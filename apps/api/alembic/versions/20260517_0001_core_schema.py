@@ -7,6 +7,7 @@ Create Date: 2026-05-17
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "20260517_0001"
 down_revision = None
@@ -14,18 +15,43 @@ branch_labels = None
 depends_on = None
 
 
-USER_ROLE = sa.Enum("USER", "CURATOR", "ADMIN", name="userrole")
-PROJECT_MEMBER_ROLE = sa.Enum("OWNER", "MEMBER", name="projectmemberrole")
-ENZYME_MODULE = sa.Enum(
+USERROLE = postgresql.ENUM("USER", "CURATOR", "ADMIN", name="userrole", create_type=False)
+PROJECTMEMBERROLE = postgresql.ENUM(
+    "OWNER", "MEMBER", name="projectmemberrole", create_type=False
+)
+ENZYMEMODULE = postgresql.ENUM(
     "ANTHRAQUINONE_GLYCOSYLTRANSFERASE",
     "MICROBIAL_TRANSGLUTAMINASE_MATURE",
     name="enzymemodule",
+    create_type=False,
 )
-VISIBILITY = sa.Enum("PRIVATE", "PUBLIC", name="visibility")
-CURATION_STATUS = sa.Enum(
-    "UNREVIEWED", "PENDING", "APPROVED", "REJECTED", name="curationstatus"
+VISIBILITY = postgresql.ENUM("PRIVATE", "PUBLIC", name="visibility", create_type=False)
+CURATIONSTATUS = postgresql.ENUM(
+    "UNREVIEWED",
+    "PENDING",
+    "APPROVED",
+    "REJECTED",
+    name="curationstatus",
+    create_type=False,
 )
-JOB_STATUS = sa.Enum("QUEUED", "RUNNING", "FINISHED", "FAILED", "CANCELLED", name="jobstatus")
+JOBSTATUS = postgresql.ENUM(
+    "QUEUED",
+    "RUNNING",
+    "FINISHED",
+    "FAILED",
+    "CANCELLED",
+    name="jobstatus",
+    create_type=False,
+)
+
+ENUM_TYPES = (
+    USERROLE,
+    PROJECTMEMBERROLE,
+    ENZYMEMODULE,
+    VISIBILITY,
+    CURATIONSTATUS,
+    JOBSTATUS,
+)
 
 
 def uuid_pk() -> sa.Column[str]:
@@ -33,13 +59,17 @@ def uuid_pk() -> sa.Column[str]:
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    for enum_type in ENUM_TYPES:
+        enum_type.create(bind, checkfirst=True)
+
     op.create_table(
         "users",
         uuid_pk(),
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("display_name", sa.String(length=120), nullable=True),
-        sa.Column("role", USER_ROLE, nullable=False),
+        sa.Column("role", USERROLE, nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
@@ -50,7 +80,7 @@ def upgrade() -> None:
     op.create_table(
         "enzyme_family",
         uuid_pk(),
-        sa.Column("module", ENZYME_MODULE, nullable=False),
+        sa.Column("module", ENZYMEMODULE, nullable=False),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("last_refreshed_at", sa.DateTime(), nullable=True),
@@ -79,7 +109,7 @@ def upgrade() -> None:
         sa.Column("owner_user_id", sa.String(length=36), nullable=False),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("target_enzyme_module", ENZYME_MODULE, nullable=True),
+        sa.Column("target_enzyme_module", ENZYMEMODULE, nullable=True),
         sa.Column("default_visibility", VISIBILITY, nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
@@ -114,7 +144,7 @@ def upgrade() -> None:
         uuid_pk(),
         sa.Column("project_id", sa.String(length=36), nullable=False),
         sa.Column("user_id", sa.String(length=36), nullable=False),
-        sa.Column("role", PROJECT_MEMBER_ROLE, nullable=False),
+        sa.Column("role", PROJECTMEMBERROLE, nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
@@ -162,7 +192,7 @@ def upgrade() -> None:
         sa.Column("project_id", sa.String(length=36), nullable=True),
         sa.Column("enzyme_entry_id", sa.String(length=36), nullable=True),
         sa.Column("job_type", sa.String(length=80), nullable=False),
-        sa.Column("status", JOB_STATUS, nullable=False),
+        sa.Column("status", JOBSTATUS, nullable=False),
         sa.Column("parameters_json", sa.JSON(), nullable=True),
         sa.Column("result_summary_json", sa.JSON(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
@@ -194,7 +224,7 @@ def upgrade() -> None:
         sa.Column("reference_id", sa.String(length=36), nullable=True),
         sa.Column("evidence_text", sa.Text(), nullable=True),
         sa.Column("visibility", VISIBILITY, nullable=False),
-        sa.Column("curation_status", CURATION_STATUS, nullable=False),
+        sa.Column("curation_status", CURATIONSTATUS, nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["enzyme_entry_id"], ["enzyme_entry.id"]),
         sa.ForeignKeyConstraint(["reference_id"], ["literature_reference.id"]),
@@ -215,7 +245,7 @@ def upgrade() -> None:
         sa.Column("method", sa.Text(), nullable=True),
         sa.Column("reference_id", sa.String(length=36), nullable=True),
         sa.Column("visibility", VISIBILITY, nullable=False),
-        sa.Column("curation_status", CURATION_STATUS, nullable=False),
+        sa.Column("curation_status", CURATIONSTATUS, nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["enzyme_entry_id"], ["enzyme_entry.id"]),
         sa.ForeignKeyConstraint(["reference_id"], ["literature_reference.id"]),
@@ -236,7 +266,7 @@ def upgrade() -> None:
         sa.Column("reference_id", sa.String(length=36), nullable=True),
         sa.Column("is_user_uploaded", sa.Boolean(), nullable=False),
         sa.Column("visibility", VISIBILITY, nullable=False),
-        sa.Column("curation_status", CURATION_STATUS, nullable=False),
+        sa.Column("curation_status", CURATIONSTATUS, nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["enzyme_entry_id"], ["enzyme_entry.id"]),
         sa.ForeignKeyConstraint(["parent_enzyme_entry_id"], ["enzyme_entry.id"]),
@@ -278,7 +308,7 @@ def upgrade() -> None:
         sa.Column("unit", sa.String(length=80), nullable=True),
         sa.Column("assay_condition_json", sa.JSON(), nullable=True),
         sa.Column("visibility", VISIBILITY, nullable=False),
-        sa.Column("curation_status", CURATION_STATUS, nullable=False),
+        sa.Column("curation_status", CURATIONSTATUS, nullable=False),
         sa.Column("created_by", sa.String(length=36), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"]),
@@ -334,6 +364,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
     op.drop_table("structure_entry")
     op.drop_table("audit_log")
     op.drop_table("curation_task")
@@ -355,3 +386,6 @@ def downgrade() -> None:
     op.drop_table("enzyme_family")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
+
+    for enum_type in reversed(ENUM_TYPES):
+        enum_type.drop(bind, checkfirst=True)
