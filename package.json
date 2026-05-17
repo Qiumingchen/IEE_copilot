@@ -1,0 +1,10 @@
+{
+  "name": "iee-copilot",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "web:dev": "pnpm --filter @iee-copilot/web dev",
+    "web:build": "pnpm --filter @iee-copilot/web build",
+    "web:lint": "pnpm --filter @iee-copilot/web lint"
+  }
+}

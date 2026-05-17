@@ -1,0 +1,10 @@
+{
+  "ANTHRAQUINONE_GLYCOSYLTRANSFERASE": {
+    "label": "Anthraquinone Glycosyltransferase",
+    "defaultGoals": ["specific_activity", "product_selectivity", "thermostability"]
+  },
+  "MICROBIAL_TRANSGLUTAMINASE_MATURE": {
+    "label": "Mature Microbial Transglutaminase",
+    "defaultGoals": ["thermostability", "opt_temperature", "specific_activity"]
+  }
+}
