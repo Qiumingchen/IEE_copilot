@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.auth import router as auth_router
+from app.api.routes.enzyme_records import router as enzyme_records_router
 from app.api.routes.enzymes import router as enzymes_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
@@ -32,4 +33,5 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(enzymes_router)
+app.include_router(enzyme_records_router)
 app.include_router(jobs_router)
