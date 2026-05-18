@@ -22,6 +22,7 @@ from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, Enzyme
 from app.services.cache import find_fresh_search_cache, find_fresh_uniprot_hit, find_search_cache, is_fresh
 from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
+from app.services.similarity_matching import find_level_two_similarity_match
 from worker.jobs import run_placeholder_analysis
 
 
@@ -210,6 +211,20 @@ def search_enzymes(
         )
         if exact_match is not None:
             enzyme = exact_match
+            if is_fresh(enzyme.last_refreshed_at):
+                cache_status = "hit"
+            else:
+                enzyme.last_refreshed_at = datetime.utcnow()
+                cache_status = "stale_refreshed"
+
+    if enzyme is None and resolved.kind == QueryKind.SEQUENCE:
+        similarity_match = find_level_two_similarity_match(
+            db,
+            module=module,
+            query_sequence=resolved.normalized_query,
+        )
+        if similarity_match is not None:
+            enzyme = similarity_match.enzyme
             if is_fresh(enzyme.last_refreshed_at):
                 cache_status = "hit"
             else:

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, SearchCacheRecord
+from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, SearchCacheRecord
 
 
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
@@ -277,3 +277,68 @@ def test_enzyme_search_refreshes_stale_local_pdb_match(client, db_session, monke
     assert response.json()["enzyme"]["id"] == enzyme.id
     db_session.refresh(enzyme)
     assert enzyme.last_refreshed_at > datetime.utcnow() - timedelta(days=1)
+
+
+def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    sequence = "AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNG"
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Similar sequence mTGase",
+        organism="Streptomyces mobaraensis",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence=sequence,
+            mature_sequence=sequence,
+            source="test",
+            checksum="similar-sequence-checksum",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "sequence-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Sequence Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "sequence-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": sequence},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "hit"
+    assert body["query_kind"] == "sequence"
+    assert body["enzyme"]["id"] == enzyme.id

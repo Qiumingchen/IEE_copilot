@@ -30,6 +30,13 @@ def test_resolve_ec_number():
     assert resolved.normalized_query == "2.3.2.13"
 
 
+def test_resolve_amino_acid_sequence():
+    resolved = resolve_query("AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNG")
+
+    assert resolved.kind == QueryKind.SEQUENCE
+    assert resolved.normalized_query == "AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNG"
+
+
 def test_detect_mtgase_module_from_keyword():
     resolved = resolve_query("microbial transglutaminase")
 

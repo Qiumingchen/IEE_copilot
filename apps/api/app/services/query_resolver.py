@@ -9,6 +9,7 @@ class QueryKind(str, enum.Enum):
     UNIPROT = "uniprot"
     PDB = "pdb"
     EC = "ec"
+    SEQUENCE = "sequence"
     KEYWORD = "keyword"
 
 
@@ -25,6 +26,7 @@ UNIPROT_RE = re.compile(
 )
 PDB_RE = re.compile(r"^[0-9][A-Za-z0-9]{3}$")
 EC_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+AA_SEQUENCE_RE = re.compile(r"^[ACDEFGHIKLMNPQRSTVWYBXZJUO]+$", re.IGNORECASE)
 
 
 def detect_module(query: str) -> EnzymeModule | None:
@@ -34,6 +36,11 @@ def detect_module(query: str) -> EnzymeModule | None:
     if "anthraquinone" in lowered or "glycosyltransferase" in lowered:
         return EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE
     return None
+
+
+def detect_amino_acid_sequence(query: str) -> bool:
+    compact = re.sub(r"\s+", "", query)
+    return len(compact) >= 30 and AA_SEQUENCE_RE.match(compact) is not None
 
 
 def resolve_query(query: str) -> ResolvedQuery:
@@ -47,6 +54,9 @@ def resolve_query(query: str) -> ResolvedQuery:
     elif UNIPROT_RE.match(upper):
         kind = QueryKind.UNIPROT
         normalized = upper
+    elif detect_amino_acid_sequence(normalized):
+        kind = QueryKind.SEQUENCE
+        normalized = re.sub(r"\s+", "", upper)
     else:
         kind = QueryKind.KEYWORD
     return ResolvedQuery(
