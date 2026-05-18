@@ -74,6 +74,14 @@ def main() -> None:
             )
             session.add(project)
             session.flush()
+
+        membership = session.scalar(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == user.id,
+            )
+        )
+        if membership is None:
             session.add(
                 ProjectMember(
                     project_id=project.id,
@@ -81,6 +89,8 @@ def main() -> None:
                     role=ProjectMemberRole.OWNER,
                 )
             )
+        elif membership.role != ProjectMemberRole.OWNER:
+            membership.role = ProjectMemberRole.OWNER
 
         session.commit()
 
