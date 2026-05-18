@@ -9,6 +9,13 @@ def test_resolve_uniprot_accession():
     assert resolved.normalized_query == "P81453"
 
 
+def test_resolve_ten_character_uniprot_accession():
+    resolved = resolve_query("A0A024RBG1")
+
+    assert resolved.kind == QueryKind.UNIPROT
+    assert resolved.normalized_query == "A0A024RBG1"
+
+
 def test_resolve_pdb_id():
     resolved = resolve_query("1IU4")
 
