@@ -1,4 +1,17 @@
-def test_enzyme_search_creates_family_profile_job(client):
+def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
+    enqueued_job_ids = []
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
     client.post(
         "/auth/register",
         json={
@@ -37,3 +50,4 @@ def test_enzyme_search_creates_family_profile_job(client):
     assert body["enzyme"]["name"]
     assert body["job_id"]
     assert body["cache_status"] in {"hit", "miss_refreshed", "stale_refreshed"}
+    assert enqueued_job_ids == [body["job_id"]]

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,9 +8,17 @@ from app.api.routes.enzymes import router as enzymes_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.projects import router as projects_router
+from app.core.errors import register_exception_handlers
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 
 app = FastAPI(title="IEE-Copilot API")
+register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,

@@ -20,6 +20,7 @@ from app.db.session import get_db
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
 from app.services.cache import find_fresh_uniprot_hit, is_fresh
 from app.services.query_resolver import QueryKind, resolve_query
+from worker.jobs import run_placeholder_analysis
 
 
 router = APIRouter(prefix="/enzymes", tags=["enzymes"])
@@ -196,6 +197,7 @@ def search_enzymes(
     db.commit()
     db.refresh(enzyme)
     db.refresh(job)
+    run_placeholder_analysis.delay(job.id)
 
     return EnzymeSearchResponse(
         enzyme=enzyme,
