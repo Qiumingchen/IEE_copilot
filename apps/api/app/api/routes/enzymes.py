@@ -14,11 +14,12 @@ from app.db.models import (
     JobStatus,
     Project,
     ProteinSequence,
+    SearchCacheRecord,
     User,
 )
 from app.db.session import get_db
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
-from app.services.cache import find_fresh_uniprot_hit, is_fresh
+from app.services.cache import find_fresh_search_cache, find_fresh_uniprot_hit, find_search_cache, is_fresh
 from app.services.query_resolver import QueryKind, resolve_query
 from worker.jobs import run_placeholder_analysis
 
@@ -119,6 +120,49 @@ def _ensure_protein_sequence(
     )
 
 
+def _search_cache_payload(enzyme: EnzymeEntry, job: AnalysisJob) -> dict[str, str]:
+    return {
+        "enzyme_entry_id": enzyme.id,
+        "job_id": job.id,
+    }
+
+
+def _upsert_search_cache(
+    db: Session,
+    *,
+    query: str,
+    normalized_query: str,
+    query_kind: str,
+    module: EnzymeModule,
+    enzyme: EnzymeEntry,
+    job: AnalysisJob,
+) -> None:
+    now = datetime.utcnow()
+    record = find_search_cache(db, normalized_query, query_kind, module)
+    if record is None:
+        db.add(
+            SearchCacheRecord(
+                query=query,
+                normalized_query=normalized_query,
+                query_kind=query_kind,
+                module=module,
+                enzyme_entry_id=enzyme.id,
+                payload_json=_search_cache_payload(enzyme, job),
+                source=enzyme.source,
+                last_refreshed_at=now,
+                updated_at=now,
+            )
+        )
+        return
+
+    record.query = query
+    record.enzyme_entry_id = enzyme.id
+    record.payload_json = _search_cache_payload(enzyme, job)
+    record.source = enzyme.source
+    record.last_refreshed_at = now
+    record.updated_at = now
+
+
 @router.post("/search", response_model=EnzymeSearchResponse)
 def search_enzymes(
     request: EnzymeSearchRequest,
@@ -131,11 +175,24 @@ def search_enzymes(
     cache_status = "miss_refreshed"
 
     enzyme: EnzymeEntry | None = None
-    if resolved.kind == QueryKind.UNIPROT:
-        enzyme = find_fresh_uniprot_hit(db, resolved.normalized_query)
-        if enzyme is not None:
+    fresh_cache = find_fresh_search_cache(
+        db,
+        normalized_query=resolved.normalized_query,
+        query_kind=resolved.kind.value,
+        module=module,
+    )
+    if fresh_cache and fresh_cache.enzyme_entry_id:
+        cached_enzyme = db.get(EnzymeEntry, fresh_cache.enzyme_entry_id)
+        if cached_enzyme is not None:
+            enzyme = cached_enzyme
             cache_status = "hit"
-        else:
+
+    if resolved.kind == QueryKind.UNIPROT:
+        if enzyme is None:
+            enzyme = find_fresh_uniprot_hit(db, resolved.normalized_query)
+            if enzyme is not None:
+                cache_status = "hit"
+        if enzyme is None:
             stale_entry = db.scalar(
                 select(EnzymeEntry).where(EnzymeEntry.uniprot_id == resolved.normalized_query)
             )
@@ -143,6 +200,17 @@ def search_enzymes(
                 enzyme = stale_entry
                 enzyme.last_refreshed_at = datetime.utcnow()
                 cache_status = "stale_refreshed"
+
+    stale_cache = find_search_cache(
+        db,
+        normalized_query=resolved.normalized_query,
+        query_kind=resolved.kind.value,
+        module=module,
+    )
+    if enzyme is None and stale_cache is not None and not is_fresh(stale_cache.last_refreshed_at):
+        cache_status = "stale_refreshed"
+    elif enzyme is not None and stale_cache is not None and not is_fresh(stale_cache.last_refreshed_at):
+        cache_status = "stale_refreshed"
 
     seed_name = (
         "Microbial transglutaminase"
@@ -194,6 +262,16 @@ def search_enzymes(
         created_by=user.id,
     )
     db.add(job)
+    db.flush()
+    _upsert_search_cache(
+        db,
+        query=request.query,
+        normalized_query=resolved.normalized_query,
+        query_kind=resolved.kind.value,
+        module=module,
+        enzyme=enzyme,
+        job=job,
+    )
     db.commit()
     db.refresh(enzyme)
     db.refresh(job)
