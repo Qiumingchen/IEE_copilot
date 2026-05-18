@@ -178,6 +178,21 @@ class StructureEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class LigandEntry(Base):
+    __tablename__ = "ligand_entry"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    structure_entry_id: Mapped[str] = mapped_column(ForeignKey("structure_entry.id"))
+    ligand_name: Mapped[str] = mapped_column(String(240))
+    ligand_code: Mapped[str | None] = mapped_column(String(40))
+    ligand_type: Mapped[str] = mapped_column(String(80), default="unknown")
+    chain_id: Mapped[str | None] = mapped_column(String(20))
+    residue_number: Mapped[str | None] = mapped_column(String(40))
+    smiles: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class LiteratureReference(Base):
     __tablename__ = "literature_reference"
 
@@ -189,6 +204,36 @@ class LiteratureReference(Base):
     doi: Mapped[str | None] = mapped_column(String(200))
     pubmed_id: Mapped[str | None] = mapped_column(String(80))
     source: Mapped[str] = mapped_column(String(80), default="manual")
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SubstrateEntry(Base):
+    __tablename__ = "substrate_entry"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    enzyme_family_id: Mapped[str | None] = mapped_column(ForeignKey("enzyme_family.id"))
+    enzyme_entry_id: Mapped[str | None] = mapped_column(ForeignKey("enzyme_entry.id"))
+    user_experiment_id: Mapped[str | None] = mapped_column(ForeignKey("user_experiment.id"))
+    name: Mapped[str] = mapped_column(String(240))
+    substrate_class: Mapped[str | None] = mapped_column(String(120))
+    smiles: Mapped[str | None] = mapped_column(Text)
+    inchi: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ExperimentCondition(Base):
+    __tablename__ = "experiment_condition"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    enzyme_entry_id: Mapped[str | None] = mapped_column(ForeignKey("enzyme_entry.id"))
+    substrate_entry_id: Mapped[str | None] = mapped_column(ForeignKey("substrate_entry.id"))
+    assay_temperature: Mapped[str | None] = mapped_column(String(80))
+    assay_pH: Mapped[str | None] = mapped_column(String(80))
+    buffer: Mapped[str | None] = mapped_column(String(240))
+    method: Mapped[str | None] = mapped_column(Text)
+    reference_id: Mapped[str | None] = mapped_column(ForeignKey("literature_reference.id"))
     metadata_json: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -211,6 +256,27 @@ class PropertyRecord(Base):
     method: Mapped[str | None] = mapped_column(Text)
     reference_id: Mapped[str | None] = mapped_column(ForeignKey("literature_reference.id"))
     evidence_text: Mapped[str | None] = mapped_column(Text)
+    visibility: Mapped[Visibility] = mapped_column(Enum(Visibility), default=Visibility.PUBLIC)
+    curation_status: Mapped[CurationStatus] = mapped_column(
+        Enum(CurationStatus), default=CurationStatus.UNREVIEWED
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ExpressionRecord(Base):
+    __tablename__ = "expression_record"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    enzyme_entry_id: Mapped[str] = mapped_column(ForeignKey("enzyme_entry.id"))
+    expression_host: Mapped[str | None] = mapped_column(String(160))
+    vector: Mapped[str | None] = mapped_column(String(160))
+    expression_level_original: Mapped[str | None] = mapped_column(String(120))
+    expression_level_standardized: Mapped[str | None] = mapped_column(String(120))
+    soluble_expression: Mapped[str | None] = mapped_column(String(120))
+    unit_original: Mapped[str | None] = mapped_column(String(80))
+    unit_standardized: Mapped[str | None] = mapped_column(String(80))
+    condition_id: Mapped[str | None] = mapped_column(ForeignKey("experiment_condition.id"))
+    reference_id: Mapped[str | None] = mapped_column(ForeignKey("literature_reference.id"))
     visibility: Mapped[Visibility] = mapped_column(Enum(Visibility), default=Visibility.PUBLIC)
     curation_status: Mapped[CurationStatus] = mapped_column(
         Enum(CurationStatus), default=CurationStatus.UNREVIEWED
