@@ -1,3 +1,8 @@
+from sqlalchemy import select
+
+from app.db.models import Project, ProjectMember, ProjectMemberRole, User
+
+
 def test_register_login_and_me(client):
     register_response = client.post(
         "/auth/register",
@@ -59,3 +64,55 @@ def test_create_and_list_projects_for_current_user(client):
 
     assert list_response.status_code == 200
     assert [project["name"] for project in list_response.json()] == ["AQGT optimization"]
+
+
+def test_member_does_not_see_non_owned_project_in_project_list(client, db_session):
+    client.post(
+        "/auth/register",
+        json={
+            "email": "owner-filter@example.com",
+            "password": "owner-password",
+            "display_name": "Owner",
+        },
+    )
+    client.post(
+        "/auth/register",
+        json={
+            "email": "member-filter@example.com",
+            "password": "member-password",
+            "display_name": "Member",
+        },
+    )
+    owner_token = client.post(
+        "/auth/login",
+        json={"email": "owner-filter@example.com", "password": "owner-password"},
+    ).json()["access_token"]
+    member_token = client.post(
+        "/auth/login",
+        json={"email": "member-filter@example.com", "password": "member-password"},
+    ).json()["access_token"]
+
+    create_response = client.post(
+        "/projects",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"name": "Owner-only project"},
+    )
+    assert create_response.status_code == 201
+
+    project = db_session.scalar(select(Project).where(Project.name == "Owner-only project"))
+    member = db_session.scalar(select(User).where(User.email == "member-filter@example.com"))
+    assert project is not None
+    assert member is not None
+    db_session.add(
+        ProjectMember(
+            project_id=project.id,
+            user_id=member.id,
+            role=ProjectMemberRole.MEMBER,
+        )
+    )
+    db_session.commit()
+
+    list_response = client.get("/projects", headers={"Authorization": f"Bearer {member_token}"})
+
+    assert list_response.status_code == 200
+    assert list_response.json() == []
