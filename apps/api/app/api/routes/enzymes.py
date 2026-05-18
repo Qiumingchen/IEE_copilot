@@ -20,6 +20,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
 from app.services.cache import find_fresh_search_cache, find_fresh_uniprot_hit, find_search_cache, is_fresh
+from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
 from worker.jobs import run_placeholder_analysis
 
@@ -198,6 +199,20 @@ def search_enzymes(
             )
             if stale_entry is not None and not is_fresh(stale_entry.last_refreshed_at):
                 enzyme = stale_entry
+                enzyme.last_refreshed_at = datetime.utcnow()
+                cache_status = "stale_refreshed"
+
+    if enzyme is None:
+        exact_match = find_level_one_exact_match(
+            db,
+            query_kind=resolved.kind,
+            normalized_query=resolved.normalized_query,
+        )
+        if exact_match is not None:
+            enzyme = exact_match
+            if is_fresh(enzyme.last_refreshed_at):
+                cache_status = "hit"
+            else:
                 enzyme.last_refreshed_at = datetime.utcnow()
                 cache_status = "stale_refreshed"
 

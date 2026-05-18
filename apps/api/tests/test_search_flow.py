@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db.models import SearchCacheRecord
+from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, SearchCacheRecord
 
 
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
@@ -163,3 +163,117 @@ def test_enzyme_search_refreshes_stale_search_cache(client, db_session, monkeypa
     assert second_response.json()["cache_status"] == "stale_refreshed"
     db_session.refresh(cache_record)
     assert cache_record.last_refreshed_at > datetime.utcnow() - timedelta(days=1)
+
+
+def test_enzyme_search_hits_local_entry_by_pdb_id(client, db_session, monkeypatch):
+    enqueued_job_ids = []
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="PDB-backed mTGase",
+        organism="Streptomyces mobaraensis",
+        pdb_id="1ABC",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "pdb-searcher@example.com",
+            "password": "search-password",
+            "display_name": "PDB Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "pdb-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "1abc"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "hit"
+    assert body["query_kind"] == "pdb"
+    assert body["enzyme"]["id"] == enzyme.id
+    assert body["enzyme"]["pdb_id"] == "1ABC"
+    assert enqueued_job_ids == [body["job_id"]]
+
+
+def test_enzyme_search_refreshes_stale_local_pdb_match(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Stale PDB-backed mTGase",
+        organism="Streptomyces mobaraensis",
+        pdb_id="2DEF",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=16),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "stale-pdb-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Stale PDB Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "stale-pdb-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "2def"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cache_status"] == "stale_refreshed"
+    assert response.json()["enzyme"]["id"] == enzyme.id
+    db_session.refresh(enzyme)
+    assert enzyme.last_refreshed_at > datetime.utcnow() - timedelta(days=1)
