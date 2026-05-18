@@ -114,3 +114,70 @@ export async function createPropertyRecord(
     body: JSON.stringify(payload)
   });
 }
+
+export async function createStructureRecord(
+  enzymeId: string,
+  token: string,
+  payload: {
+    structure_type: string;
+    complex_state?: string;
+    pdb_id?: string;
+    source?: string;
+    ligands?: Array<{
+      ligand_name: string;
+      ligand_code?: string;
+      ligand_type?: string;
+      smiles?: string;
+    }>;
+  }
+): Promise<StructureRecord> {
+  return fetchWithToken<StructureRecord>(`/enzymes/${enzymeId}/structures`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function createKineticRecord(
+  enzymeId: string,
+  token: string,
+  payload: {
+    substrate?: string;
+    km?: string;
+    kcat?: string;
+    kcat_km?: string;
+    unit_original?: string;
+    assay_temperature?: string;
+    assay_pH?: string;
+  }
+): Promise<KineticRecord> {
+  return fetchWithToken<KineticRecord>(`/enzymes/${enzymeId}/kinetics`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function createExpressionRecord(
+  enzymeId: string,
+  token: string,
+  payload: {
+    expression_host?: string;
+    vector?: string;
+    expression_level_original?: string;
+    expression_level_standardized?: string;
+    soluble_expression?: string;
+    unit_original?: string;
+    unit_standardized?: string;
+    condition?: {
+      substrate_entry_id?: string;
+      assay_temperature?: string;
+      assay_pH?: string;
+      buffer?: string;
+      method?: string;
+    };
+  }
+): Promise<ExpressionRecord> {
+  return fetchWithToken<ExpressionRecord>(`/enzymes/${enzymeId}/expression`, token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
