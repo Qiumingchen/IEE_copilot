@@ -8,5 +8,6 @@ RUN pip install --no-cache-dir ".[dev]"
 
 COPY apps/api /app/apps/api
 COPY apps/worker /app/apps/worker
+COPY scripts /app/scripts
 
 CMD ["celery", "-A", "worker.main.celery_app", "worker", "--loglevel=INFO"]
