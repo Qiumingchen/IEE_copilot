@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, SearchCacheRecord
+from app.external.uniprot import UniProtEntry, UniProtSearchHit
 
 
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
@@ -342,3 +343,164 @@ def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, mo
     assert body["cache_status"] == "hit"
     assert body["query_kind"] == "sequence"
     assert body["enzyme"]["id"] == enzyme.id
+
+
+def test_enzyme_search_uses_uniprot_connector_for_ec_refresh(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            assert ec_number == "2.3.2.13"
+            return [
+                UniProtSearchHit(
+                    accession="U11111",
+                    protein_name="Connector microbial transglutaminase",
+                    organism="Streptomyces testingensis",
+                    ec_number=ec_number,
+                )
+            ]
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            raise AssertionError("EC search should not call keyword search")
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise AssertionError("EC search should not call organism search")
+
+        def fetch_entry(self, accession: str):
+            assert accession == "U11111"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Connector microbial transglutaminase",
+                organism="Streptomyces testingensis",
+                ec_number="2.3.2.13",
+                sequence="MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVY",
+                cross_references={"AlphaFoldDB": "AF-U11111-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|U11111|MOCK\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVY\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {"AlphaFoldDB": "AF-U11111-F1"}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "ec-connector@example.com",
+            "password": "search-password",
+            "display_name": "EC Connector Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "ec-connector@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "2.3.2.13"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "miss_refreshed"
+    assert body["query_kind"] == "ec"
+    assert body["enzyme"]["uniprot_id"] == "U11111"
+    assert body["enzyme"]["name"] == "Connector microbial transglutaminase"
+
+    enzyme = db_session.get(EnzymeEntry, body["enzyme"]["id"])
+    assert enzyme is not None
+    assert enzyme.source == "uniprot_mock"
+    sequence = db_session.scalar(select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id))
+    assert sequence is not None
+    assert sequence.sequence == "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVY"
+
+
+def test_enzyme_search_fetches_uniprot_accession_when_not_local(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            assert accession == "P99999"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Fetched UniProt enzyme",
+                organism="Bacillus testingensis",
+                ec_number=None,
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P99999|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "uniprot-connector@example.com",
+            "password": "search-password",
+            "display_name": "UniProt Connector Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "uniprot-connector@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P99999"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "miss_refreshed"
+    assert body["query_kind"] == "uniprot"
+    assert body["enzyme"]["uniprot_id"] == "P99999"
+    assert body["enzyme"]["name"] == "Fetched UniProt enzyme"

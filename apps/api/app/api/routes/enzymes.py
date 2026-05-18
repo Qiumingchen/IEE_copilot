@@ -18,6 +18,7 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_db
+from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
 from app.services.cache import find_fresh_search_cache, find_fresh_uniprot_hit, find_search_cache, is_fresh
 from app.services.exact_matching import find_level_one_exact_match
@@ -120,6 +121,62 @@ def _ensure_protein_sequence(
             checksum=hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
         )
     )
+
+
+def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | None, str | None]:
+    client = get_uniprot_client()
+    if resolved_query.kind == QueryKind.UNIPROT:
+        entry = client.fetch_entry(resolved_query.normalized_query)
+        return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
+
+    hits = []
+    if resolved_query.kind == QueryKind.EC:
+        hits = client.search_by_ec(resolved_query.normalized_query)
+    elif resolved_query.kind == QueryKind.KEYWORD:
+        hits = client.search_by_keyword(resolved_query.normalized_query)
+
+    if not hits:
+        return None, None, None
+
+    entry = client.fetch_entry(hits[0].accession)
+    return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
+
+
+def _create_enzyme_from_uniprot_entry(
+    db: Session,
+    *,
+    family: EnzymeFamily,
+    entry: UniProtEntry,
+    fasta: str | None,
+    source: str | None,
+) -> EnzymeEntry:
+    now = datetime.utcnow()
+    sequence = entry.sequence or parse_fasta_sequence(fasta or "")
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name=entry.protein_name,
+        organism=entry.organism,
+        ec_number=entry.ec_number,
+        uniprot_id=entry.accession,
+        alphafold_id=entry.cross_references.get("AlphaFoldDB"),
+        source=source or "uniprot",
+        last_refreshed_at=now,
+    )
+    db.add(enzyme)
+    db.flush()
+
+    if sequence:
+        db.add(
+            ProteinSequence(
+                enzyme_entry_id=enzyme.id,
+                sequence=sequence,
+                mature_sequence=sequence,
+                is_engineering_target=True,
+                source=source or "uniprot",
+                checksum=hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+            )
+        )
+    return enzyme
 
 
 def _search_cache_payload(enzyme: EnzymeEntry, job: AnalysisJob) -> dict[str, str]:
@@ -230,6 +287,18 @@ def search_enzymes(
             else:
                 enzyme.last_refreshed_at = datetime.utcnow()
                 cache_status = "stale_refreshed"
+
+    if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
+        entry, fasta, source = _fetch_uniprot_entry(resolved)
+        if entry is not None:
+            enzyme = _create_enzyme_from_uniprot_entry(
+                db,
+                family=family,
+                entry=entry,
+                fasta=fasta,
+                source=source,
+            )
+            cache_status = "miss_refreshed"
 
     stale_cache = find_search_cache(
         db,
