@@ -33,6 +33,28 @@ def test_register_login_and_me(client):
     assert me_response.json()["email"] == "engineer@example.com"
 
 
+def test_register_and_login_allow_local_development_email(client):
+    register_response = client.post(
+        "/auth/register",
+        json={
+            "email": "demo@iee.local",
+            "password": "demo-password",
+            "display_name": "IEE Demo Admin",
+        },
+    )
+
+    assert register_response.status_code == 201
+    assert register_response.json()["email"] == "demo@iee.local"
+
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "demo@iee.local", "password": "demo-password"},
+    )
+
+    assert login_response.status_code == 200
+    assert login_response.json()["token_type"] == "bearer"
+
+
 def test_create_and_list_projects_for_current_user(client):
     client.post(
         "/auth/register",

@@ -18,6 +18,11 @@ export type SearchResponse = {
   module: string;
 };
 
+export type TokenResponse = {
+  access_token: string;
+  token_type: string;
+};
+
 export type JobResponse = {
   id: string;
   project_id: string | null;
