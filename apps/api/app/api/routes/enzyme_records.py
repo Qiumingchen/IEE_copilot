@@ -72,8 +72,49 @@ def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
     return protein_sequence.mature_sequence or protein_sequence.sequence
 
 
-def _analysis_job_parameters(job_type: str, sequence: str) -> dict:
+def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "homolog_sequences",
+        )
+        .order_by(AnalysisArtifact.created_at.desc())
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    raw_homologs = summary.get("homologs", [])
+    if not isinstance(raw_homologs, list):
+        return []
+
+    homologs = []
+    for index, homolog in enumerate(raw_homologs):
+        if not isinstance(homolog, dict) or not homolog.get("sequence"):
+            continue
+        identifier = homolog.get("identifier") or homolog.get("accession") or f"homolog_{index + 1}"
+        homologs.append(
+            {
+                "identifier": str(identifier),
+                "accession": str(homolog.get("accession") or ""),
+                "organism": str(homolog.get("organism") or ""),
+                "sequence": str(homolog["sequence"]),
+                "identity": homolog.get("identity"),
+                "coverage": homolog.get("coverage"),
+            }
+        )
+    return homologs
+
+
+def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequence: str) -> dict:
     parameters = {"requested_from": "enzyme_analysis_page"}
+    if job_type == "msa":
+        homologs = _latest_homologs_for_msa(db, enzyme_id)
+        if homologs:
+            parameters["homologs"] = homologs
     if job_type == "conservation_profile":
         parameters["aligned_records"] = [
             {"identifier": "query", "aligned_sequence": sequence},
@@ -485,7 +526,7 @@ def create_analysis_job(
         enzyme_entry_id=enzyme.id,
         job_type=request.job_type,
         status=JobStatus.QUEUED,
-        parameters_json=_analysis_job_parameters(request.job_type, sequence),
+        parameters_json=_analysis_job_parameters(db, enzyme.id, request.job_type, sequence),
         created_by=user.id,
     )
     db.add(job)

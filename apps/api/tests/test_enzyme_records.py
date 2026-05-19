@@ -296,6 +296,82 @@ def test_create_analysis_job_queues_selected_worker_task(client, db_session, mon
     assert job.created_by is not None
 
 
+def test_create_msa_job_uses_latest_homolog_sequence_artifact(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKLMNPQRSTVWY",
+            mature_sequence="ACDEFGHIKLMNPQRSTVWY",
+            source="test",
+            checksum="msa-homolog-sequence",
+        )
+    )
+    homolog_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="homolog_collection",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "homologs": [
+                {
+                    "accession": "HOMOLOG_A",
+                    "organism": "Bacillus subtilis",
+                    "sequence": "ACDEFGHIKLMNPQRSTVWY",
+                    "identity": 0.91,
+                    "coverage": 1.0,
+                },
+                {
+                    "accession": "HOMOLOG_B",
+                    "organism": "Streptomyces coelicolor",
+                    "sequence": "ACDEYGHIKLMNPQRSTVWY",
+                    "identity": 0.84,
+                    "coverage": 1.0,
+                },
+            ]
+        },
+    )
+    db_session.add(homolog_job)
+    db_session.flush()
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=homolog_job.id,
+            artifact_type="homolog_sequences",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{homolog_job.id}/homolog-sequences.json",
+            content_type="application/json",
+            size_bytes=512,
+        )
+    )
+    db_session.commit()
+
+    class MsaTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_msa",
+        MsaTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={"job_type": "msa"},
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert [item["identifier"] for item in parameters["homologs"]] == ["HOMOLOG_A", "HOMOLOG_B"]
+    assert [item["sequence"] for item in parameters["homologs"]] == [
+        "ACDEFGHIKLMNPQRSTVWY",
+        "ACDEYGHIKLMNPQRSTVWY",
+    ]
+
+
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
