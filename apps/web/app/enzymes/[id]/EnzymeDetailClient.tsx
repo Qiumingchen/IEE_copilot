@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -326,6 +327,12 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
           >
             Refresh
           </button>
+          <Link
+            className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
+            href={`/enzymes/${enzymeId}/analysis`}
+          >
+            MSA / Conservation
+          </Link>
         </div>
       </header>
 
