@@ -15,9 +15,11 @@ from app.db.models import (
     Project,
     ProteinSequence,
     SearchCacheRecord,
+    StructureEntry,
     User,
 )
 from app.db.session import get_db
+from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
 from app.services.cache import (
@@ -185,6 +187,41 @@ def _create_enzyme_from_uniprot_entry(
     return enzyme
 
 
+def _create_enzyme_from_rcsb_metadata(
+    db: Session,
+    *,
+    family: EnzymeFamily,
+    metadata: RcsbStructureMetadata,
+    source: str | None,
+) -> EnzymeEntry:
+    now = datetime.utcnow()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name=metadata.title,
+        organism=metadata.organism,
+        uniprot_id=metadata.uniprot_id,
+        pdb_id=metadata.pdb_id,
+        source=source or "rcsb",
+        last_refreshed_at=now,
+    )
+    db.add(enzyme)
+    db.flush()
+    db.add(
+        StructureEntry(
+            enzyme_entry_id=enzyme.id,
+            structure_type="pdb",
+            complex_state="unknown",
+            pdb_id=metadata.pdb_id,
+            chain_summary=metadata.chain_summary,
+            ligand_summary=metadata.ligand_summary,
+            source=source or "rcsb",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    return enzyme
+
+
 def _search_cache_payload(enzyme: EnzymeEntry, job: AnalysisJob) -> dict[str, str]:
     return {
         "enzyme_entry_id": enzyme.id,
@@ -293,6 +330,17 @@ def search_enzymes(
             else:
                 enzyme.last_refreshed_at = datetime.utcnow()
                 cache_status = "stale_refreshed"
+
+    if enzyme is None and resolved.kind == QueryKind.PDB:
+        rcsb_client = get_rcsb_client()
+        metadata = rcsb_client.fetch_structure_metadata(resolved.normalized_query)
+        enzyme = _create_enzyme_from_rcsb_metadata(
+            db,
+            family=family,
+            metadata=metadata,
+            source=getattr(rcsb_client, "source", "rcsb"),
+        )
+        cache_status = "miss_refreshed"
 
     if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
         entry, fasta, source = _fetch_uniprot_entry(resolved)

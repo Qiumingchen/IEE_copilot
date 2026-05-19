@@ -2,7 +2,15 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db.models import AnalysisJob, EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, SearchCacheRecord
+from app.db.models import (
+    AnalysisJob,
+    EnzymeEntry,
+    EnzymeFamily,
+    EnzymeModule,
+    ProteinSequence,
+    SearchCacheRecord,
+    StructureEntry,
+)
 from app.external.uniprot import UniProtEntry, UniProtSearchHit
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
 
@@ -346,6 +354,54 @@ def test_enzyme_search_refreshes_stale_local_pdb_match(client, db_session, monke
     assert response.json()["enzyme"]["id"] == enzyme.id
     db_session.refresh(enzyme)
     assert enzyme.last_refreshed_at > datetime.utcnow() - timedelta(days=1)
+
+
+def test_enzyme_search_fetches_rcsb_metadata_when_pdb_not_local(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "rcsb-pdb-searcher@example.com",
+            "password": "search-password",
+            "display_name": "RCSB PDB Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "rcsb-pdb-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "1abc"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "miss_refreshed"
+    assert body["query_kind"] == "pdb"
+    assert body["enzyme"]["pdb_id"] == "1ABC"
+    assert body["enzyme"]["uniprot_id"] == "MOCKMTG1"
+
+    structure = db_session.scalar(
+        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
+    )
+    assert structure is not None
+    assert structure.pdb_id == "1ABC"
+    assert structure.source == "rcsb_mock"
+    assert structure.chain_summary == {"polymer_entity_count": 1, "chains": ["A"]}
+    assert structure.ligand_summary == {"ligands": ["GTP"]}
 
 
 def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, monkeypatch):
