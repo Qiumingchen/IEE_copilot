@@ -17,9 +17,14 @@ import type {
 import {
   buildConservationDownloadJson,
   filterConservationSites,
-  getConservationSites
+  getConservationSites,
+  getMutationRecommendationCandidates
 } from "./analysis-utils";
-import type { ConservationCategoryFilter, ConservationSiteView } from "./analysis-utils";
+import type {
+  ConservationCategoryFilter,
+  ConservationSiteView,
+  MutationRecommendationCandidateView
+} from "./analysis-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -48,6 +53,13 @@ const analysisModules = [
     jobType: "conservation_profile",
     metric: "entropy / WT frequency",
     actionLabel: "Run conservation"
+  },
+  {
+    title: "Hotspot recommendations",
+    artifactType: "mutation_recommendations",
+    jobType: "mutation_recommendation",
+    metric: "priority score / mutations",
+    actionLabel: "Run recommendations"
   }
 ] satisfies Array<{
   title: string;
@@ -69,6 +81,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
+  const [recommendationCandidates, setRecommendationCandidates] = useState<MutationRecommendationCandidateView[]>([]);
+  const [recommendationObjectKey, setRecommendationObjectKey] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,6 +94,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       const nextArtifacts = await getAnalysisArtifacts(enzymeId, nextToken);
       setArtifacts(nextArtifacts);
       await loadLatestConservationProfile(nextArtifacts, nextToken);
+      await loadLatestRecommendations(nextArtifacts, nextToken);
     } catch {
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
     } finally {
@@ -111,6 +126,30 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       setConservationSites([]);
       setLatestConservationContent(null);
       setConservationObjectKey(latestConservationArtifact.object_key);
+    }
+  }
+
+  async function loadLatestRecommendations(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const recommendationArtifacts = nextArtifacts.filter(
+      (artifact) => artifact.artifact_type === "mutation_recommendations"
+    );
+    const latestRecommendationArtifact = recommendationArtifacts[recommendationArtifacts.length - 1];
+    if (!latestRecommendationArtifact) {
+      setRecommendationCandidates([]);
+      setRecommendationObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestRecommendationArtifact.id, nextToken);
+      setRecommendationCandidates(getMutationRecommendationCandidates(content));
+      setRecommendationObjectKey(content.object_key);
+    } catch {
+      setRecommendationCandidates([]);
+      setRecommendationObjectKey(latestRecommendationArtifact.object_key);
     }
   }
 
@@ -214,7 +253,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 
       {isLoading ? <p className="mt-6 text-sm text-slate-600">Loading analysis artifacts...</p> : null}
 
-      <section className="mt-6 grid gap-3 md:grid-cols-3">
+      <section className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {analysisModules.map((item) => {
           const moduleArtifacts = artifacts.filter((artifact) => artifact.artifact_type === item.artifactType);
           const latestArtifact = moduleArtifacts[moduleArtifacts.length - 1];
@@ -401,19 +440,97 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
           </table>
         </div>
       </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h2 className="text-base font-semibold text-slate-950">Hotspot recommendations</h2>
+          {recommendationObjectKey ? (
+            <p className="mt-1 break-words font-mono text-xs text-slate-500">{recommendationObjectKey}</p>
+          ) : null}
+          <p className="mt-1 text-xs text-slate-500">{recommendationCandidates.length} candidate sites</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Rationale</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {recommendationCandidates.length > 0 ? (
+                recommendationCandidates.map((candidate) => (
+                  <tr key={`${candidate.query_position}-${candidate.wildtype_residue}`}>
+                    <td className="px-4 py-3 font-medium text-slate-950">{candidate.query_position}</td>
+                    <td className="px-4 py-3 font-mono">{candidate.wildtype_residue}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {candidate.conservation_category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{candidate.priority_score}</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {candidate.suggested_mutations.length > 0
+                        ? candidate.suggested_mutations.join(", ")
+                        : "-"}
+                    </td>
+                    <td className="min-w-80 px-4 py-3 text-xs text-slate-600">{candidate.rationale}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                    No hotspot recommendation artifact
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   );
 }
 
 function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRecord }) {
   const sites = getConservationSites(content);
+  const candidates = getMutationRecommendationCandidates(content);
   return (
     <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-base font-semibold text-slate-950">Artifact content</h2>
         <p className="mt-1 break-words font-mono text-xs text-slate-500">{content.object_key}</p>
       </div>
-      {sites.length > 0 ? (
+      {candidates.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {candidates.map((candidate) => (
+                <tr key={`${candidate.query_position}-${candidate.wildtype_residue}`}>
+                  <td className="px-4 py-3 font-medium text-slate-950">{candidate.query_position}</td>
+                  <td className="px-4 py-3 font-mono">{candidate.wildtype_residue}</td>
+                  <td className="px-4 py-3">{candidate.conservation_category}</td>
+                  <td className="px-4 py-3">{candidate.priority_score}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{candidate.suggested_mutations.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : sites.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">

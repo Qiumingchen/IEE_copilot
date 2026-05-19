@@ -4,7 +4,8 @@ import { test } from "node:test";
 import {
   buildConservationDownloadJson,
   filterConservationSites,
-  getConservationSites
+  getConservationSites,
+  getMutationRecommendationCandidates
 } from "../app/enzymes/[id]/analysis/analysis-utils.ts";
 
 const conservationContent = {
@@ -56,4 +57,37 @@ test("builds conservation download json with artifact metadata and sites", () =>
   assert.equal(payload.object_key, "analysis-jobs/job-1/conservation-profile.json");
   assert.equal(payload.sites.length, 2);
   assert.equal(payload.sites[1].conservation_category, "moderately_conserved");
+});
+
+test("extracts mutation recommendation candidates from artifact content", () => {
+  const content = {
+    artifact_id: "artifact-2",
+    artifact_type: "mutation_recommendations",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-2/mutation-recommendations.json",
+    content_text: null,
+    content_json: {
+      candidates: [
+        {
+          query_position: 10,
+          wildtype_residue: "L",
+          conservation_category: "variable",
+          priority_score: 1.8,
+          suggested_mutations: ["L10A", "L10V", "L10S"],
+          rationale: "variable site"
+        }
+      ]
+    }
+  };
+
+  assert.deepEqual(getMutationRecommendationCandidates(content), [
+    {
+      query_position: 10,
+      wildtype_residue: "L",
+      conservation_category: "variable",
+      priority_score: 1.8,
+      suggested_mutations: ["L10A", "L10V", "L10S"],
+      rationale: "variable site"
+    }
+  ]);
 });

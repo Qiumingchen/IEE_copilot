@@ -14,6 +14,15 @@ export type ConservationCategoryFilter =
   | "moderately_conserved"
   | "variable";
 
+export type MutationRecommendationCandidateView = {
+  query_position: number | string;
+  wildtype_residue: string;
+  conservation_category: string;
+  priority_score: number | string;
+  suggested_mutations: string[];
+  rationale: string;
+};
+
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
   const rawSites = content.content_json?.sites;
   if (!Array.isArray(rawSites)) {
@@ -55,6 +64,29 @@ export function buildConservationDownloadJson(
     null,
     2
   );
+}
+
+export function getMutationRecommendationCandidates(
+  content: AnalysisArtifactContentRecord
+): MutationRecommendationCandidateView[] {
+  const rawCandidates = content.content_json?.candidates;
+  if (!Array.isArray(rawCandidates)) {
+    return [];
+  }
+  return rawCandidates
+    .filter((candidate): candidate is Record<string, unknown> => (
+      typeof candidate === "object" && candidate !== null
+    ))
+    .map((candidate) => ({
+      query_position: valueOrDash(candidate.query_position),
+      wildtype_residue: String(valueOrDash(candidate.wildtype_residue)),
+      conservation_category: String(valueOrDash(candidate.conservation_category)),
+      priority_score: valueOrDash(candidate.priority_score),
+      suggested_mutations: Array.isArray(candidate.suggested_mutations)
+        ? candidate.suggested_mutations.map(String)
+        : [],
+      rationale: String(valueOrDash(candidate.rationale))
+    }));
 }
 
 function valueOrDash(value: unknown): string | number {
