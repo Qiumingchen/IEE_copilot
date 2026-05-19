@@ -107,11 +107,15 @@ export async function getAnalysisArtifactContent(
 export async function createAnalysisJob(
   enzymeId: string,
   token: string,
-  jobType: AnalysisJobType
+  jobType: AnalysisJobType,
+  parametersJson?: Record<string, unknown>
 ): Promise<JobResponse> {
   return fetchWithToken<JobResponse>(`/enzymes/${enzymeId}/analysis-jobs`, token, {
     method: "POST",
-    body: JSON.stringify({ job_type: jobType })
+    body: JSON.stringify({
+      job_type: jobType,
+      ...(parametersJson ? { parameters_json: parametersJson } : {})
+    })
   });
 }
 

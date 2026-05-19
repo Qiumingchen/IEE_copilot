@@ -68,7 +68,8 @@ export type AnalysisJobType =
   | "homolog_collection"
   | "msa"
   | "conservation_profile"
-  | "mutation_recommendation";
+  | "mutation_recommendation"
+  | "rosetta_ddg";
 
 export type SubstrateRecord = {
   id: string;

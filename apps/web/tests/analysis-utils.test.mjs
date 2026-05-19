@@ -5,7 +5,8 @@ import {
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
-  getMutationRecommendationCandidates
+  getMutationRecommendationCandidates,
+  getRosettaDdgResults
 } from "../app/enzymes/[id]/analysis/analysis-utils.ts";
 
 const conservationContent = {
@@ -88,6 +89,33 @@ test("extracts mutation recommendation candidates from artifact content", () => 
       priority_score: 1.8,
       suggested_mutations: ["L10A", "L10V", "L10S"],
       rationale: "variable site"
+    }
+  ]);
+});
+
+test("extracts rosetta ddg results from artifact content", () => {
+  const content = {
+    artifact_id: "artifact-3",
+    artifact_type: "rosetta_ddg",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-3/rosetta-ddg.json",
+    content_text: null,
+    content_json: {
+      mutation_string: "L10A",
+      ddg_kcal_per_mol: -0.6,
+      interpretation: "stabilizing",
+      structure_id: "structure-1",
+      runner: "mock_rosetta_ddg"
+    }
+  };
+
+  assert.deepEqual(getRosettaDdgResults(content), [
+    {
+      mutation_string: "L10A",
+      ddg_kcal_per_mol: -0.6,
+      interpretation: "stabilizing",
+      structure_id: "structure-1",
+      runner: "mock_rosetta_ddg"
     }
   ]);
 });

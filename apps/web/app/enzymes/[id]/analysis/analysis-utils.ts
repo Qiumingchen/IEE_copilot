@@ -23,6 +23,14 @@ export type MutationRecommendationCandidateView = {
   rationale: string;
 };
 
+export type RosettaDdgResultView = {
+  mutation_string: string;
+  ddg_kcal_per_mol: number | string;
+  interpretation: string;
+  structure_id: string;
+  runner: string;
+};
+
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
   const rawSites = content.content_json?.sites;
   if (!Array.isArray(rawSites)) {
@@ -87,6 +95,25 @@ export function getMutationRecommendationCandidates(
         : [],
       rationale: String(valueOrDash(candidate.rationale))
     }));
+}
+
+export function getRosettaDdgResults(content: AnalysisArtifactContentRecord): RosettaDdgResultView[] {
+  if (content.artifact_type !== "rosetta_ddg" || !content.content_json) {
+    return [];
+  }
+  const mutationString = content.content_json.mutation_string;
+  if (typeof mutationString !== "string" || mutationString.length === 0) {
+    return [];
+  }
+  return [
+    {
+      mutation_string: mutationString,
+      ddg_kcal_per_mol: valueOrDash(content.content_json.ddg_kcal_per_mol),
+      interpretation: String(valueOrDash(content.content_json.interpretation)),
+      structure_id: String(valueOrDash(content.content_json.structure_id)),
+      runner: String(valueOrDash(content.content_json.runner))
+    }
+  ];
 }
 
 function valueOrDash(value: unknown): string | number {
