@@ -119,6 +119,10 @@ export async function createAnalysisJob(
   });
 }
 
+export async function listJobs(token: string): Promise<JobResponse[]> {
+  return fetchWithToken<JobResponse[]>("/jobs", token);
+}
+
 export async function createSubstrate(
   enzymeId: string,
   token: string,

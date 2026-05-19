@@ -6,7 +6,8 @@ import {
   filterConservationSites,
   getConservationSites,
   getMutationRecommendationCandidates,
-  getRosettaDdgResults
+  getRosettaDdgResults,
+  getRosettaDdgRunViews
 } from "../app/enzymes/[id]/analysis/analysis-utils.ts";
 
 const conservationContent = {
@@ -118,6 +119,77 @@ test("extracts rosetta ddg results from artifact content", () => {
       interpretation: "stabilizing",
       structure_id: "structure-1",
       runner: "mock_rosetta_ddg"
+    }
+  ]);
+});
+
+test("builds rosetta ddg run views with status and error messages", () => {
+  const jobs = [
+    {
+      id: "job-failed",
+      enzyme_entry_id: "enzyme-1",
+      job_type: "rosetta_ddg",
+      status: "failed",
+      parameters_json: { mutation_string: "G2A" },
+      result_summary_json: null,
+      error_message: "expected G at position 2 but found C",
+      created_at: "2026-05-19T10:00:00",
+      finished_at: "2026-05-19T10:00:05"
+    },
+    {
+      id: "job-finished",
+      enzyme_entry_id: "enzyme-1",
+      job_type: "rosetta_ddg",
+      status: "finished",
+      parameters_json: { mutation_string: "L10A" },
+      result_summary_json: {
+        mutation_string: "L10A",
+        mutation_file: "L 10 A",
+        ddg_kcal_per_mol: -0.6,
+        interpretation: "stabilizing",
+        runner: "mock_rosetta_ddg"
+      },
+      error_message: null,
+      created_at: "2026-05-19T10:01:00",
+      finished_at: "2026-05-19T10:01:05"
+    },
+    {
+      id: "job-other",
+      enzyme_entry_id: "enzyme-1",
+      job_type: "msa",
+      status: "finished",
+      parameters_json: null,
+      result_summary_json: null,
+      error_message: null,
+      created_at: "2026-05-19T10:02:00",
+      finished_at: "2026-05-19T10:02:05"
+    }
+  ];
+
+  assert.deepEqual(getRosettaDdgRunViews(jobs, "enzyme-1"), [
+    {
+      job_id: "job-failed",
+      status: "failed",
+      mutation_string: "G2A",
+      mutation_file: "-",
+      ddg_kcal_per_mol: "-",
+      interpretation: "-",
+      runner: "-",
+      error_message: "expected G at position 2 but found C",
+      created_at: "2026-05-19T10:00:00",
+      finished_at: "2026-05-19T10:00:05"
+    },
+    {
+      job_id: "job-finished",
+      status: "finished",
+      mutation_string: "L10A",
+      mutation_file: "L 10 A",
+      ddg_kcal_per_mol: -0.6,
+      interpretation: "stabilizing",
+      runner: "mock_rosetta_ddg",
+      error_message: "-",
+      created_at: "2026-05-19T10:01:00",
+      finished_at: "2026-05-19T10:01:05"
     }
   ]);
 });

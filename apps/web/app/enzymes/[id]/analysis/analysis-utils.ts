@@ -1,4 +1,4 @@
-import type { AnalysisArtifactContentRecord } from "../../../../lib/types";
+import type { AnalysisArtifactContentRecord, JobResponse } from "../../../../lib/types";
 
 export type ConservationSiteView = {
   query_position: number | string;
@@ -30,6 +30,19 @@ export type RosettaDdgResultView = {
   interpretation: string;
   structure_id: string;
   runner: string;
+};
+
+export type RosettaDdgRunView = {
+  job_id: string;
+  status: string;
+  mutation_string: string;
+  mutation_file: string;
+  ddg_kcal_per_mol: number | string;
+  interpretation: string;
+  runner: string;
+  error_message: string;
+  created_at: string;
+  finished_at: string | null;
 };
 
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
@@ -116,6 +129,31 @@ export function getRosettaDdgResults(content: AnalysisArtifactContentRecord): Ro
       runner: String(valueOrDash(content.content_json.runner))
     }
   ];
+}
+
+export function getRosettaDdgRunViews(
+  jobs: JobResponse[],
+  enzymeId: string
+): RosettaDdgRunView[] {
+  return jobs
+    .filter((job) => job.enzyme_entry_id === enzymeId && job.job_type === "rosetta_ddg")
+    .map((job) => {
+      const parameters = job.parameters_json ?? {};
+      const summary = job.result_summary_json ?? {};
+      const mutationString = valueOrDash(summary.mutation_string ?? parameters.mutation_string);
+      return {
+        job_id: job.id,
+        status: job.status,
+        mutation_string: String(mutationString),
+        mutation_file: String(valueOrDash(summary.mutation_file)),
+        ddg_kcal_per_mol: valueOrDash(summary.ddg_kcal_per_mol),
+        interpretation: String(valueOrDash(summary.interpretation)),
+        runner: String(valueOrDash(summary.runner)),
+        error_message: String(valueOrDash(job.error_message)),
+        created_at: job.created_at,
+        finished_at: job.finished_at
+      };
+    });
 }
 
 function valueOrDash(value: unknown): string | number {

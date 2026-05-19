@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import {
   createAnalysisJob,
   getAnalysisArtifactContent,
-  getAnalysisArtifacts
+  getAnalysisArtifacts,
+  listJobs
 } from "../../../../lib/api";
 import type {
   AnalysisArtifactContentRecord,
@@ -19,13 +20,14 @@ import {
   filterConservationSites,
   getConservationSites,
   getMutationRecommendationCandidates,
-  getRosettaDdgResults
+  getRosettaDdgResults,
+  getRosettaDdgRunViews
 } from "./analysis-utils";
 import type {
   ConservationCategoryFilter,
   ConservationSiteView,
   MutationRecommendationCandidateView,
-  RosettaDdgResultView
+  RosettaDdgRunView
 } from "./analysis-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -85,7 +87,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
   const [recommendationCandidates, setRecommendationCandidates] = useState<MutationRecommendationCandidateView[]>([]);
   const [recommendationObjectKey, setRecommendationObjectKey] = useState<string | null>(null);
-  const [rosettaResults, setRosettaResults] = useState<RosettaDdgResultView[]>([]);
+  const [rosettaRuns, setRosettaRuns] = useState<RosettaDdgRunView[]>([]);
   const [rosettaObjectKey, setRosettaObjectKey] = useState<string | null>(null);
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
@@ -100,7 +102,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       setArtifacts(nextArtifacts);
       await loadLatestConservationProfile(nextArtifacts, nextToken);
       await loadLatestRecommendations(nextArtifacts, nextToken);
-      await loadRecentRosettaDdgResults(nextArtifacts, nextToken);
+      loadLatestRosettaDdgArtifact(nextArtifacts);
+      await loadRosettaDdgRuns(nextToken);
     } catch {
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
     } finally {
@@ -159,32 +162,23 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     }
   }
 
-  async function loadRecentRosettaDdgResults(
-    nextArtifacts: AnalysisArtifactRecord[],
-    nextToken: string
-  ) {
-    const rosettaArtifacts = nextArtifacts
-      .filter((artifact) => artifact.artifact_type === "rosetta_ddg")
-      .slice(-12);
-    if (rosettaArtifacts.length === 0) {
-      setRosettaResults([]);
+  async function loadRosettaDdgRuns(nextToken: string) {
+    try {
+      const jobs = await listJobs(nextToken);
+      setRosettaRuns(getRosettaDdgRunViews(jobs, enzymeId));
+    } catch {
+      setRosettaRuns([]);
+    }
+  }
+
+  function loadLatestRosettaDdgArtifact(nextArtifacts: AnalysisArtifactRecord[]) {
+    const rosettaArtifacts = nextArtifacts.filter((artifact) => artifact.artifact_type === "rosetta_ddg");
+    const latestRosettaArtifact = rosettaArtifacts[rosettaArtifacts.length - 1];
+    if (!latestRosettaArtifact) {
       setRosettaObjectKey(null);
       return;
     }
-
-    const nextResults: RosettaDdgResultView[] = [];
-    let latestObjectKey: string | null = rosettaArtifacts[rosettaArtifacts.length - 1]?.object_key ?? null;
-    for (const artifact of rosettaArtifacts) {
-      try {
-        const content = await getAnalysisArtifactContent(enzymeId, artifact.id, nextToken);
-        nextResults.push(...getRosettaDdgResults(content));
-        latestObjectKey = content.object_key;
-      } catch {
-        latestObjectKey = artifact.object_key;
-      }
-    }
-    setRosettaResults(nextResults);
-    setRosettaObjectKey(latestObjectKey);
+    setRosettaObjectKey(latestRosettaArtifact.object_key);
   }
 
   async function runAnalysis(jobType: AnalysisJobType) {
@@ -564,44 +558,48 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 
       <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="text-base font-semibold text-slate-950">Rosetta ddG results</h2>
+          <h2 className="text-base font-semibold text-slate-950">Rosetta ddG jobs</h2>
           {rosettaObjectKey ? (
             <p className="mt-1 break-words font-mono text-xs text-slate-500">{rosettaObjectKey}</p>
           ) : null}
-          <p className="mt-1 text-xs text-slate-500">{rosettaResults.length} scored mutations</p>
+          <p className="mt-1 text-xs text-slate-500">{rosettaRuns.length} submitted jobs</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Job</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Status</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Structure</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Runner</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Error</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {rosettaResults.length > 0 ? (
-                rosettaResults.map((result, index) => (
-                  <tr key={`${result.mutation_string}-${index}`}>
-                    <td className="px-4 py-3 font-mono text-slate-950">{result.mutation_string}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{result.mutation_file}</td>
-                    <td className="px-4 py-3">{result.ddg_kcal_per_mol}</td>
+              {rosettaRuns.length > 0 ? (
+                rosettaRuns.map((run) => (
+                  <tr key={run.job_id}>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-950">{run.job_id}</td>
+                    <td className="px-4 py-3"><StatusPill value={run.status} /></td>
+                    <td className="px-4 py-3 font-mono text-slate-950">{run.mutation_string}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.mutation_file}</td>
+                    <td className="px-4 py-3">{run.ddg_kcal_per_mol}</td>
                     <td className="px-4 py-3">
                       <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-                        {result.interpretation}
+                        {run.interpretation}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs">{result.structure_id}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{result.runner}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.runner}</td>
+                    <td className="min-w-72 px-4 py-3 text-xs text-slate-600">{run.error_message}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
-                    No Rosetta ddG artifact
+                  <td className="px-4 py-4 text-slate-500" colSpan={8}>
+                    No Rosetta ddG job
                   </td>
                 </tr>
               )}
