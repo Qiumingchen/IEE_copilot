@@ -20,7 +20,13 @@ from app.db.models import (
 from app.db.session import get_db
 from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
-from app.services.cache import find_fresh_search_cache, find_fresh_uniprot_hit, find_search_cache, is_fresh
+from app.services.cache import (
+    find_fresh_search_cache,
+    find_fresh_uniprot_hit,
+    find_search_cache,
+    is_fresh,
+    stale_data_modules,
+)
 from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
 from app.services.similarity_matching import find_level_two_similarity_match
@@ -346,6 +352,8 @@ def search_enzymes(
         db.flush()
 
     _ensure_protein_sequence(db, enzyme, module)
+    db.flush()
+    refresh_modules = stale_data_modules(db, enzyme.id)
 
     job = AnalysisJob(
         project_id=request.project_id,
@@ -357,6 +365,7 @@ def search_enzymes(
             "normalized_query": resolved.normalized_query,
             "query_kind": resolved.kind.value,
             "module": module.value,
+            "refresh_modules": refresh_modules,
         },
         created_by=user.id,
     )

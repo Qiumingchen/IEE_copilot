@@ -2,8 +2,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, SearchCacheRecord
+from app.db.models import AnalysisJob, EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, SearchCacheRecord
 from app.external.uniprot import UniProtEntry, UniProtSearchHit
+from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
 
 
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
@@ -113,6 +114,73 @@ def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch
     assert len(cache_records) == 1
     assert cache_records[0].payload_json["enzyme_entry_id"] == first_response.json()["enzyme"]["id"]
     assert enqueued_job_ids == [first_response.json()["job_id"], second_response.json()["job_id"]]
+
+
+def test_enzyme_search_marks_stale_data_modules_for_partial_refresh(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "partial-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Partial Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "partial-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Fresh local mTGase",
+        organism="Streptomyces mobaraensis",
+        uniprot_id="P55555",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNG",
+            mature_sequence="AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNG",
+            source="test",
+            checksum="partial-refresh-sequence",
+            created_at=datetime.utcnow() - timedelta(days=1),
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P55555"},
+    )
+
+    assert response.status_code == 200
+    job = db_session.get(AnalysisJob, response.json()["job_id"])
+    assert job is not None
+    refresh_modules = job.parameters_json["refresh_modules"]
+    assert DATA_MODULE_SEQUENCE not in refresh_modules
+    assert DATA_MODULE_STRUCTURE in refresh_modules
 
 
 def test_enzyme_search_refreshes_stale_search_cache(client, db_session, monkeypatch):
