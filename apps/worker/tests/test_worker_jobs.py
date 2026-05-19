@@ -14,6 +14,7 @@ from app.db.models import (
 from worker.jobs import (
     finish_conservation_profile_job,
     finish_homology_collection_job,
+    finish_mutation_recommendation_job,
     finish_msa_job,
     finish_placeholder_job,
     mark_job_failed,
@@ -275,6 +276,79 @@ def test_finish_conservation_profile_job_creates_conservation_artifact():
     assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
     assert artifact.checksum is not None
+
+
+def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Worker recommendation family",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker recommendation test mTGase",
+            organism="Streptomyces mobaraensis",
+            source="test",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="mutation_recommendation",
+            status=JobStatus.QUEUED,
+            parameters_json={
+                "conservation_sites": [
+                    {
+                        "query_position": 1,
+                        "wildtype_residue": "A",
+                        "shannon_entropy": 0.0,
+                        "wildtype_frequency": 1.0,
+                        "conservation_category": "highly_conserved",
+                    },
+                    {
+                        "query_position": 8,
+                        "wildtype_residue": "I",
+                        "shannon_entropy": 0.918,
+                        "wildtype_frequency": 0.667,
+                        "conservation_category": "moderately_conserved",
+                    },
+                    {
+                        "query_position": 10,
+                        "wildtype_residue": "L",
+                        "shannon_entropy": 1.2,
+                        "wildtype_frequency": 0.4,
+                        "conservation_category": "variable",
+                    },
+                ]
+            },
+        )
+        db.add(job)
+        db.commit()
+
+        finish_mutation_recommendation_job(db, job.id, bucket="iee-artifacts")
+
+        artifact = db.scalar(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.job_id == job.id,
+                AnalysisArtifact.artifact_type == "mutation_recommendations",
+            )
+        )
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json["message"] == "mutation recommendation completed"
+    assert job.result_summary_json["artifact_type"] == "mutation_recommendations"
+    assert [candidate["query_position"] for candidate in job.result_summary_json["candidates"]] == [10, 8]
+    assert job.result_summary_json["candidates"][0]["suggested_mutations"] == ["L10A", "L10V", "L10S"]
+    assert artifact is not None
+    assert artifact.object_key == f"analysis-jobs/{job.id}/mutation-recommendations.json"
+    assert artifact.content_type == "application/json"
+    assert artifact.size_bytes > 0
 
 
 def test_mark_job_failed_records_error_message():

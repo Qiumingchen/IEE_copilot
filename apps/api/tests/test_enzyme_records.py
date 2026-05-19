@@ -432,6 +432,83 @@ def test_create_conservation_job_uses_latest_msa_artifact(client, db_session, mo
     ]
 
 
+def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="mutation-recommendation-sequence",
+        )
+    )
+    conservation_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="conservation_profile",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "sites": [
+                {
+                    "query_position": 1,
+                    "wildtype_residue": "A",
+                    "shannon_entropy": 0.0,
+                    "wildtype_frequency": 1.0,
+                    "conservation_category": "highly_conserved",
+                },
+                {
+                    "query_position": 8,
+                    "wildtype_residue": "I",
+                    "shannon_entropy": 0.918,
+                    "wildtype_frequency": 0.667,
+                    "conservation_category": "moderately_conserved",
+                },
+            ]
+        },
+    )
+    db_session.add(conservation_job)
+    db_session.flush()
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=conservation_job.id,
+            artifact_type="conservation_profile",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{conservation_job.id}/conservation-profile.json",
+            content_type="application/json",
+            size_bytes=256,
+        )
+    )
+    db_session.commit()
+
+    class MutationRecommendationTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_mutation_recommendation",
+        MutationRecommendationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={"job_type": "mutation_recommendation"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["job_type"] == "mutation_recommendation"
+    assert body["parameters_json"]["conservation_sites"] == conservation_job.result_summary_json["sites"]
+
+
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

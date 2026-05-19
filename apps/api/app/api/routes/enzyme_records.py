@@ -37,7 +37,12 @@ from app.schemas.enzyme_record import (
     SubstrateResponse,
 )
 from app.schemas.job import AnalysisJobCreate, JobResponse
-from worker.jobs import run_conservation_profile, run_homology_collection, run_msa
+from worker.jobs import (
+    run_conservation_profile,
+    run_homology_collection,
+    run_msa,
+    run_mutation_recommendation,
+)
 
 
 router = APIRouter(prefix="/enzymes", tags=["enzyme records"])
@@ -48,9 +53,10 @@ ANALYSIS_ARTIFACT_TYPES = {
     "multiple_sequence_alignment",
     "conservation",
     "conservation_profile",
+    "mutation_recommendations",
 }
 
-ANALYSIS_JOB_TYPES = {"homolog_collection", "msa", "conservation_profile"}
+ANALYSIS_JOB_TYPES = {"homolog_collection", "msa", "conservation_profile", "mutation_recommendation"}
 
 
 def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
@@ -161,6 +167,27 @@ def _latest_msa_records_for_conservation(db: Session, enzyme_id: str) -> list[di
     return _parse_msa_fasta(msa_fasta)
 
 
+def _latest_conservation_sites_for_recommendation(db: Session, enzyme_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "conservation_profile",
+        )
+        .order_by(AnalysisArtifact.created_at.desc())
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    sites = summary.get("sites", [])
+    if not isinstance(sites, list):
+        return []
+    return [site for site in sites if isinstance(site, dict)]
+
+
 def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequence: str) -> dict:
     parameters = {"requested_from": "enzyme_analysis_page"}
     if job_type == "msa":
@@ -171,6 +198,8 @@ def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequenc
         parameters["aligned_records"] = _latest_msa_records_for_conservation(db, enzyme_id) or [
             {"identifier": "query", "aligned_sequence": sequence},
         ]
+    if job_type == "mutation_recommendation":
+        parameters["conservation_sites"] = _latest_conservation_sites_for_recommendation(db, enzyme_id)
     return parameters
 
 
@@ -183,6 +212,9 @@ def _enqueue_analysis_job(job_type: str, job_id: str) -> None:
         return
     if job_type == "conservation_profile":
         run_conservation_profile.delay(job_id)
+        return
+    if job_type == "mutation_recommendation":
+        run_mutation_recommendation.delay(job_id)
         return
     raise ValueError(f"unsupported analysis job type: {job_type}")
 
@@ -208,6 +240,11 @@ def _artifact_content_from_summary(
         content_json = {
             "homolog_count": summary.get("homolog_count"),
             "homologs": summary.get("homologs", []),
+        }
+    elif artifact.artifact_type == "mutation_recommendations":
+        content_json = {
+            "candidate_count": summary.get("candidate_count"),
+            "candidates": summary.get("candidates", []),
         }
 
     if content_text is None and content_json is None:
