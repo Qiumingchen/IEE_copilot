@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
+from app.external.literature import create_literature_reference, get_literature_client
 from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
@@ -197,6 +198,12 @@ def _create_enzyme_from_uniprot_entry(
             source=getattr(alphafold_client, "source", "alphafold"),
         )
     return enzyme
+
+
+def _save_literature_for_enzyme(db: Session, enzyme: EnzymeEntry) -> None:
+    client = get_literature_client()
+    for metadata in client.search_by_enzyme_name(enzyme.name):
+        create_literature_reference(db, metadata)
 
 
 def _create_alphafold_structure(
@@ -393,6 +400,7 @@ def search_enzymes(
                 fasta=fasta,
                 source=source,
             )
+            _save_literature_for_enzyme(db, enzyme)
             cache_status = "miss_refreshed"
 
     stale_cache = find_search_cache(

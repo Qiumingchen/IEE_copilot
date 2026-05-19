@@ -7,6 +7,7 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    LiteratureReference,
     ProteinSequence,
     SearchCacheRecord,
     StructureEntry,
@@ -712,3 +713,89 @@ def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
     assert structure.source == "alphafold_mock"
     assert structure.chain_summary["model_id"] == "AF-P99998-F1"
     assert structure.chain_summary["confidence_summary"]["mean_plddt"] == 90.0
+
+
+def test_enzyme_search_saves_literature_metadata_for_external_hit(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return [
+                UniProtSearchHit(
+                    accession="MOCKMTG1",
+                    protein_name="Mock microbial transglutaminase",
+                    organism="Streptomyces mobaraensis",
+                    ec_number="2.3.2.13",
+                )
+            ]
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Mock microbial transglutaminase",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|MOCKMTG1|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "literature-connector@example.com",
+            "password": "search-password",
+            "display_name": "Literature Connector Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "literature-connector@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    reference = db_session.scalar(
+        select(LiteratureReference).where(
+            LiteratureReference.doi == "10.0000/mock-mtgase-thermostability"
+        )
+    )
+    assert reference is not None
+    assert reference.source == "literature_mock"
+    assert "thermostability" in reference.metadata_json["abstract"].lower()
