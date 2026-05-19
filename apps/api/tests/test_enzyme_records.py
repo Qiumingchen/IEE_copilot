@@ -372,6 +372,66 @@ def test_create_msa_job_uses_latest_homolog_sequence_artifact(client, db_session
     ]
 
 
+def test_create_conservation_job_uses_latest_msa_artifact(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="conservation-msa-sequence",
+        )
+    )
+    msa_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="msa",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "msa_fasta": ">query\nACDEFGHIKL\n>HOMOLOG_A\nACDEFGHIVL\n",
+        },
+    )
+    db_session.add(msa_job)
+    db_session.flush()
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=msa_job.id,
+            artifact_type="msa",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{msa_job.id}/msa.fasta",
+            content_type="text/x-fasta",
+            size_bytes=64,
+        )
+    )
+    db_session.commit()
+
+    class ConservationTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_conservation_profile",
+        ConservationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={"job_type": "conservation_profile"},
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert parameters["aligned_records"] == [
+        {"identifier": "query", "aligned_sequence": "ACDEFGHIKL"},
+        {"identifier": "HOMOLOG_A", "aligned_sequence": "ACDEFGHIVL"},
+    ]
+
+
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

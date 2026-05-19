@@ -109,6 +109,58 @@ def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
     return homologs
 
 
+def _parse_msa_fasta(msa_fasta: str) -> list[dict]:
+    records = []
+    current_identifier: str | None = None
+    current_sequence: list[str] = []
+
+    def flush_record() -> None:
+        if current_identifier and current_sequence:
+            records.append(
+                {
+                    "identifier": current_identifier,
+                    "aligned_sequence": "".join(current_sequence),
+                }
+            )
+
+    for line in msa_fasta.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(">"):
+            flush_record()
+            header = stripped[1:].strip()
+            current_identifier = header.split()[0] if header else None
+            current_sequence = []
+            continue
+        if current_identifier:
+            current_sequence.append(stripped)
+
+    flush_record()
+    return records
+
+
+def _latest_msa_records_for_conservation(db: Session, enzyme_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type.in_(("msa", "multiple_sequence_alignment")),
+        )
+        .order_by(AnalysisArtifact.created_at.desc())
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    msa_fasta = summary.get("msa_fasta")
+    if not isinstance(msa_fasta, str) or not msa_fasta.strip():
+        return []
+    return _parse_msa_fasta(msa_fasta)
+
+
 def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequence: str) -> dict:
     parameters = {"requested_from": "enzyme_analysis_page"}
     if job_type == "msa":
@@ -116,7 +168,7 @@ def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequenc
         if homologs:
             parameters["homologs"] = homologs
     if job_type == "conservation_profile":
-        parameters["aligned_records"] = [
+        parameters["aligned_records"] = _latest_msa_records_for_conservation(db, enzyme_id) or [
             {"identifier": "query", "aligned_sequence": sequence},
         ]
     return parameters
