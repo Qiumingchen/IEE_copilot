@@ -42,6 +42,7 @@ from worker.jobs import (
     run_homology_collection,
     run_msa,
     run_mutation_recommendation,
+    run_rosetta_ddg,
 )
 
 
@@ -54,9 +55,16 @@ ANALYSIS_ARTIFACT_TYPES = {
     "conservation",
     "conservation_profile",
     "mutation_recommendations",
+    "rosetta_ddg",
 }
 
-ANALYSIS_JOB_TYPES = {"homolog_collection", "msa", "conservation_profile", "mutation_recommendation"}
+ANALYSIS_JOB_TYPES = {
+    "homolog_collection",
+    "msa",
+    "conservation_profile",
+    "mutation_recommendation",
+    "rosetta_ddg",
+}
 
 
 def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
@@ -188,8 +196,16 @@ def _latest_conservation_sites_for_recommendation(db: Session, enzyme_id: str) -
     return [site for site in sites if isinstance(site, dict)]
 
 
-def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequence: str) -> dict:
+def _analysis_job_parameters(
+    db: Session,
+    enzyme_id: str,
+    job_type: str,
+    sequence: str,
+    requested_parameters: dict | None = None,
+) -> dict:
     parameters = {"requested_from": "enzyme_analysis_page"}
+    if requested_parameters:
+        parameters.update(requested_parameters)
     if job_type == "msa":
         homologs = _latest_homologs_for_msa(db, enzyme_id)
         if homologs:
@@ -200,6 +216,8 @@ def _analysis_job_parameters(db: Session, enzyme_id: str, job_type: str, sequenc
         ]
     if job_type == "mutation_recommendation":
         parameters["conservation_sites"] = _latest_conservation_sites_for_recommendation(db, enzyme_id)
+    if job_type == "rosetta_ddg" and not parameters.get("mutation_string"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="mutation_string is required")
     return parameters
 
 
@@ -215,6 +233,9 @@ def _enqueue_analysis_job(job_type: str, job_id: str) -> None:
         return
     if job_type == "mutation_recommendation":
         run_mutation_recommendation.delay(job_id)
+        return
+    if job_type == "rosetta_ddg":
+        run_rosetta_ddg.delay(job_id)
         return
     raise ValueError(f"unsupported analysis job type: {job_type}")
 
@@ -245,6 +266,14 @@ def _artifact_content_from_summary(
         content_json = {
             "candidate_count": summary.get("candidate_count"),
             "candidates": summary.get("candidates", []),
+        }
+    elif artifact.artifact_type == "rosetta_ddg":
+        content_json = {
+            "mutation_string": summary.get("mutation_string"),
+            "ddg_kcal_per_mol": summary.get("ddg_kcal_per_mol"),
+            "interpretation": summary.get("interpretation"),
+            "structure_id": summary.get("structure_id"),
+            "runner": summary.get("runner"),
         }
 
     if content_text is None and content_json is None:
@@ -615,7 +644,13 @@ def create_analysis_job(
         enzyme_entry_id=enzyme.id,
         job_type=request.job_type,
         status=JobStatus.QUEUED,
-        parameters_json=_analysis_job_parameters(db, enzyme.id, request.job_type, sequence),
+        parameters_json=_analysis_job_parameters(
+            db,
+            enzyme.id,
+            request.job_type,
+            sequence,
+            request.parameters_json,
+        ),
         created_by=user.id,
     )
     db.add(job)

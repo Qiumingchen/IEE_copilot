@@ -292,6 +292,59 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
     return job
 
 
+def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise ValueError(f"analysis job not found: {job_id}")
+    if job.enzyme_entry_id is None:
+        raise ValueError(f"analysis job has no enzyme entry: {job_id}")
+
+    parameters = job.parameters_json or {}
+    mutation_string = str(parameters.get("mutation_string") or "").strip()
+    if not mutation_string:
+        raise ValueError("mutation_string is required for Rosetta ddG job")
+
+    now = datetime.utcnow()
+    job.status = JobStatus.RUNNING
+    job.started_at = now
+    db.commit()
+
+    ddg = _mock_ddg_for_mutation(mutation_string)
+    payload = {
+        "mutation_string": mutation_string,
+        "structure_id": parameters.get("structure_id"),
+        "ddg_kcal_per_mol": ddg,
+        "interpretation": "stabilizing" if ddg < 0 else "destabilizing_or_neutral",
+        "runner": "mock_rosetta_ddg",
+    }
+    payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+
+    db.add(
+        AnalysisArtifact(
+            project_id=job.project_id,
+            enzyme_entry_id=job.enzyme_entry_id,
+            job_id=job.id,
+            artifact_type="rosetta_ddg",
+            bucket=bucket,
+            object_key=f"analysis-jobs/{job.id}/rosetta-ddg.json",
+            checksum=hashlib.sha256(payload_bytes).hexdigest(),
+            content_type="application/json",
+            size_bytes=len(payload_bytes),
+        )
+    )
+
+    job.status = JobStatus.FINISHED
+    job.finished_at = datetime.utcnow()
+    job.result_summary_json = {
+        "message": "Rosetta ddG placeholder completed",
+        "artifact_type": "rosetta_ddg",
+        **payload,
+    }
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_failed(db: Session, job_id: str, error_message: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -365,6 +418,18 @@ def run_mutation_recommendation(_task, job_id: str) -> str:
         raise
 
 
+@celery_app.task(bind=True, name="worker.jobs.run_rosetta_ddg")
+def run_rosetta_ddg(_task, job_id: str) -> str:
+    try:
+        with SessionLocal() as db:
+            job = finish_rosetta_ddg_job(db, job_id, bucket=get_settings().minio_bucket)
+            return job.id
+    except Exception as exc:
+        with SessionLocal() as db:
+            mark_job_failed(db, job_id, str(exc))
+        raise
+
+
 def _homolog_parameters_from_job(job: AnalysisJob) -> HomologSearchParameters:
     raw = job.parameters_json or {}
     return HomologSearchParameters(
@@ -420,6 +485,10 @@ def _mutate_every_nth_residue(sequence: str, step: int) -> str:
     for index in range(step - 1, len(residues), step):
         residues[index] = "V" if residues[index].upper() != "V" else "A"
     return "".join(residues)
+
+
+def _mock_ddg_for_mutation(mutation_string: str) -> float:
+    return round(((sum(ord(char) for char in mutation_string) % 21) - 10) / 5, 2)
 
 
 def _homolog_inputs_from_job(job: AnalysisJob) -> list[MsaInputSequence]:

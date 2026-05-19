@@ -509,6 +509,53 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     assert body["parameters_json"]["conservation_sites"] == conservation_job.result_summary_json["sites"]
 
 
+def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="rosetta-ddg-sequence",
+        )
+    )
+    db_session.commit()
+    enqueued_job_ids = []
+
+    class RosettaTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_rosetta_ddg",
+        RosettaTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "rosetta_ddg",
+            "parameters_json": {
+                "mutation_string": "L10A",
+                "structure_id": "structure-1",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["job_type"] == "rosetta_ddg"
+    assert body["parameters_json"]["mutation_string"] == "L10A"
+    assert body["parameters_json"]["structure_id"] == "structure-1"
+    assert body["parameters_json"]["requested_from"] == "enzyme_analysis_page"
+    assert enqueued_job_ids == [body["id"]]
+
+
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

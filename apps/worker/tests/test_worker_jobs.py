@@ -17,6 +17,7 @@ from worker.jobs import (
     finish_mutation_recommendation_job,
     finish_msa_job,
     finish_placeholder_job,
+    finish_rosetta_ddg_job,
     mark_job_failed,
 )
 
@@ -347,6 +348,55 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
     assert job.result_summary_json["candidates"][0]["suggested_mutations"] == ["L10A", "L10V", "L10S"]
     assert artifact is not None
     assert artifact.object_key == f"analysis-jobs/{job.id}/mutation-recommendations.json"
+    assert artifact.content_type == "application/json"
+    assert artifact.size_bytes > 0
+
+
+def test_finish_rosetta_ddg_job_creates_mock_ddg_artifact():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Worker Rosetta family",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker Rosetta test mTGase",
+            organism="Streptomyces mobaraensis",
+            source="test",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="rosetta_ddg",
+            status=JobStatus.QUEUED,
+            parameters_json={"mutation_string": "L10A", "structure_id": "structure-1"},
+        )
+        db.add(job)
+        db.commit()
+
+        finish_rosetta_ddg_job(db, job.id, bucket="iee-artifacts")
+
+        artifact = db.scalar(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.job_id == job.id,
+                AnalysisArtifact.artifact_type == "rosetta_ddg",
+            )
+        )
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json["message"] == "Rosetta ddG placeholder completed"
+    assert job.result_summary_json["mutation_string"] == "L10A"
+    assert job.result_summary_json["ddg_kcal_per_mol"] == -0.6
+    assert job.result_summary_json["artifact_type"] == "rosetta_ddg"
+    assert artifact is not None
+    assert artifact.object_key == f"analysis-jobs/{job.id}/rosetta-ddg.json"
     assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
 

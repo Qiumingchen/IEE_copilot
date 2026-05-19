@@ -24,3 +24,4 @@ class JobResponse(BaseModel):
 
 class AnalysisJobCreate(BaseModel):
     job_type: str
+    parameters_json: dict | None = None
