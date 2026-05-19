@@ -7,8 +7,11 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    KineticRecord,
     LiteratureReference,
+    MutationRecord,
     ProteinSequence,
+    PropertyRecord,
     SearchCacheRecord,
     StructureEntry,
 )
@@ -799,3 +802,63 @@ def test_enzyme_search_saves_literature_metadata_for_external_hit(
     assert reference is not None
     assert reference.source == "literature_mock"
     assert "thermostability" in reference.metadata_json["abstract"].lower()
+
+
+def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "enzyme-data-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Enzyme Data Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "enzyme-data-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    enzyme_id = response.json()["enzyme"]["id"]
+
+    properties = list(
+        db_session.scalars(
+            select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme_id)
+        )
+    )
+    kinetics = list(
+        db_session.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme_id))
+    )
+    mutations = list(
+        db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme_id))
+    )
+
+    assert {(record.property_type, record.value_original) for record in properties} == {
+        ("optimal_temperature", "55"),
+        ("optimal_pH", "7.0"),
+    }
+    assert all(record.evidence_text for record in properties)
+    assert len(kinetics) == 1
+    assert kinetics[0].substrate == "CBZ-Gln-Gly"
+    assert kinetics[0].km == "2.1"
+    assert kinetics[0].kcat == "31.0"
+    assert len(mutations) == 1
+    assert mutations[0].mutation_string == "S2P"
+    assert mutations[0].property_delta == {"optimal_temperature_delta_degC": 5}

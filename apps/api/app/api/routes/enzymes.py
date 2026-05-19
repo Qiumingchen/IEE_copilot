@@ -12,14 +12,18 @@ from app.db.models import (
     EnzymeFamily,
     EnzymeModule,
     JobStatus,
+    KineticRecord,
+    MutationRecord,
     Project,
     ProteinSequence,
+    PropertyRecord,
     SearchCacheRecord,
     StructureEntry,
     User,
 )
 from app.db.session import get_db
 from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
+from app.external.enzyme_data import get_enzyme_data_client
 from app.external.literature import create_literature_reference, get_literature_client
 from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
@@ -204,6 +208,90 @@ def _save_literature_for_enzyme(db: Session, enzyme: EnzymeEntry) -> None:
     client = get_literature_client()
     for metadata in client.search_by_enzyme_name(enzyme.name):
         create_literature_reference(db, metadata)
+
+
+def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
+    client = get_enzyme_data_client()
+    query = enzyme.name
+
+    property_data = [
+        *client.fetch_opt_temperature(query),
+        *client.fetch_opt_pH(query),
+    ]
+    for datum in property_data:
+        existing = db.scalar(
+            select(PropertyRecord).where(
+                PropertyRecord.enzyme_entry_id == enzyme.id,
+                PropertyRecord.property_type == datum.property_type,
+                PropertyRecord.value_original == datum.value_original,
+                PropertyRecord.substrate == datum.substrate,
+            )
+        )
+        if existing is not None:
+            continue
+        db.add(
+            PropertyRecord(
+                enzyme_entry_id=enzyme.id,
+                property_type=datum.property_type,
+                value_original=datum.value_original,
+                unit_original=datum.unit_original,
+                substrate=datum.substrate,
+                assay_temperature=datum.assay_temperature,
+                assay_pH=datum.assay_pH,
+                method=datum.source,
+                evidence_text=datum.evidence,
+            )
+        )
+
+    for parameter in client.fetch_kinetic_parameters(query):
+        existing = db.scalar(
+            select(KineticRecord).where(
+                KineticRecord.enzyme_entry_id == enzyme.id,
+                KineticRecord.substrate == parameter.substrate,
+                KineticRecord.km == parameter.km,
+                KineticRecord.kcat == parameter.kcat,
+                KineticRecord.kcat_km == parameter.kcat_km,
+            )
+        )
+        if existing is not None:
+            continue
+        db.add(
+            KineticRecord(
+                enzyme_entry_id=enzyme.id,
+                substrate=parameter.substrate,
+                km=parameter.km,
+                kcat=parameter.kcat,
+                kcat_km=parameter.kcat_km,
+                unit_original=parameter.unit_original,
+                assay_temperature=parameter.assay_temperature,
+                assay_pH=parameter.assay_pH,
+                method=f"{parameter.source}: {parameter.evidence}" if parameter.evidence else parameter.source,
+            )
+        )
+
+    for mutant in client.fetch_mutants(query):
+        existing = db.scalar(
+            select(MutationRecord).where(
+                MutationRecord.enzyme_entry_id == enzyme.id,
+                MutationRecord.mutation_string == mutant.mutation_string,
+            )
+        )
+        if existing is not None:
+            continue
+        db.add(
+            MutationRecord(
+                enzyme_entry_id=enzyme.id,
+                mutation_string=mutant.mutation_string,
+                effect_summary=mutant.effect_summary,
+                property_delta=mutant.property_delta,
+                substrate=mutant.substrate,
+                assay_condition_summary={
+                    "source": mutant.source,
+                    "evidence": mutant.evidence,
+                    "organism": mutant.organism,
+                },
+            )
+        )
 
 
 def _create_alphafold_structure(
@@ -449,6 +537,8 @@ def search_enzymes(
         db.flush()
 
     _ensure_protein_sequence(db, enzyme, module)
+    db.flush()
+    _save_external_enzyme_data(db, enzyme)
     db.flush()
     refresh_modules = stale_data_modules(db, enzyme.id)
 
