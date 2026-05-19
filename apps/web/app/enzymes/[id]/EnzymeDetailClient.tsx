@@ -1,10 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
+  createExpressionRecord,
+  createKineticRecord,
   createPropertyRecord,
+  createStructureRecord,
   createSubstrate,
   getEnzymeRecordBundle
 } from "../../../lib/api";
@@ -25,6 +29,37 @@ type PropertyFormState = {
   assay_pH: string;
 };
 
+type StructureFormState = {
+  structure_type: string;
+  complex_state: string;
+  pdb_id: string;
+  ligand_name: string;
+  ligand_code: string;
+  ligand_type: string;
+};
+
+type KineticFormState = {
+  substrate: string;
+  km: string;
+  kcat: string;
+  kcat_km: string;
+  unit_original: string;
+  assay_temperature: string;
+  assay_pH: string;
+};
+
+type ExpressionFormState = {
+  expression_host: string;
+  vector: string;
+  expression_level_original: string;
+  soluble_expression: string;
+  unit_original: string;
+  substrate_entry_id: string;
+  assay_temperature: string;
+  assay_pH: string;
+  method: string;
+};
+
 function emptyPropertyForm(): PropertyFormState {
   return {
     property_type: "optimal_temperature",
@@ -33,6 +68,43 @@ function emptyPropertyForm(): PropertyFormState {
     substrate: "",
     assay_temperature: "",
     assay_pH: ""
+  };
+}
+
+function emptyStructureForm(): StructureFormState {
+  return {
+    structure_type: "uploaded_pdb",
+    complex_state: "apo",
+    pdb_id: "",
+    ligand_name: "",
+    ligand_code: "",
+    ligand_type: "substrate"
+  };
+}
+
+function emptyKineticForm(): KineticFormState {
+  return {
+    substrate: "",
+    km: "",
+    kcat: "",
+    kcat_km: "",
+    unit_original: "",
+    assay_temperature: "",
+    assay_pH: ""
+  };
+}
+
+function emptyExpressionForm(): ExpressionFormState {
+  return {
+    expression_host: "",
+    vector: "",
+    expression_level_original: "",
+    soluble_expression: "",
+    unit_original: "",
+    substrate_entry_id: "",
+    assay_temperature: "",
+    assay_pH: "",
+    method: ""
   };
 }
 
@@ -48,12 +120,22 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingSubstrate, setIsSavingSubstrate] = useState(false);
   const [isSavingProperty, setIsSavingProperty] = useState(false);
+  const [isSavingStructure, setIsSavingStructure] = useState(false);
+  const [isSavingKinetic, setIsSavingKinetic] = useState(false);
+  const [isSavingExpression, setIsSavingExpression] = useState(false);
   const [substrateName, setSubstrateName] = useState("");
   const [substrateClass, setSubstrateClass] = useState("");
   const [substrateSmiles, setSubstrateSmiles] = useState("");
   const [propertyForm, setPropertyForm] = useState<PropertyFormState>(emptyPropertyForm);
+  const [structureForm, setStructureForm] = useState<StructureFormState>(emptyStructureForm);
+  const [kineticForm, setKineticForm] = useState<KineticFormState>(emptyKineticForm);
+  const [expressionForm, setExpressionForm] = useState<ExpressionFormState>(emptyExpressionForm);
 
   const substrateOptions = useMemo(() => bundle?.substrates.map((item) => item.name) ?? [], [bundle]);
+  const substrateIdOptions = useMemo(
+    () => bundle?.substrates.map((item) => ({ id: item.id, name: item.name })) ?? [],
+    [bundle]
+  );
 
   async function loadBundle(nextToken: string) {
     setError(null);
@@ -128,6 +210,104 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
     }
   }
 
+  async function handleCreateStructure(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !structureForm.structure_type.trim()) {
+      return;
+    }
+
+    setIsSavingStructure(true);
+    setError(null);
+    try {
+      await createStructureRecord(enzymeId, token, {
+        structure_type: structureForm.structure_type.trim(),
+        complex_state: structureForm.complex_state.trim() || undefined,
+        pdb_id: structureForm.pdb_id.trim() || undefined,
+        source: "user_upload",
+        ligands: structureForm.ligand_name.trim()
+          ? [
+              {
+                ligand_name: structureForm.ligand_name.trim(),
+                ligand_code: structureForm.ligand_code.trim() || undefined,
+                ligand_type: structureForm.ligand_type.trim() || undefined
+              }
+            ]
+          : []
+      });
+      setStructureForm(emptyStructureForm());
+      await loadBundle(token);
+    } catch {
+      setError("Unable to save structure record.");
+    } finally {
+      setIsSavingStructure(false);
+    }
+  }
+
+  async function handleCreateKinetic(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || (!kineticForm.km.trim() && !kineticForm.kcat.trim() && !kineticForm.kcat_km.trim())) {
+      return;
+    }
+
+    setIsSavingKinetic(true);
+    setError(null);
+    try {
+      await createKineticRecord(enzymeId, token, {
+        substrate: kineticForm.substrate.trim() || undefined,
+        km: kineticForm.km.trim() || undefined,
+        kcat: kineticForm.kcat.trim() || undefined,
+        kcat_km: kineticForm.kcat_km.trim() || undefined,
+        unit_original: kineticForm.unit_original.trim() || undefined,
+        assay_temperature: kineticForm.assay_temperature.trim() || undefined,
+        assay_pH: kineticForm.assay_pH.trim() || undefined
+      });
+      setKineticForm(emptyKineticForm());
+      await loadBundle(token);
+    } catch {
+      setError("Unable to save kinetic record.");
+    } finally {
+      setIsSavingKinetic(false);
+    }
+  }
+
+  async function handleCreateExpression(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !expressionForm.expression_host.trim()) {
+      return;
+    }
+
+    setIsSavingExpression(true);
+    setError(null);
+    try {
+      await createExpressionRecord(enzymeId, token, {
+        expression_host: expressionForm.expression_host.trim(),
+        vector: expressionForm.vector.trim() || undefined,
+        expression_level_original: expressionForm.expression_level_original.trim() || undefined,
+        soluble_expression: expressionForm.soluble_expression.trim() || undefined,
+        unit_original: expressionForm.unit_original.trim() || undefined,
+        unit_standardized: expressionForm.unit_original.trim() || undefined,
+        condition:
+          expressionForm.substrate_entry_id ||
+          expressionForm.assay_temperature ||
+          expressionForm.assay_pH ||
+          expressionForm.method
+            ? {
+                substrate_entry_id: expressionForm.substrate_entry_id || undefined,
+                assay_temperature: expressionForm.assay_temperature.trim() || undefined,
+                assay_pH: expressionForm.assay_pH.trim() || undefined,
+                method: expressionForm.method.trim() || undefined
+              }
+            : undefined
+      });
+      setExpressionForm(emptyExpressionForm());
+      await loadBundle(token);
+    } catch {
+      setError("Unable to save expression record.");
+    } finally {
+      setIsSavingExpression(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -147,6 +327,12 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
           >
             Refresh
           </button>
+          <Link
+            className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
+            href={`/enzymes/${enzymeId}/analysis`}
+          >
+            MSA / Conservation
+          </Link>
         </div>
       </header>
 
@@ -300,6 +486,296 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                 type="submit"
               >
                 {isSavingProperty ? "Saving..." : "Save property"}
+              </button>
+            </form>
+          </section>
+
+          <section className="mt-6 grid gap-6 xl:grid-cols-3">
+            <form className="rounded-md border border-slate-200 bg-white p-5" onSubmit={handleCreateStructure}>
+              <h2 className="text-base font-semibold text-slate-950">Structure</h2>
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Type
+                  <select
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={structureForm.structure_type}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({ ...current, structure_type: event.target.value }))
+                    }
+                  >
+                    <option value="uploaded_pdb">uploaded_pdb</option>
+                    <option value="pdb">pdb</option>
+                    <option value="alphafold">alphafold</option>
+                    <option value="predicted">predicted</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  State
+                  <select
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={structureForm.complex_state}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({ ...current, complex_state: event.target.value }))
+                    }
+                  >
+                    <option value="apo">apo</option>
+                    <option value="enzyme_substrate_complex">enzyme_substrate_complex</option>
+                    <option value="unknown">unknown</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  PDB ID
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={structureForm.pdb_id}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({ ...current, pdb_id: event.target.value }))
+                    }
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Ligand name
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={structureForm.ligand_name}
+                      onChange={(event) =>
+                        setStructureForm((current) => ({ ...current, ligand_name: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Ligand code
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={structureForm.ligand_code}
+                      onChange={(event) =>
+                        setStructureForm((current) => ({ ...current, ligand_code: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+              <button
+                className="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                disabled={isSavingStructure || !structureForm.structure_type.trim()}
+                type="submit"
+              >
+                {isSavingStructure ? "Saving..." : "Save structure"}
+              </button>
+            </form>
+
+            <form className="rounded-md border border-slate-200 bg-white p-5" onSubmit={handleCreateKinetic}>
+              <h2 className="text-base font-semibold text-slate-950">Kinetic</h2>
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Substrate
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    list="substrate-options"
+                    value={kineticForm.substrate}
+                    onChange={(event) =>
+                      setKineticForm((current) => ({ ...current, substrate: event.target.value }))
+                    }
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Km
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.km}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, km: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    kcat
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.kcat}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, kcat: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    kcat/Km
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.kcat_km}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, kcat_km: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Unit
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.unit_original}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, unit_original: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Temp
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.assay_temperature}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, assay_temperature: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    pH
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={kineticForm.assay_pH}
+                      onChange={(event) =>
+                        setKineticForm((current) => ({ ...current, assay_pH: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+              <button
+                className="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                disabled={
+                  isSavingKinetic ||
+                  (!kineticForm.km.trim() && !kineticForm.kcat.trim() && !kineticForm.kcat_km.trim())
+                }
+                type="submit"
+              >
+                {isSavingKinetic ? "Saving..." : "Save kinetic"}
+              </button>
+            </form>
+
+            <form className="rounded-md border border-slate-200 bg-white p-5" onSubmit={handleCreateExpression}>
+              <h2 className="text-base font-semibold text-slate-950">Expression</h2>
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Host
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={expressionForm.expression_host}
+                    onChange={(event) =>
+                      setExpressionForm((current) => ({ ...current, expression_host: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Vector
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={expressionForm.vector}
+                    onChange={(event) =>
+                      setExpressionForm((current) => ({ ...current, vector: event.target.value }))
+                    }
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Level
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={expressionForm.expression_level_original}
+                      onChange={(event) =>
+                        setExpressionForm((current) => ({
+                          ...current,
+                          expression_level_original: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Unit
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={expressionForm.unit_original}
+                      onChange={(event) =>
+                        setExpressionForm((current) => ({ ...current, unit_original: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Soluble
+                  <select
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={expressionForm.soluble_expression}
+                    onChange={(event) =>
+                      setExpressionForm((current) => ({ ...current, soluble_expression: event.target.value }))
+                    }
+                  >
+                    <option value="">-</option>
+                    <option value="high">high</option>
+                    <option value="medium">medium</option>
+                    <option value="low">low</option>
+                    <option value="insoluble">insoluble</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Condition substrate
+                  <select
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={expressionForm.substrate_entry_id}
+                    onChange={(event) =>
+                      setExpressionForm((current) => ({ ...current, substrate_entry_id: event.target.value }))
+                    }
+                  >
+                    <option value="">-</option>
+                    {substrateIdOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    Temp
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={expressionForm.assay_temperature}
+                      onChange={(event) =>
+                        setExpressionForm((current) => ({ ...current, assay_temperature: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium text-slate-700">
+                    pH
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                      value={expressionForm.assay_pH}
+                      onChange={(event) =>
+                        setExpressionForm((current) => ({ ...current, assay_pH: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Method
+                  <input
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                    value={expressionForm.method}
+                    onChange={(event) =>
+                      setExpressionForm((current) => ({ ...current, method: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+              <button
+                className="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                disabled={isSavingExpression || !expressionForm.expression_host.trim()}
+                type="submit"
+              >
+                {isSavingExpression ? "Saving..." : "Save expression"}
               </button>
             </form>
           </section>

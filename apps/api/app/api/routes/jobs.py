@@ -3,9 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
-from app.db.models import AnalysisJob, User
+from app.db.models import AnalysisJob, JobStatus, User
 from app.db.session import get_db
 from app.schemas.job import JobResponse
+from worker.jobs import run_rosetta_ddg
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -36,4 +37,30 @@ def get_job(
     )
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    return job
+
+
+@router.post("/{job_id}/retry", response_model=JobResponse)
+def retry_job(
+    job_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    job = db.scalar(
+        select(AnalysisJob).where(AnalysisJob.id == job_id, AnalysisJob.created_by == user.id)
+    )
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    if job.status != JobStatus.FAILED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="only failed jobs can be retried")
+    if job.job_type != "rosetta_ddg":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="retry is not supported for this job type")
+
+    job.status = JobStatus.QUEUED
+    job.error_message = None
+    job.started_at = None
+    job.finished_at = None
+    db.commit()
+    db.refresh(job)
+    run_rosetta_ddg.delay(job.id)
     return job

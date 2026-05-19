@@ -1,0 +1,755 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import {
+  createAnalysisJob,
+  getAnalysisArtifactContent,
+  getAnalysisArtifacts,
+  listJobs,
+  retryJob
+} from "../../../../lib/api";
+import type {
+  AnalysisArtifactContentRecord,
+  AnalysisArtifactRecord,
+  AnalysisJobType
+} from "../../../../lib/types";
+import {
+  buildConservationDownloadJson,
+  filterConservationSites,
+  getConservationSites,
+  getMutationRecommendationCandidates,
+  getRosettaDdgResults,
+  getRosettaDdgRunViews
+} from "./analysis-utils";
+import type {
+  ConservationCategoryFilter,
+  ConservationSiteView,
+  MutationRecommendationCandidateView,
+  RosettaDdgRunView
+} from "./analysis-utils";
+
+const TOKEN_KEY = "iee-copilot-token";
+
+type AnalysisClientProps = {
+  enzymeId: string;
+};
+
+const analysisModules = [
+  {
+    title: "Homolog sequences",
+    artifactType: "homolog_sequences",
+    jobType: "homolog_collection",
+    metric: "identity / coverage",
+    actionLabel: "Run homologs"
+  },
+  {
+    title: "MSA",
+    artifactType: "msa",
+    jobType: "msa",
+    metric: "aligned FASTA",
+    actionLabel: "Run MSA"
+  },
+  {
+    title: "Conservation",
+    artifactType: "conservation_profile",
+    jobType: "conservation_profile",
+    metric: "entropy / WT frequency",
+    actionLabel: "Run conservation"
+  },
+  {
+    title: "Hotspot recommendations",
+    artifactType: "mutation_recommendations",
+    jobType: "mutation_recommendation",
+    metric: "priority score / mutations",
+    actionLabel: "Run recommendations"
+  }
+] satisfies Array<{
+  title: string;
+  artifactType: string;
+  jobType: AnalysisJobType;
+  metric: string;
+  actionLabel: string;
+}>;
+
+export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
+  const router = useRouter();
+  const [token, setToken] = useState<string | null>(null);
+  const [artifacts, setArtifacts] = useState<AnalysisArtifactRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [runningJobType, setRunningJobType] = useState<AnalysisJobType | null>(null);
+  const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
+  const [latestConservationContent, setLatestConservationContent] =
+    useState<AnalysisArtifactContentRecord | null>(null);
+  const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
+  const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
+  const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
+  const [recommendationCandidates, setRecommendationCandidates] = useState<MutationRecommendationCandidateView[]>([]);
+  const [recommendationObjectKey, setRecommendationObjectKey] = useState<string | null>(null);
+  const [rosettaRuns, setRosettaRuns] = useState<RosettaDdgRunView[]>([]);
+  const [rosettaObjectKey, setRosettaObjectKey] = useState<string | null>(null);
+  const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+  const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function loadArtifacts(nextToken: string) {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const nextArtifacts = await getAnalysisArtifacts(enzymeId, nextToken);
+      setArtifacts(nextArtifacts);
+      await loadLatestConservationProfile(nextArtifacts, nextToken);
+      await loadLatestRecommendations(nextArtifacts, nextToken);
+      loadLatestRosettaDdgArtifact(nextArtifacts);
+      await loadRosettaDdgRuns(nextToken);
+    } catch {
+      setError("Unable to load analysis artifacts. Please check the API service and your login.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function loadLatestConservationProfile(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const conservationArtifacts = nextArtifacts.filter(
+      (artifact) => artifact.artifact_type === "conservation_profile"
+    );
+    const latestConservationArtifact = conservationArtifacts[conservationArtifacts.length - 1];
+    if (!latestConservationArtifact) {
+      setConservationSites([]);
+      setLatestConservationContent(null);
+      setConservationObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestConservationArtifact.id, nextToken);
+      setLatestConservationContent(content);
+      setConservationSites(getConservationSites(content));
+      setConservationObjectKey(content.object_key);
+    } catch {
+      setConservationSites([]);
+      setLatestConservationContent(null);
+      setConservationObjectKey(latestConservationArtifact.object_key);
+    }
+  }
+
+  async function loadLatestRecommendations(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const recommendationArtifacts = nextArtifacts.filter(
+      (artifact) => artifact.artifact_type === "mutation_recommendations"
+    );
+    const latestRecommendationArtifact = recommendationArtifacts[recommendationArtifacts.length - 1];
+    if (!latestRecommendationArtifact) {
+      setRecommendationCandidates([]);
+      setRecommendationObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestRecommendationArtifact.id, nextToken);
+      setRecommendationCandidates(getMutationRecommendationCandidates(content));
+      setRecommendationObjectKey(content.object_key);
+    } catch {
+      setRecommendationCandidates([]);
+      setRecommendationObjectKey(latestRecommendationArtifact.object_key);
+    }
+  }
+
+  async function loadRosettaDdgRuns(nextToken: string) {
+    try {
+      const jobs = await listJobs(nextToken);
+      setRosettaRuns(getRosettaDdgRunViews(jobs, enzymeId));
+    } catch {
+      setRosettaRuns([]);
+    }
+  }
+
+  function loadLatestRosettaDdgArtifact(nextArtifacts: AnalysisArtifactRecord[]) {
+    const rosettaArtifacts = nextArtifacts.filter((artifact) => artifact.artifact_type === "rosetta_ddg");
+    const latestRosettaArtifact = rosettaArtifacts[rosettaArtifacts.length - 1];
+    if (!latestRosettaArtifact) {
+      setRosettaObjectKey(null);
+      return;
+    }
+    setRosettaObjectKey(latestRosettaArtifact.object_key);
+  }
+
+  async function runAnalysis(jobType: AnalysisJobType) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setRunningJobType(jobType);
+    try {
+      const job = await createAnalysisJob(enzymeId, token, jobType);
+      setNotice(`${job.job_type} job queued: ${job.id}`);
+      await loadArtifacts(token);
+    } catch {
+      setError("Unable to queue analysis job. Please check that this enzyme has a protein sequence.");
+    } finally {
+      setRunningJobType(null);
+    }
+  }
+
+  async function runRosettaDdg(mutationString: string) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setRunningRosettaMutation(mutationString);
+    try {
+      const job = await createAnalysisJob(enzymeId, token, "rosetta_ddg", {
+        mutation_string: mutationString,
+        source: "hotspot_recommendation"
+      });
+      setNotice(`${job.job_type} job queued for ${mutationString}: ${job.id}`);
+      await loadArtifacts(token);
+    } catch {
+      setError("Unable to queue Rosetta ddG job. Please check that this enzyme has a structure and mutation string.");
+    } finally {
+      setRunningRosettaMutation(null);
+    }
+  }
+
+  async function retryRosettaDdgJob(jobId: string) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setRetryingJobId(jobId);
+    try {
+      const job = await retryJob(jobId, token);
+      setNotice(`${job.job_type} job requeued: ${job.id}`);
+      await loadArtifacts(token);
+    } catch {
+      setError("Unable to retry Rosetta ddG job. Only failed Rosetta jobs can be retried.");
+    } finally {
+      setRetryingJobId(null);
+    }
+  }
+
+  async function viewArtifactContent(artifact: AnalysisArtifactRecord) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setLoadingArtifactId(artifact.id);
+    try {
+      setSelectedContent(await getAnalysisArtifactContent(enzymeId, artifact.id, token));
+    } catch {
+      setError("Unable to load artifact content. This artifact may have been created before preview payloads were enabled.");
+    } finally {
+      setLoadingArtifactId(null);
+    }
+  }
+
+  function downloadLatestConservationProfile() {
+    if (!latestConservationContent) {
+      return;
+    }
+    const payload = buildConservationDownloadJson(latestConservationContent, conservationSites);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `conservation-profile-${enzymeId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  useEffect(() => {
+    const storedToken = window.localStorage.getItem(TOKEN_KEY);
+    if (!storedToken) {
+      router.replace("/login");
+      return;
+    }
+    setToken(storedToken);
+    void loadArtifacts(storedToken);
+  }, [enzymeId, router]);
+
+  const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
+
+  return (
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <header className="border-b border-slate-200 pb-6">
+        <p className="text-sm font-medium text-slate-500">MSA / Conservation</p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-950">Evolutionary analysis</h1>
+            <p className="mt-2 text-sm text-slate-600">Entry id: {enzymeId}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+              disabled={!token || isLoading}
+              onClick={() => token && void loadArtifacts(token)}
+              type="button"
+            >
+              Refresh
+            </button>
+            <Link
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+              href={`/enzymes/${enzymeId}`}
+            >
+              Back to enzyme
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {error ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {notice}
+        </p>
+      ) : null}
+
+      {isLoading ? <p className="mt-6 text-sm text-slate-600">Loading analysis artifacts...</p> : null}
+
+      <section className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        {analysisModules.map((item) => {
+          const moduleArtifacts = artifacts.filter((artifact) => artifact.artifact_type === item.artifactType);
+          const latestArtifact = moduleArtifacts[moduleArtifacts.length - 1];
+          const isRunning = runningJobType === item.jobType;
+          return (
+            <article className="rounded-md border border-slate-200 bg-white p-4" key={item.artifactType}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">{item.title}</h2>
+                  <p className="mt-1 text-sm text-slate-600">{item.metric}</p>
+                </div>
+                <StatusPill value={latestArtifact?.job_status ?? "not_run"} />
+              </div>
+              <dl className="mt-4 grid gap-3">
+                <div>
+                  <dt className="text-xs font-medium uppercase text-slate-500">Artifact</dt>
+                  <dd className="mt-1 break-words font-mono text-sm text-slate-950">{item.artifactType}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase text-slate-500">Latest object</dt>
+                  <dd className="mt-1 break-words font-mono text-xs text-slate-700">
+                    {latestArtifact?.object_key ?? "-"}
+                  </dd>
+                </div>
+              </dl>
+              <button
+                className="mt-4 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!token || Boolean(runningJobType)}
+                onClick={() => void runAnalysis(item.jobType)}
+                type="button"
+              >
+                {isRunning ? "Queueing..." : item.actionLabel}
+              </button>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h2 className="text-base font-semibold text-slate-950">Analysis artifacts</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Type
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Status
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Object key
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Size
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Content
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {artifacts.length > 0 ? (
+                artifacts.map((artifact) => (
+                  <tr key={artifact.id}>
+                    <td className="px-4 py-3 font-mono text-slate-950">{artifact.artifact_type}</td>
+                    <td className="px-4 py-3">
+                      <StatusPill value={artifact.job_status ?? "-"} />
+                    </td>
+                    <td className="max-w-md px-4 py-3">
+                      <span className="break-words font-mono text-xs">{artifact.object_key}</span>
+                    </td>
+                    <td className="px-4 py-3">{artifact.size_bytes ?? "-"}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                        disabled={!token || loadingArtifactId === artifact.id}
+                        onClick={() => void viewArtifactContent(artifact)}
+                        type="button"
+                      >
+                        {loadingArtifactId === artifact.id ? "Loading..." : "View"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
+                    No analysis artifacts
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {selectedContent ? <ArtifactContentPanel content={selectedContent} /> : null}
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Conservation profile</h2>
+              {conservationObjectKey ? (
+                <p className="mt-1 break-words font-mono text-xs text-slate-500">{conservationObjectKey}</p>
+              ) : null}
+              <p className="mt-1 text-xs text-slate-500">
+                Showing {filteredConservationSites.length} of {conservationSites.length} sites
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="conservation-filter">
+                Category
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="conservation-filter"
+                onChange={(event) => setConservationFilter(event.target.value as ConservationCategoryFilter)}
+                value={conservationFilter}
+              >
+                <option value="all">All</option>
+                <option value="highly_conserved">Highly conserved</option>
+                <option value="moderately_conserved">Moderately conserved</option>
+                <option value="variable">Variable</option>
+              </select>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!latestConservationContent}
+                onClick={downloadLatestConservationProfile}
+                type="button"
+              >
+                Download JSON
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Position
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  WT
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Entropy
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  WT frequency
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Category
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {filteredConservationSites.length > 0 ? (
+                filteredConservationSites.map((site) => (
+                  <tr key={`${site.query_position}-${site.wildtype_residue}`}>
+                    <td className="px-4 py-3 font-medium text-slate-950">{site.query_position}</td>
+                    <td className="px-4 py-3 font-mono">{site.wildtype_residue}</td>
+                    <td className="px-4 py-3">{site.shannon_entropy}</td>
+                    <td className="px-4 py-3">{site.wildtype_frequency}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {site.conservation_category}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
+                    {conservationSites.length > 0 ? "No sites match this filter" : "No conservation profile artifact"}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h2 className="text-base font-semibold text-slate-950">Hotspot recommendations</h2>
+          {recommendationObjectKey ? (
+            <p className="mt-1 break-words font-mono text-xs text-slate-500">{recommendationObjectKey}</p>
+          ) : null}
+          <p className="mt-1 text-xs text-slate-500">{recommendationCandidates.length} candidate sites</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Rationale</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {recommendationCandidates.length > 0 ? (
+                recommendationCandidates.map((candidate) => (
+                  <tr key={`${candidate.query_position}-${candidate.wildtype_residue}`}>
+                    <td className="px-4 py-3 font-medium text-slate-950">{candidate.query_position}</td>
+                    <td className="px-4 py-3 font-mono">{candidate.wildtype_residue}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {candidate.conservation_category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{candidate.priority_score}</td>
+                    <td className="px-4 py-3">
+                      {candidate.suggested_mutations.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {candidate.suggested_mutations.map((mutation) => (
+                            <button
+                              className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                              disabled={!token || Boolean(runningRosettaMutation)}
+                              key={mutation}
+                              onClick={() => void runRosettaDdg(mutation)}
+                              type="button"
+                            >
+                              {runningRosettaMutation === mutation ? "Queueing..." : `Run ddG ${mutation}`}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="min-w-80 px-4 py-3 text-xs text-slate-600">{candidate.rationale}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                    No hotspot recommendation artifact
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h2 className="text-base font-semibold text-slate-950">Rosetta ddG jobs</h2>
+          {rosettaObjectKey ? (
+            <p className="mt-1 break-words font-mono text-xs text-slate-500">{rosettaObjectKey}</p>
+          ) : null}
+          <p className="mt-1 text-xs text-slate-500">{rosettaRuns.length} submitted jobs</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Job</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Status</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Runner</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Error</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {rosettaRuns.length > 0 ? (
+                rosettaRuns.map((run) => (
+                  <tr key={run.job_id}>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-950">{run.job_id}</td>
+                    <td className="px-4 py-3"><StatusPill value={run.status} /></td>
+                    <td className="px-4 py-3 font-mono text-slate-950">{run.mutation_string}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.mutation_file}</td>
+                    <td className="px-4 py-3">{run.ddg_kcal_per_mol}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {run.interpretation}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.runner}</td>
+                    <td className="min-w-72 px-4 py-3 text-xs text-slate-600">{run.error_message}</td>
+                    <td className="px-4 py-3">
+                      {run.can_retry ? (
+                        <button
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                          disabled={!token || retryingJobId === run.job_id}
+                          onClick={() => void retryRosettaDdgJob(run.job_id)}
+                          type="button"
+                        >
+                          {retryingJobId === run.job_id ? "Retrying..." : "Retry"}
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={9}>
+                    No Rosetta ddG job
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRecord }) {
+  const sites = getConservationSites(content);
+  const candidates = getMutationRecommendationCandidates(content);
+  const rosettaResults = getRosettaDdgResults(content);
+  return (
+    <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Artifact content</h2>
+        <p className="mt-1 break-words font-mono text-xs text-slate-500">{content.object_key}</p>
+      </div>
+      {rosettaResults.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Structure</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Runner</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {rosettaResults.map((result) => (
+                <tr key={result.mutation_string}>
+                  <td className="px-4 py-3 font-mono text-slate-950">{result.mutation_string}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{result.mutation_file}</td>
+                  <td className="px-4 py-3">{result.ddg_kcal_per_mol}</td>
+                  <td className="px-4 py-3">{result.interpretation}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{result.structure_id}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{result.runner}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : candidates.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {candidates.map((candidate) => (
+                <tr key={`${candidate.query_position}-${candidate.wildtype_residue}`}>
+                  <td className="px-4 py-3 font-medium text-slate-950">{candidate.query_position}</td>
+                  <td className="px-4 py-3 font-mono">{candidate.wildtype_residue}</td>
+                  <td className="px-4 py-3">{candidate.conservation_category}</td>
+                  <td className="px-4 py-3">{candidate.priority_score}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{candidate.suggested_mutations.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : sites.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Entropy</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT frequency</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {sites.map((site) => (
+                <tr key={`${site.query_position}-${site.wildtype_residue}`}>
+                  <td className="px-4 py-3 font-medium text-slate-950">{site.query_position}</td>
+                  <td className="px-4 py-3 font-mono">{site.wildtype_residue}</td>
+                  <td className="px-4 py-3">{site.shannon_entropy}</td>
+                  <td className="px-4 py-3">{site.wildtype_frequency}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                      {site.conservation_category}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs text-slate-800">
+          {content.content_text ?? JSON.stringify(content.content_json, null, 2)}
+        </pre>
+      )}
+    </section>
+  );
+}
+
+function StatusPill({ value }: { value: string }) {
+  return (
+    <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+      {value}
+    </span>
+  );
+}

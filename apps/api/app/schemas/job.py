@@ -20,3 +20,8 @@ class JobResponse(BaseModel):
     finished_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class AnalysisJobCreate(BaseModel):
+    job_type: str
+    parameters_json: dict | None = None

@@ -162,6 +162,30 @@ class AnalysisArtifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SearchCacheRecord(Base):
+    __tablename__ = "search_cache_record"
+    __table_args__ = (
+        UniqueConstraint(
+            "normalized_query",
+            "query_kind",
+            "module",
+            name="uq_search_cache_query_kind_module",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    query: Mapped[str] = mapped_column(String(500))
+    normalized_query: Mapped[str] = mapped_column(String(500), index=True)
+    query_kind: Mapped[str] = mapped_column(String(80))
+    module: Mapped[EnzymeModule | None] = mapped_column(Enum(EnzymeModule))
+    enzyme_entry_id: Mapped[str | None] = mapped_column(ForeignKey("enzyme_entry.id"))
+    payload_json: Mapped[dict | None] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(80), default="local")
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class StructureEntry(Base):
     __tablename__ = "structure_entry"
 
