@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.db.models import AnalysisArtifact, AnalysisJob, JobStatus, ProteinSequence
 from app.db.session import SessionLocal
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
+from app.services.msa import MsaInputSequence, run_mock_mafft
 from app.tasks.celery_app import celery_app
 
 
@@ -116,6 +117,60 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
     return job
 
 
+def finish_msa_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise ValueError(f"analysis job not found: {job_id}")
+    if job.enzyme_entry_id is None:
+        raise ValueError(f"analysis job has no enzyme entry: {job_id}")
+
+    protein_sequence = db.scalar(
+        select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == job.enzyme_entry_id)
+    )
+    if protein_sequence is None:
+        raise ValueError(f"protein sequence not found for enzyme entry: {job.enzyme_entry_id}")
+
+    now = datetime.utcnow()
+    job.status = JobStatus.RUNNING
+    job.started_at = now
+    db.commit()
+
+    query_sequence = protein_sequence.mature_sequence or protein_sequence.sequence
+    alignment = run_mock_mafft(
+        [
+            MsaInputSequence(identifier="query", sequence=query_sequence),
+            *_homolog_inputs_from_job(job),
+        ]
+    )
+    payload_bytes = alignment.to_fasta().encode("utf-8")
+
+    db.add(
+        AnalysisArtifact(
+            project_id=job.project_id,
+            enzyme_entry_id=job.enzyme_entry_id,
+            job_id=job.id,
+            artifact_type="msa",
+            bucket=bucket,
+            object_key=f"analysis-jobs/{job.id}/msa.fasta",
+            checksum=hashlib.sha256(payload_bytes).hexdigest(),
+            content_type="text/x-fasta",
+            size_bytes=len(payload_bytes),
+        )
+    )
+
+    job.status = JobStatus.FINISHED
+    job.finished_at = datetime.utcnow()
+    job.result_summary_json = {
+        "message": "MSA completed",
+        "sequence_count": alignment.sequence_count,
+        "alignment_length": alignment.alignment_length,
+        "artifact_type": "msa",
+    }
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_failed(db: Session, job_id: str, error_message: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -146,6 +201,18 @@ def run_homology_collection(_task, job_id: str) -> str:
     try:
         with SessionLocal() as db:
             job = finish_homology_collection_job(db, job_id, bucket=get_settings().minio_bucket)
+            return job.id
+    except Exception as exc:
+        with SessionLocal() as db:
+            mark_job_failed(db, job_id, str(exc))
+        raise
+
+
+@celery_app.task(bind=True, name="worker.jobs.run_msa")
+def run_msa(_task, job_id: str) -> str:
+    try:
+        with SessionLocal() as db:
+            job = finish_msa_job(db, job_id, bucket=get_settings().minio_bucket)
             return job.id
     except Exception as exc:
         with SessionLocal() as db:
@@ -208,3 +275,16 @@ def _mutate_every_nth_residue(sequence: str, step: int) -> str:
     for index in range(step - 1, len(residues), step):
         residues[index] = "V" if residues[index].upper() != "V" else "A"
     return "".join(residues)
+
+
+def _homolog_inputs_from_job(job: AnalysisJob) -> list[MsaInputSequence]:
+    raw = job.parameters_json or {}
+    homologs = raw.get("homologs", [])
+    return [
+        MsaInputSequence(
+            identifier=str(homolog.get("identifier") or homolog.get("accession") or f"homolog_{index + 1}"),
+            sequence=str(homolog["sequence"]),
+        )
+        for index, homolog in enumerate(homologs)
+        if homolog.get("sequence")
+    ]

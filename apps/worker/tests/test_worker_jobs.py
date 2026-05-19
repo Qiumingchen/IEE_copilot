@@ -11,7 +11,12 @@ from app.db.models import (
     JobStatus,
     ProteinSequence,
 )
-from worker.jobs import finish_homology_collection_job, finish_placeholder_job, mark_job_failed
+from worker.jobs import (
+    finish_homology_collection_job,
+    finish_msa_job,
+    finish_placeholder_job,
+    mark_job_failed,
+)
 
 
 def test_finish_placeholder_job_marks_job_finished_and_creates_artifact():
@@ -96,6 +101,76 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
     assert artifact.bucket == "iee-artifacts"
     assert artifact.object_key == f"analysis-jobs/{job.id}/homolog-sequences.json"
     assert artifact.content_type == "application/json"
+    assert artifact.size_bytes > 0
+    assert artifact.checksum is not None
+
+
+def test_finish_msa_job_creates_msa_artifact_from_target_sequence():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker MSA test mTGase",
+            source="test",
+        )
+        db.add(enzyme)
+        db.flush()
+        enzyme_id = enzyme.id
+        db.add(
+            ProteinSequence(
+                enzyme_entry_id=enzyme_id,
+                sequence="ACDEFGHIKL",
+                mature_sequence="ACDEFGHIKL",
+                source="test",
+                checksum="worker-msa-test-sequence",
+            )
+        )
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme_id,
+            job_type="msa",
+            status=JobStatus.QUEUED,
+            parameters_json={
+                "homologs": [
+                    {"identifier": "homolog_1", "sequence": "ACDEFGHIVL"},
+                    {"identifier": "homolog_2", "sequence": "ACDEYGHIKL"},
+                ]
+            },
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        finish_msa_job(db, job.id, bucket="iee-artifacts")
+
+        db.refresh(job)
+        artifact = db.scalar(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.job_id == job.id,
+                AnalysisArtifact.artifact_type == "msa",
+            )
+        )
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json == {
+        "message": "MSA completed",
+        "sequence_count": 3,
+        "alignment_length": 10,
+        "artifact_type": "msa",
+    }
+    assert artifact is not None
+    assert artifact.enzyme_entry_id == enzyme_id
+    assert artifact.bucket == "iee-artifacts"
+    assert artifact.object_key == f"analysis-jobs/{job.id}/msa.fasta"
+    assert artifact.content_type == "text/x-fasta"
     assert artifact.size_bytes > 0
     assert artifact.checksum is not None
 
