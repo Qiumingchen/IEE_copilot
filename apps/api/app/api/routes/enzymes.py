@@ -19,6 +19,7 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_db
+from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
 from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
@@ -184,7 +185,47 @@ def _create_enzyme_from_uniprot_entry(
                 checksum=hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
             )
         )
+
+    alphafold_id = entry.cross_references.get("AlphaFoldDB")
+    if alphafold_id:
+        alphafold_client = get_alphafold_client()
+        model = alphafold_client.fetch_model_by_uniprot(entry.accession)
+        _create_alphafold_structure(
+            db,
+            enzyme=enzyme,
+            model=model,
+            source=getattr(alphafold_client, "source", "alphafold"),
+        )
     return enzyme
+
+
+def _create_alphafold_structure(
+    db: Session,
+    *,
+    enzyme: EnzymeEntry,
+    model: AlphaFoldModelMetadata,
+    source: str,
+) -> StructureEntry:
+    now = datetime.utcnow()
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme.id,
+        structure_type="alphafold",
+        complex_state="predicted",
+        pdb_id=None,
+        chain_summary={
+            "model_id": model.model_id,
+            "uniprot_id": model.uniprot_id,
+            "structure_url": model.structure_url,
+            "confidence_url": model.confidence_url,
+            "confidence_summary": model.confidence_summary,
+        },
+        ligand_summary={"ligands": []},
+        source=source,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(structure)
+    return structure
 
 
 def _create_enzyme_from_rcsb_metadata(

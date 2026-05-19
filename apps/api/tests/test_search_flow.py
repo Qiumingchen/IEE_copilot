@@ -628,3 +628,87 @@ def test_enzyme_search_fetches_uniprot_accession_when_not_local(client, db_sessi
     assert body["query_kind"] == "uniprot"
     assert body["enzyme"]["uniprot_id"] == "P99999"
     assert body["enzyme"]["name"] == "Fetched UniProt enzyme"
+
+
+def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            assert accession == "P99998"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="AlphaFold linked enzyme",
+                organism="Bacillus testingensis",
+                ec_number=None,
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={"AlphaFoldDB": "AF-P99998-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P99998|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {"AlphaFoldDB": "AF-P99998-F1"}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "alphafold-connector@example.com",
+            "password": "search-password",
+            "display_name": "AlphaFold Connector Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alphafold-connector@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P99998"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enzyme"]["alphafold_id"] == "AF-P99998-F1"
+
+    structure = db_session.scalar(
+        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
+    )
+    assert structure is not None
+    assert structure.structure_type == "alphafold"
+    assert structure.complex_state == "predicted"
+    assert structure.source == "alphafold_mock"
+    assert structure.chain_summary["model_id"] == "AF-P99998-F1"
+    assert structure.chain_summary["confidence_summary"]["mean_plddt"] == 90.0
