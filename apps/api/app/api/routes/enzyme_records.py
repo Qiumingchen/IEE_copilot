@@ -37,6 +37,12 @@ from app.schemas.enzyme_record import (
     SubstrateResponse,
 )
 from app.schemas.job import AnalysisJobCreate, JobResponse
+from app.services.mutations import (
+    MutationParseError,
+    normalize_mutation_string,
+    parse_mutation_string,
+    validate_mutations_against_sequence,
+)
 from worker.jobs import (
     run_conservation_profile,
     run_homology_collection,
@@ -216,8 +222,14 @@ def _analysis_job_parameters(
         ]
     if job_type == "mutation_recommendation":
         parameters["conservation_sites"] = _latest_conservation_sites_for_recommendation(db, enzyme_id)
-    if job_type == "rosetta_ddg" and not parameters.get("mutation_string"):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="mutation_string is required")
+    if job_type == "rosetta_ddg":
+        try:
+            mutations = parse_mutation_string(str(parameters.get("mutation_string") or ""))
+            validate_mutations_against_sequence(mutations, sequence)
+        except MutationParseError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        parameters["mutation_string"] = normalize_mutation_string(mutations)
+        parameters["parsed_mutations"] = [mutation.model_dump() for mutation in mutations]
     return parameters
 
 
@@ -270,6 +282,8 @@ def _artifact_content_from_summary(
     elif artifact.artifact_type == "rosetta_ddg":
         content_json = {
             "mutation_string": summary.get("mutation_string"),
+            "mutation_file": summary.get("mutation_file"),
+            "parsed_mutations": summary.get("parsed_mutations", []),
             "ddg_kcal_per_mol": summary.get("ddg_kcal_per_mol"),
             "interpretation": summary.get("interpretation"),
             "structure_id": summary.get("structure_id"),

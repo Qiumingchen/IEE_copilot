@@ -251,6 +251,50 @@ def test_get_analysis_artifact_content_returns_worker_payload(client, db_session
     assert body["content_json"] is None
 
 
+def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="rosetta_ddg",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "artifact_type": "rosetta_ddg",
+            "mutation_string": "L10A",
+            "mutation_file": "L 10 A",
+            "parsed_mutations": [{"wildtype": "L", "position": 10, "mutant": "A"}],
+            "ddg_kcal_per_mol": -0.6,
+            "interpretation": "stabilizing",
+            "structure_id": "structure-1",
+            "runner": "mock_rosetta_ddg",
+        },
+    )
+    db_session.add(job)
+    db_session.flush()
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=job.id,
+        artifact_type="rosetta_ddg",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{job.id}/rosetta-ddg.json",
+        content_type="application/json",
+        size_bytes=128,
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    response = client.get(
+        f"/enzymes/{enzyme_id}/analysis-artifacts/{artifact.id}/content",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    content_json = response.json()["content_json"]
+    assert content_json["mutation_string"] == "L10A"
+    assert content_json["mutation_file"] == "L 10 A"
+    assert content_json["parsed_mutations"] == [{"wildtype": "L", "position": 10, "mutant": "A"}]
+
+
 def test_create_analysis_job_queues_selected_worker_task(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
@@ -554,6 +598,44 @@ def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, 
     assert body["parameters_json"]["structure_id"] == "structure-1"
     assert body["parameters_json"]["requested_from"] == "enzyme_analysis_page"
     assert enqueued_job_ids == [body["id"]]
+
+
+def test_create_rosetta_ddg_job_rejects_wildtype_mismatch(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="rosetta-ddg-mismatch-sequence",
+        )
+    )
+    db_session.commit()
+
+    class RosettaTask:
+        @staticmethod
+        def delay(job_id):
+            raise AssertionError(f"invalid mutation should not enqueue job {job_id}")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_rosetta_ddg",
+        RosettaTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "rosetta_ddg",
+            "parameters_json": {"mutation_string": "G2A"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "expected G at position 2 but found C" in response.json()["error"]["message"]
 
 
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):

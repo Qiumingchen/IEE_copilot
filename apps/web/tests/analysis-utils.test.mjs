@@ -102,6 +102,7 @@ test("extracts rosetta ddg results from artifact content", () => {
     content_text: null,
     content_json: {
       mutation_string: "L10A",
+      mutation_file: "L 10 A",
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
       structure_id: "structure-1",
@@ -112,6 +113,7 @@ test("extracts rosetta ddg results from artifact content", () => {
   assert.deepEqual(getRosettaDdgResults(content), [
     {
       mutation_string: "L10A",
+      mutation_file: "L 10 A",
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
       structure_id: "structure-1",

@@ -25,6 +25,7 @@ export type MutationRecommendationCandidateView = {
 
 export type RosettaDdgResultView = {
   mutation_string: string;
+  mutation_file: string;
   ddg_kcal_per_mol: number | string;
   interpretation: string;
   structure_id: string;
@@ -108,6 +109,7 @@ export function getRosettaDdgResults(content: AnalysisArtifactContentRecord): Ro
   return [
     {
       mutation_string: mutationString,
+      mutation_file: String(valueOrDash(content.content_json.mutation_file)),
       ddg_kcal_per_mol: valueOrDash(content.content_json.ddg_kcal_per_mol),
       interpretation: String(valueOrDash(content.content_json.interpretation)),
       structure_id: String(valueOrDash(content.content_json.structure_id)),

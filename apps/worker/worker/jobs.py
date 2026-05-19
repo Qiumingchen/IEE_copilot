@@ -10,6 +10,11 @@ from app.db.models import AnalysisArtifact, AnalysisJob, JobStatus, ProteinSeque
 from app.db.session import SessionLocal
 from app.services.conservation import calculate_conservation_profile
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
+from app.services.mutations import (
+    generate_rosetta_mutation_file,
+    normalize_mutation_string,
+    parse_mutation_string,
+)
 from app.services.mutation_recommendation import recommend_mutation_hotspots
 from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence, run_mock_mafft
 from app.tasks.celery_app import celery_app
@@ -303,15 +308,20 @@ def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
     mutation_string = str(parameters.get("mutation_string") or "").strip()
     if not mutation_string:
         raise ValueError("mutation_string is required for Rosetta ddG job")
+    mutations = parse_mutation_string(mutation_string)
+    normalized_mutation_string = normalize_mutation_string(mutations)
+    mutation_file = generate_rosetta_mutation_file(mutations)
 
     now = datetime.utcnow()
     job.status = JobStatus.RUNNING
     job.started_at = now
     db.commit()
 
-    ddg = _mock_ddg_for_mutation(mutation_string)
+    ddg = _mock_ddg_for_mutation(normalized_mutation_string)
     payload = {
-        "mutation_string": mutation_string,
+        "mutation_string": normalized_mutation_string,
+        "mutation_file": mutation_file,
+        "parsed_mutations": [mutation.model_dump() for mutation in mutations],
         "structure_id": parameters.get("structure_id"),
         "ddg_kcal_per_mol": ddg,
         "interpretation": "stabilizing" if ddg < 0 else "destabilizing_or_neutral",

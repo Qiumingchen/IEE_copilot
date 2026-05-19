@@ -575,6 +575,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Structure</th>
@@ -586,6 +587,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 rosettaResults.map((result, index) => (
                   <tr key={`${result.mutation_string}-${index}`}>
                     <td className="px-4 py-3 font-mono text-slate-950">{result.mutation_string}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{result.mutation_file}</td>
                     <td className="px-4 py-3">{result.ddg_kcal_per_mol}</td>
                     <td className="px-4 py-3">
                       <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
@@ -598,7 +600,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
                     No Rosetta ddG artifact
                   </td>
                 </tr>
@@ -627,6 +629,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Structure</th>
@@ -637,6 +640,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
               {rosettaResults.map((result) => (
                 <tr key={result.mutation_string}>
                   <td className="px-4 py-3 font-mono text-slate-950">{result.mutation_string}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{result.mutation_file}</td>
                   <td className="px-4 py-3">{result.ddg_kcal_per_mol}</td>
                   <td className="px-4 py-3">{result.interpretation}</td>
                   <td className="px-4 py-3 font-mono text-xs">{result.structure_id}</td>
