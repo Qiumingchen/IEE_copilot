@@ -14,6 +14,12 @@ import type {
   AnalysisArtifactRecord,
   AnalysisJobType
 } from "../../../../lib/types";
+import {
+  buildConservationDownloadJson,
+  filterConservationSites,
+  getConservationSites
+} from "./analysis-utils";
+import type { ConservationCategoryFilter, ConservationSiteView } from "./analysis-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -51,14 +57,6 @@ const analysisModules = [
   actionLabel: string;
 }>;
 
-type ConservationSiteView = {
-  query_position: number | string;
-  wildtype_residue: string;
-  shannon_entropy: number | string;
-  wildtype_frequency: number | string;
-  conservation_category: string;
-};
-
 export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -66,7 +64,10 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [runningJobType, setRunningJobType] = useState<AnalysisJobType | null>(null);
   const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
+  const [latestConservationContent, setLatestConservationContent] =
+    useState<AnalysisArtifactContentRecord | null>(null);
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
+  const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,16 +97,19 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     const latestConservationArtifact = conservationArtifacts[conservationArtifacts.length - 1];
     if (!latestConservationArtifact) {
       setConservationSites([]);
+      setLatestConservationContent(null);
       setConservationObjectKey(null);
       return;
     }
 
     try {
       const content = await getAnalysisArtifactContent(enzymeId, latestConservationArtifact.id, nextToken);
+      setLatestConservationContent(content);
       setConservationSites(getConservationSites(content));
       setConservationObjectKey(content.object_key);
     } catch {
       setConservationSites([]);
+      setLatestConservationContent(null);
       setConservationObjectKey(latestConservationArtifact.object_key);
     }
   }
@@ -143,6 +147,20 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     }
   }
 
+  function downloadLatestConservationProfile() {
+    if (!latestConservationContent) {
+      return;
+    }
+    const payload = buildConservationDownloadJson(latestConservationContent, conservationSites);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `conservation-profile-${enzymeId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
     if (!storedToken) {
@@ -152,6 +170,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setToken(storedToken);
     void loadArtifacts(storedToken);
   }, [enzymeId, router]);
+
+  const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -298,10 +318,41 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 
       <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="text-base font-semibold text-slate-950">Conservation profile</h2>
-          {conservationObjectKey ? (
-            <p className="mt-1 break-words font-mono text-xs text-slate-500">{conservationObjectKey}</p>
-          ) : null}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Conservation profile</h2>
+              {conservationObjectKey ? (
+                <p className="mt-1 break-words font-mono text-xs text-slate-500">{conservationObjectKey}</p>
+              ) : null}
+              <p className="mt-1 text-xs text-slate-500">
+                Showing {filteredConservationSites.length} of {conservationSites.length} sites
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="conservation-filter">
+                Category
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="conservation-filter"
+                onChange={(event) => setConservationFilter(event.target.value as ConservationCategoryFilter)}
+                value={conservationFilter}
+              >
+                <option value="all">All</option>
+                <option value="highly_conserved">Highly conserved</option>
+                <option value="moderately_conserved">Moderately conserved</option>
+                <option value="variable">Variable</option>
+              </select>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!latestConservationContent}
+                onClick={downloadLatestConservationProfile}
+                type="button"
+              >
+                Download JSON
+              </button>
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -325,8 +376,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {conservationSites.length > 0 ? (
-                conservationSites.map((site) => (
+              {filteredConservationSites.length > 0 ? (
+                filteredConservationSites.map((site) => (
                   <tr key={`${site.query_position}-${site.wildtype_residue}`}>
                     <td className="px-4 py-3 font-medium text-slate-950">{site.query_position}</td>
                     <td className="px-4 py-3 font-mono">{site.wildtype_residue}</td>
@@ -342,7 +393,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               ) : (
                 <tr>
                   <td className="px-4 py-4 text-slate-500" colSpan={5}>
-                    No conservation profile artifact
+                    {conservationSites.length > 0 ? "No sites match this filter" : "No conservation profile artifact"}
                   </td>
                 </tr>
               )}
@@ -406,27 +457,4 @@ function StatusPill({ value }: { value: string }) {
       {value}
     </span>
   );
-}
-
-function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
-  const rawSites = content.content_json?.sites;
-  if (!Array.isArray(rawSites)) {
-    return [];
-  }
-  return rawSites
-    .filter((site): site is Record<string, unknown> => typeof site === "object" && site !== null)
-    .map((site) => ({
-      query_position: valueOrDash(site.query_position),
-      wildtype_residue: String(valueOrDash(site.wildtype_residue)),
-      shannon_entropy: valueOrDash(site.shannon_entropy),
-      wildtype_frequency: valueOrDash(site.wildtype_frequency),
-      conservation_category: String(valueOrDash(site.conservation_category))
-    }));
-}
-
-function valueOrDash(value: unknown): string | number {
-  if (typeof value === "number" || typeof value === "string") {
-    return value;
-  }
-  return "-";
 }
