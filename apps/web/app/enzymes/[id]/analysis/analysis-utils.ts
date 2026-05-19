@@ -41,6 +41,7 @@ export type RosettaDdgRunView = {
   interpretation: string;
   runner: string;
   error_message: string;
+  can_retry: boolean;
   created_at: string;
   finished_at: string | null;
 };
@@ -150,6 +151,7 @@ export function getRosettaDdgRunViews(
         interpretation: String(valueOrDash(summary.interpretation)),
         runner: String(valueOrDash(summary.runner)),
         error_message: String(valueOrDash(job.error_message)),
+        can_retry: job.status === "failed",
         created_at: job.created_at,
         finished_at: job.finished_at
       };

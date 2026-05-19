@@ -176,6 +176,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       interpretation: "-",
       runner: "-",
       error_message: "expected G at position 2 but found C",
+      can_retry: true,
       created_at: "2026-05-19T10:00:00",
       finished_at: "2026-05-19T10:00:05"
     },
@@ -188,6 +189,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       interpretation: "stabilizing",
       runner: "mock_rosetta_ddg",
       error_message: "-",
+      can_retry: false,
       created_at: "2026-05-19T10:01:00",
       finished_at: "2026-05-19T10:01:05"
     }

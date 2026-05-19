@@ -8,7 +8,8 @@ import {
   createAnalysisJob,
   getAnalysisArtifactContent,
   getAnalysisArtifacts,
-  listJobs
+  listJobs,
+  retryJob
 } from "../../../../lib/api";
 import type {
   AnalysisArtifactContentRecord,
@@ -90,6 +91,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [rosettaRuns, setRosettaRuns] = useState<RosettaDdgRunView[]>([]);
   const [rosettaObjectKey, setRosettaObjectKey] = useState<string | null>(null);
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -217,6 +219,24 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       setError("Unable to queue Rosetta ddG job. Please check that this enzyme has a structure and mutation string.");
     } finally {
       setRunningRosettaMutation(null);
+    }
+  }
+
+  async function retryRosettaDdgJob(jobId: string) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setRetryingJobId(jobId);
+    try {
+      const job = await retryJob(jobId, token);
+      setNotice(`${job.job_type} job requeued: ${job.id}`);
+      await loadArtifacts(token);
+    } catch {
+      setError("Unable to retry Rosetta ddG job. Only failed Rosetta jobs can be retried.");
+    } finally {
+      setRetryingJobId(null);
     }
   }
 
@@ -576,6 +596,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Runner</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Error</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -594,11 +615,25 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{run.runner}</td>
                     <td className="min-w-72 px-4 py-3 text-xs text-slate-600">{run.error_message}</td>
+                    <td className="px-4 py-3">
+                      {run.can_retry ? (
+                        <button
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                          disabled={!token || retryingJobId === run.job_id}
+                          onClick={() => void retryRosettaDdgJob(run.job_id)}
+                          type="button"
+                        >
+                          {retryingJobId === run.job_id ? "Retrying..." : "Retry"}
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={8}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={9}>
                     No Rosetta ddG job
                   </td>
                 </tr>

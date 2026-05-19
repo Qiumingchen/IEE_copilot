@@ -123,6 +123,12 @@ export async function listJobs(token: string): Promise<JobResponse[]> {
   return fetchWithToken<JobResponse[]>("/jobs", token);
 }
 
+export async function retryJob(jobId: string, token: string): Promise<JobResponse> {
+  return fetchWithToken<JobResponse>(`/jobs/${jobId}/retry`, token, {
+    method: "POST"
+  });
+}
+
 export async function createSubstrate(
   enzymeId: string,
   token: string,
