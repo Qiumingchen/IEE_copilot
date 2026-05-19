@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import AnalysisArtifact, AnalysisJob, JobStatus, ProteinSequence
 from app.db.session import SessionLocal
+from app.services.conservation import calculate_conservation_profile
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
-from app.services.msa import MsaInputSequence, run_mock_mafft
+from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence, run_mock_mafft
 from app.tasks.celery_app import celery_app
 
 
@@ -171,6 +172,63 @@ def finish_msa_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
     return job
 
 
+def finish_conservation_profile_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise ValueError(f"analysis job not found: {job_id}")
+    if job.enzyme_entry_id is None:
+        raise ValueError(f"analysis job has no enzyme entry: {job_id}")
+
+    alignment = _alignment_from_job(job)
+    now = datetime.utcnow()
+    job.status = JobStatus.RUNNING
+    job.started_at = now
+    db.commit()
+
+    profile = calculate_conservation_profile(alignment, query_identifier="query")
+    payload = {
+        "sequence_count": profile.sequence_count,
+        "sites": [
+            {
+                "query_position": site.query_position,
+                "alignment_column": site.alignment_column,
+                "wildtype_residue": site.wildtype_residue,
+                "shannon_entropy": site.shannon_entropy,
+                "wildtype_frequency": site.wildtype_frequency,
+                "conservation_category": site.conservation_category,
+            }
+            for site in profile.sites
+        ],
+    }
+    payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+
+    db.add(
+        AnalysisArtifact(
+            project_id=job.project_id,
+            enzyme_entry_id=job.enzyme_entry_id,
+            job_id=job.id,
+            artifact_type="conservation_profile",
+            bucket=bucket,
+            object_key=f"analysis-jobs/{job.id}/conservation-profile.json",
+            checksum=hashlib.sha256(payload_bytes).hexdigest(),
+            content_type="application/json",
+            size_bytes=len(payload_bytes),
+        )
+    )
+
+    job.status = JobStatus.FINISHED
+    job.finished_at = datetime.utcnow()
+    job.result_summary_json = {
+        "message": "conservation profile completed",
+        "site_count": len(profile.sites),
+        "sequence_count": profile.sequence_count,
+        "artifact_type": "conservation_profile",
+    }
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_failed(db: Session, job_id: str, error_message: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -213,6 +271,18 @@ def run_msa(_task, job_id: str) -> str:
     try:
         with SessionLocal() as db:
             job = finish_msa_job(db, job_id, bucket=get_settings().minio_bucket)
+            return job.id
+    except Exception as exc:
+        with SessionLocal() as db:
+            mark_job_failed(db, job_id, str(exc))
+        raise
+
+
+@celery_app.task(bind=True, name="worker.jobs.run_conservation_profile")
+def run_conservation_profile(_task, job_id: str) -> str:
+    try:
+        with SessionLocal() as db:
+            job = finish_conservation_profile_job(db, job_id, bucket=get_settings().minio_bucket)
             return job.id
     except Exception as exc:
         with SessionLocal() as db:
@@ -288,3 +358,18 @@ def _homolog_inputs_from_job(job: AnalysisJob) -> list[MsaInputSequence]:
         for index, homolog in enumerate(homologs)
         if homolog.get("sequence")
     ]
+
+
+def _alignment_from_job(job: AnalysisJob) -> MsaAlignment:
+    raw = job.parameters_json or {}
+    records = raw.get("aligned_records", [])
+    return MsaAlignment(
+        records=[
+            MsaAlignedRecord(
+                identifier=str(record["identifier"]),
+                aligned_sequence=str(record["aligned_sequence"]),
+            )
+            for record in records
+            if record.get("identifier") and record.get("aligned_sequence")
+        ]
+    )

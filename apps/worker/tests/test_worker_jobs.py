@@ -12,6 +12,7 @@ from app.db.models import (
     ProteinSequence,
 )
 from worker.jobs import (
+    finish_conservation_profile_job,
     finish_homology_collection_job,
     finish_msa_job,
     finish_placeholder_job,
@@ -171,6 +172,78 @@ def test_finish_msa_job_creates_msa_artifact_from_target_sequence():
     assert artifact.bucket == "iee-artifacts"
     assert artifact.object_key == f"analysis-jobs/{job.id}/msa.fasta"
     assert artifact.content_type == "text/x-fasta"
+    assert artifact.size_bytes > 0
+    assert artifact.checksum is not None
+
+
+def test_finish_conservation_profile_job_creates_conservation_artifact():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker conservation test mTGase",
+            source="test",
+        )
+        db.add(enzyme)
+        db.flush()
+        enzyme_id = enzyme.id
+        db.add(
+            ProteinSequence(
+                enzyme_entry_id=enzyme_id,
+                sequence="ACD",
+                mature_sequence="ACD",
+                source="test",
+                checksum="worker-conservation-test-sequence",
+            )
+        )
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme_id,
+            job_type="conservation_profile",
+            status=JobStatus.QUEUED,
+            parameters_json={
+                "aligned_records": [
+                    {"identifier": "query", "aligned_sequence": "ACD"},
+                    {"identifier": "homolog_1", "aligned_sequence": "ACD"},
+                    {"identifier": "homolog_2", "aligned_sequence": "ACE"},
+                    {"identifier": "homolog_3", "aligned_sequence": "A-D"},
+                ]
+            },
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        finish_conservation_profile_job(db, job.id, bucket="iee-artifacts")
+
+        db.refresh(job)
+        artifact = db.scalar(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.job_id == job.id,
+                AnalysisArtifact.artifact_type == "conservation_profile",
+            )
+        )
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json == {
+        "message": "conservation profile completed",
+        "site_count": 3,
+        "sequence_count": 4,
+        "artifact_type": "conservation_profile",
+    }
+    assert artifact is not None
+    assert artifact.enzyme_entry_id == enzyme_id
+    assert artifact.bucket == "iee-artifacts"
+    assert artifact.object_key == f"analysis-jobs/{job.id}/conservation-profile.json"
+    assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
     assert artifact.checksum is not None
 
