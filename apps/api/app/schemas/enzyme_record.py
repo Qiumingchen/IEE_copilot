@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -158,3 +159,20 @@ class ExpressionRecordResponse(BaseModel):
     curation_status: CurationStatus
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class AnalysisArtifactResponse(BaseModel):
+    id: str
+    enzyme_entry_id: str | None = None
+    job_id: str | None = None
+    job_status: str | None = None
+    artifact_type: str
+    bucket: str
+    object_key: str
+    checksum: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    source: str
+    visibility: str
+    created_at: datetime
+    result_summary_json: dict[str, Any] | None = None

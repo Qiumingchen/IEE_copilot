@@ -1,6 +1,14 @@
 from sqlalchemy import select
 
-from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule
+from app.db.models import (
+    AnalysisArtifact,
+    AnalysisJob,
+    EnzymeEntry,
+    EnzymeFamily,
+    EnzymeModule,
+    JobStatus,
+    ProteinSequence,
+)
 
 
 def _auth_headers(client) -> dict[str, str]:
@@ -147,6 +155,119 @@ def test_enzyme_domain_records_require_authentication(client, db_session):
     response = client.get(f"/enzymes/{enzyme_id}/properties")
 
     assert response.status_code == 401
+
+
+def test_list_analysis_artifacts_returns_epic_four_artifacts_with_job_status(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="msa",
+        status=JobStatus.FINISHED,
+        result_summary_json={"sequence_count": 3},
+    )
+    db_session.add(job)
+    db_session.flush()
+    db_session.add_all(
+        [
+            AnalysisArtifact(
+                enzyme_entry_id=enzyme_id,
+                job_id=job.id,
+                artifact_type="homolog_sequences",
+                bucket="iee-artifacts",
+                object_key=f"analysis-jobs/{job.id}/homolog-sequences.json",
+                content_type="application/json",
+                size_bytes=128,
+            ),
+            AnalysisArtifact(
+                enzyme_entry_id=enzyme_id,
+                job_id=job.id,
+                artifact_type="msa",
+                bucket="iee-artifacts",
+                object_key=f"analysis-jobs/{job.id}/msa.fasta",
+                content_type="text/x-fasta",
+                size_bytes=256,
+            ),
+            AnalysisArtifact(
+                enzyme_entry_id=enzyme_id,
+                job_id=job.id,
+                artifact_type="family_profile_summary",
+                bucket="iee-artifacts",
+                object_key=f"analysis-jobs/{job.id}/family-profile-summary.json",
+                content_type="application/json",
+                size_bytes=64,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(f"/enzymes/{enzyme_id}/analysis-artifacts", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["artifact_type"] for item in body] == ["homolog_sequences", "msa"]
+    assert body[0]["job_status"] == "finished"
+    assert body[0]["result_summary_json"] == {"sequence_count": 3}
+    assert body[1]["object_key"].endswith("/msa.fasta")
+
+
+def test_create_analysis_job_queues_selected_worker_task(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKLMNPQRSTVWY",
+            mature_sequence="ACDEFGHIKLMNPQRSTVWY",
+            source="test",
+            checksum="analysis-job-sequence",
+        )
+    )
+    db_session.commit()
+    enqueued_job_ids = []
+
+    class MsaTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_msa",
+        MsaTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={"job_type": "msa"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["enzyme_entry_id"] == enzyme_id
+    assert body["job_type"] == "msa"
+    assert body["status"] == "queued"
+    assert body["parameters_json"]["requested_from"] == "enzyme_analysis_page"
+    assert enqueued_job_ids == [body["id"]]
+
+    job = db_session.get(AnalysisJob, body["id"])
+    assert job is not None
+    assert job.created_by is not None
+
+
+def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={"job_type": "mmpbsa"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "unsupported analysis job type"
 
 
 def test_create_enzyme_domain_record_returns_404_for_missing_enzyme(client, db_session):

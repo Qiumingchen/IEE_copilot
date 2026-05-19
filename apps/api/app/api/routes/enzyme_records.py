@@ -4,18 +4,23 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
 from app.db.models import (
+    AnalysisArtifact,
+    AnalysisJob,
     EnzymeEntry,
     ExperimentCondition,
     ExpressionRecord,
     KineticRecord,
     LigandEntry,
+    JobStatus,
     PropertyRecord,
+    ProteinSequence,
     StructureEntry,
     SubstrateEntry,
     User,
 )
 from app.db.session import get_db
 from app.schemas.enzyme_record import (
+    AnalysisArtifactResponse,
     ExperimentConditionCreate,
     ExperimentConditionResponse,
     ExpressionRecordCreate,
@@ -30,9 +35,21 @@ from app.schemas.enzyme_record import (
     SubstrateCreate,
     SubstrateResponse,
 )
+from app.schemas.job import AnalysisJobCreate, JobResponse
+from worker.jobs import run_conservation_profile, run_homology_collection, run_msa
 
 
 router = APIRouter(prefix="/enzymes", tags=["enzyme records"])
+
+ANALYSIS_ARTIFACT_TYPES = {
+    "homolog_sequences",
+    "msa",
+    "multiple_sequence_alignment",
+    "conservation",
+    "conservation_profile",
+}
+
+ANALYSIS_JOB_TYPES = {"homolog_collection", "msa", "conservation_profile"}
 
 
 def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
@@ -40,6 +57,40 @@ def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
     if enzyme is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
     return enzyme
+
+
+def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
+    protein_sequence = db.scalar(
+        select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme_id)
+    )
+    if protein_sequence is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="protein sequence not found for analysis job",
+        )
+    return protein_sequence.mature_sequence or protein_sequence.sequence
+
+
+def _analysis_job_parameters(job_type: str, sequence: str) -> dict:
+    parameters = {"requested_from": "enzyme_analysis_page"}
+    if job_type == "conservation_profile":
+        parameters["aligned_records"] = [
+            {"identifier": "query", "aligned_sequence": sequence},
+        ]
+    return parameters
+
+
+def _enqueue_analysis_job(job_type: str, job_id: str) -> None:
+    if job_type == "homolog_collection":
+        run_homology_collection.delay(job_id)
+        return
+    if job_type == "msa":
+        run_msa.delay(job_id)
+        return
+    if job_type == "conservation_profile":
+        run_conservation_profile.delay(job_id)
+        return
+    raise ValueError(f"unsupported analysis job type: {job_type}")
 
 
 def _validate_substrate(db: Session, enzyme: EnzymeEntry, substrate_entry_id: str | None) -> None:
@@ -376,3 +427,66 @@ def create_expression(
     if condition is not None:
         db.refresh(condition)
     return _expression_response(expression, condition)
+
+
+@router.post("/{enzyme_id}/analysis-jobs", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
+def create_analysis_job(
+    enzyme_id: str,
+    request: AnalysisJobCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    enzyme = _get_enzyme(db, enzyme_id)
+    if request.job_type not in ANALYSIS_JOB_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported analysis job type")
+
+    sequence = _get_engineering_sequence(db, enzyme.id)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme.id,
+        job_type=request.job_type,
+        status=JobStatus.QUEUED,
+        parameters_json=_analysis_job_parameters(request.job_type, sequence),
+        created_by=user.id,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    _enqueue_analysis_job(job.job_type, job.id)
+    return job
+
+
+@router.get("/{enzyme_id}/analysis-artifacts", response_model=list[AnalysisArtifactResponse])
+def list_analysis_artifacts(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[AnalysisArtifactResponse]:
+    _get_enzyme(db, enzyme_id)
+    rows = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .outerjoin(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type.in_(ANALYSIS_ARTIFACT_TYPES),
+        )
+        .order_by(AnalysisArtifact.created_at)
+    ).all()
+    return [
+        AnalysisArtifactResponse(
+            id=artifact.id,
+            enzyme_entry_id=artifact.enzyme_entry_id,
+            job_id=artifact.job_id,
+            job_status=job.status.value if job is not None else None,
+            artifact_type=artifact.artifact_type,
+            bucket=artifact.bucket,
+            object_key=artifact.object_key,
+            checksum=artifact.checksum,
+            content_type=artifact.content_type,
+            size_bytes=artifact.size_bytes,
+            source=artifact.source,
+            visibility=artifact.visibility.value,
+            created_at=artifact.created_at,
+            result_summary_json=job.result_summary_json if job is not None else None,
+        )
+        for artifact, job in rows
+    ]

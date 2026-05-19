@@ -1,7 +1,10 @@
 import type {
+  AnalysisArtifactRecord,
+  AnalysisJobType,
   EnzymeRecordBundle,
   EnzymeSummary,
   ExpressionRecord,
+  JobResponse,
   KineticRecord,
   PropertyRecord,
   SearchResponse,
@@ -80,6 +83,24 @@ export async function getEnzymeRecordBundle(
   ]);
 
   return { enzyme, substrates, structures, properties, kinetics, expression };
+}
+
+export async function getAnalysisArtifacts(
+  enzymeId: string,
+  token: string
+): Promise<AnalysisArtifactRecord[]> {
+  return fetchWithToken<AnalysisArtifactRecord[]>(`/enzymes/${enzymeId}/analysis-artifacts`, token);
+}
+
+export async function createAnalysisJob(
+  enzymeId: string,
+  token: string,
+  jobType: AnalysisJobType
+): Promise<JobResponse> {
+  return fetchWithToken<JobResponse>(`/enzymes/${enzymeId}/analysis-jobs`, token, {
+    method: "POST",
+    body: JSON.stringify({ job_type: jobType })
+  });
 }
 
 export async function createSubstrate(

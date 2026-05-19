@@ -38,6 +38,25 @@ export type JobResponse = {
   finished_at: string | null;
 };
 
+export type AnalysisArtifactRecord = {
+  id: string;
+  enzyme_entry_id: string | null;
+  job_id: string | null;
+  job_status: string | null;
+  artifact_type: string;
+  bucket: string;
+  object_key: string;
+  checksum: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  source: string;
+  visibility: string;
+  created_at: string;
+  result_summary_json: Record<string, unknown> | null;
+};
+
+export type AnalysisJobType = "homolog_collection" | "msa" | "conservation_profile";
+
 export type SubstrateRecord = {
   id: string;
   enzyme_family_id: string | null;
