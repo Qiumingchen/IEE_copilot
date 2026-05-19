@@ -51,30 +51,6 @@ const analysisModules = [
   actionLabel: string;
 }>;
 
-const conservationPreview = [
-  {
-    position: "1",
-    residue: "A",
-    entropy: "0.000",
-    frequency: "1.00",
-    category: "highly_conserved"
-  },
-  {
-    position: "2",
-    residue: "C",
-    entropy: "0.811",
-    frequency: "0.75",
-    category: "moderately_conserved"
-  },
-  {
-    position: "3",
-    residue: "D",
-    entropy: "0.811",
-    frequency: "0.75",
-    category: "moderately_conserved"
-  }
-];
-
 type ConservationSiteView = {
   query_position: number | string;
   wildtype_residue: string;
@@ -90,6 +66,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [runningJobType, setRunningJobType] = useState<AnalysisJobType | null>(null);
   const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
+  const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
+  const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -98,11 +76,37 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setError(null);
     setIsLoading(true);
     try {
-      setArtifacts(await getAnalysisArtifacts(enzymeId, nextToken));
+      const nextArtifacts = await getAnalysisArtifacts(enzymeId, nextToken);
+      setArtifacts(nextArtifacts);
+      await loadLatestConservationProfile(nextArtifacts, nextToken);
     } catch {
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadLatestConservationProfile(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const conservationArtifacts = nextArtifacts.filter(
+      (artifact) => artifact.artifact_type === "conservation_profile"
+    );
+    const latestConservationArtifact = conservationArtifacts[conservationArtifacts.length - 1];
+    if (!latestConservationArtifact) {
+      setConservationSites([]);
+      setConservationObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestConservationArtifact.id, nextToken);
+      setConservationSites(getConservationSites(content));
+      setConservationObjectKey(content.object_key);
+    } catch {
+      setConservationSites([]);
+      setConservationObjectKey(latestConservationArtifact.object_key);
     }
   }
 
@@ -295,6 +299,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <h2 className="text-base font-semibold text-slate-950">Conservation profile</h2>
+          {conservationObjectKey ? (
+            <p className="mt-1 break-words font-mono text-xs text-slate-500">{conservationObjectKey}</p>
+          ) : null}
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -318,19 +325,27 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {conservationPreview.map((site) => (
-                <tr key={site.position}>
-                  <td className="px-4 py-3 font-medium text-slate-950">{site.position}</td>
-                  <td className="px-4 py-3 font-mono">{site.residue}</td>
-                  <td className="px-4 py-3">{site.entropy}</td>
-                  <td className="px-4 py-3">{site.frequency}</td>
-                  <td className="px-4 py-3">
-                    <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-                      {site.category}
-                    </span>
+              {conservationSites.length > 0 ? (
+                conservationSites.map((site) => (
+                  <tr key={`${site.query_position}-${site.wildtype_residue}`}>
+                    <td className="px-4 py-3 font-medium text-slate-950">{site.query_position}</td>
+                    <td className="px-4 py-3 font-mono">{site.wildtype_residue}</td>
+                    <td className="px-4 py-3">{site.shannon_entropy}</td>
+                    <td className="px-4 py-3">{site.wildtype_frequency}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {site.conservation_category}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
+                    No conservation profile artifact
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
