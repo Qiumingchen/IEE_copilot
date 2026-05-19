@@ -176,3 +176,12 @@ class AnalysisArtifactResponse(BaseModel):
     visibility: str
     created_at: datetime
     result_summary_json: dict[str, Any] | None = None
+
+
+class AnalysisArtifactContentResponse(BaseModel):
+    artifact_id: str
+    artifact_type: str
+    content_type: str | None = None
+    object_key: str
+    content_text: str | None = None
+    content_json: dict[str, Any] | None = None

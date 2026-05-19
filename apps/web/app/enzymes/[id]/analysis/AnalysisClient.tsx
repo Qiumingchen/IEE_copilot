@@ -4,8 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { createAnalysisJob, getAnalysisArtifacts } from "../../../../lib/api";
-import type { AnalysisArtifactRecord, AnalysisJobType } from "../../../../lib/types";
+import {
+  createAnalysisJob,
+  getAnalysisArtifactContent,
+  getAnalysisArtifacts
+} from "../../../../lib/api";
+import type {
+  AnalysisArtifactContentRecord,
+  AnalysisArtifactRecord,
+  AnalysisJobType
+} from "../../../../lib/types";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -67,12 +75,22 @@ const conservationPreview = [
   }
 ];
 
+type ConservationSiteView = {
+  query_position: number | string;
+  wildtype_residue: string;
+  shannon_entropy: number | string;
+  wildtype_frequency: number | string;
+  conservation_category: string;
+};
+
 export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<AnalysisArtifactRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [runningJobType, setRunningJobType] = useState<AnalysisJobType | null>(null);
+  const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
+  const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -103,6 +121,21 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       setError("Unable to queue analysis job. Please check that this enzyme has a protein sequence.");
     } finally {
       setRunningJobType(null);
+    }
+  }
+
+  async function viewArtifactContent(artifact: AnalysisArtifactRecord) {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setLoadingArtifactId(artifact.id);
+    try {
+      setSelectedContent(await getAnalysisArtifactContent(enzymeId, artifact.id, token));
+    } catch {
+      setError("Unable to load artifact content. This artifact may have been created before preview payloads were enabled.");
+    } finally {
+      setLoadingArtifactId(null);
     }
   }
 
@@ -216,6 +249,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
                   Size
                 </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Content
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -230,11 +266,21 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                       <span className="break-words font-mono text-xs">{artifact.object_key}</span>
                     </td>
                     <td className="px-4 py-3">{artifact.size_bytes ?? "-"}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                        disabled={!token || loadingArtifactId === artifact.id}
+                        onClick={() => void viewArtifactContent(artifact)}
+                        type="button"
+                      >
+                        {loadingArtifactId === artifact.id ? "Loading..." : "View"}
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={4}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
                     No analysis artifacts
                   </td>
                 </tr>
@@ -243,6 +289,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
           </table>
         </div>
       </section>
+
+      {selectedContent ? <ArtifactContentPanel content={selectedContent} /> : null}
 
       <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
@@ -291,10 +339,79 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   );
 }
 
+function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRecord }) {
+  const sites = getConservationSites(content);
+  return (
+    <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Artifact content</h2>
+        <p className="mt-1 break-words font-mono text-xs text-slate-500">{content.object_key}</p>
+      </div>
+      {sites.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Position</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Entropy</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT frequency</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {sites.map((site) => (
+                <tr key={`${site.query_position}-${site.wildtype_residue}`}>
+                  <td className="px-4 py-3 font-medium text-slate-950">{site.query_position}</td>
+                  <td className="px-4 py-3 font-mono">{site.wildtype_residue}</td>
+                  <td className="px-4 py-3">{site.shannon_entropy}</td>
+                  <td className="px-4 py-3">{site.wildtype_frequency}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                      {site.conservation_category}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs text-slate-800">
+          {content.content_text ?? JSON.stringify(content.content_json, null, 2)}
+        </pre>
+      )}
+    </section>
+  );
+}
+
 function StatusPill({ value }: { value: string }) {
   return (
     <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
       {value}
     </span>
   );
+}
+
+function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
+  const rawSites = content.content_json?.sites;
+  if (!Array.isArray(rawSites)) {
+    return [];
+  }
+  return rawSites
+    .filter((site): site is Record<string, unknown> => typeof site === "object" && site !== null)
+    .map((site) => ({
+      query_position: valueOrDash(site.query_position),
+      wildtype_residue: String(valueOrDash(site.wildtype_residue)),
+      shannon_entropy: valueOrDash(site.shannon_entropy),
+      wildtype_frequency: valueOrDash(site.wildtype_frequency),
+      conservation_category: String(valueOrDash(site.conservation_category))
+    }));
+}
+
+function valueOrDash(value: unknown): string | number {
+  if (typeof value === "number" || typeof value === "string") {
+    return value;
+  }
+  return "-";
 }

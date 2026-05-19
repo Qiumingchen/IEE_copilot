@@ -92,11 +92,13 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
         )
 
     assert job.status == JobStatus.FINISHED
-    assert job.result_summary_json == {
-        "message": "homolog collection completed",
-        "homolog_count": 2,
-        "artifact_type": "homolog_sequences",
-    }
+    assert job.result_summary_json["message"] == "homolog collection completed"
+    assert job.result_summary_json["homolog_count"] == 2
+    assert job.result_summary_json["artifact_type"] == "homolog_sequences"
+    assert [homolog["accession"] for homolog in job.result_summary_json["homologs"]] == [
+        "MOCK_HOMOLOG_90",
+        "MOCK_HOMOLOG_80",
+    ]
     assert artifact is not None
     assert artifact.enzyme_entry_id == enzyme_id
     assert artifact.bucket == "iee-artifacts"
@@ -166,6 +168,7 @@ def test_finish_msa_job_creates_msa_artifact_from_target_sequence():
         "sequence_count": 3,
         "alignment_length": 10,
         "artifact_type": "msa",
+        "msa_fasta": ">query\nACDEFGHIKL\n>homolog_1\nACDEFGHIVL\n>homolog_2\nACDEYGHIKL\n",
     }
     assert artifact is not None
     assert artifact.enzyme_entry_id == enzyme_id
@@ -238,6 +241,32 @@ def test_finish_conservation_profile_job_creates_conservation_artifact():
         "site_count": 3,
         "sequence_count": 4,
         "artifact_type": "conservation_profile",
+        "sites": [
+            {
+                "query_position": 1,
+                "alignment_column": 1,
+                "wildtype_residue": "A",
+                "shannon_entropy": 0.0,
+                "wildtype_frequency": 1.0,
+                "conservation_category": "highly_conserved",
+            },
+            {
+                "query_position": 2,
+                "alignment_column": 2,
+                "wildtype_residue": "C",
+                "shannon_entropy": 0.811,
+                "wildtype_frequency": 0.75,
+                "conservation_category": "moderately_conserved",
+            },
+            {
+                "query_position": 3,
+                "alignment_column": 3,
+                "wildtype_residue": "D",
+                "shannon_entropy": 0.811,
+                "wildtype_frequency": 0.75,
+                "conservation_category": "moderately_conserved",
+            },
+        ],
     }
     assert artifact is not None
     assert artifact.enzyme_entry_id == enzyme_id

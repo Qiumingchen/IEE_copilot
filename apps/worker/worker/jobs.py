@@ -112,6 +112,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         "message": "homolog collection completed",
         "homolog_count": len(homologs),
         "artifact_type": "homolog_sequences",
+        "homologs": payload["homologs"],
     }
     db.commit()
     db.refresh(job)
@@ -166,6 +167,7 @@ def finish_msa_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
         "sequence_count": alignment.sequence_count,
         "alignment_length": alignment.alignment_length,
         "artifact_type": "msa",
+        "msa_fasta": alignment.to_fasta(),
     }
     db.commit()
     db.refresh(job)
@@ -223,6 +225,17 @@ def finish_conservation_profile_job(db: Session, job_id: str, bucket: str) -> An
         "site_count": len(profile.sites),
         "sequence_count": profile.sequence_count,
         "artifact_type": "conservation_profile",
+        "sites": [
+            {
+                "query_position": site.query_position,
+                "alignment_column": site.alignment_column,
+                "wildtype_residue": site.wildtype_residue,
+                "shannon_entropy": round(site.shannon_entropy, 3),
+                "wildtype_frequency": round(site.wildtype_frequency, 3),
+                "conservation_category": site.conservation_category,
+            }
+            for site in profile.sites
+        ],
     }
     db.commit()
     db.refresh(job)

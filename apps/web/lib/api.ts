@@ -1,4 +1,5 @@
 import type {
+  AnalysisArtifactContentRecord,
   AnalysisArtifactRecord,
   AnalysisJobType,
   EnzymeRecordBundle,
@@ -90,6 +91,17 @@ export async function getAnalysisArtifacts(
   token: string
 ): Promise<AnalysisArtifactRecord[]> {
   return fetchWithToken<AnalysisArtifactRecord[]>(`/enzymes/${enzymeId}/analysis-artifacts`, token);
+}
+
+export async function getAnalysisArtifactContent(
+  enzymeId: string,
+  artifactId: string,
+  token: string
+): Promise<AnalysisArtifactContentRecord> {
+  return fetchWithToken<AnalysisArtifactContentRecord>(
+    `/enzymes/${enzymeId}/analysis-artifacts/${artifactId}/content`,
+    token
+  );
 }
 
 export async function createAnalysisJob(

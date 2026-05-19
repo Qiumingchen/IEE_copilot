@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.schemas.enzyme_record import (
+    AnalysisArtifactContentResponse,
     AnalysisArtifactResponse,
     ExperimentConditionCreate,
     ExperimentConditionResponse,
@@ -91,6 +92,45 @@ def _enqueue_analysis_job(job_type: str, job_id: str) -> None:
         run_conservation_profile.delay(job_id)
         return
     raise ValueError(f"unsupported analysis job type: {job_type}")
+
+
+def _artifact_content_from_summary(
+    artifact: AnalysisArtifact,
+    job: AnalysisJob | None,
+) -> AnalysisArtifactContentResponse:
+    summary = job.result_summary_json if job is not None else {}
+    summary = summary or {}
+    content_text: str | None = None
+    content_json: dict | None = None
+
+    if artifact.artifact_type == "msa":
+        content_text = summary.get("msa_fasta")
+    elif artifact.artifact_type == "conservation_profile":
+        content_json = {
+            "sequence_count": summary.get("sequence_count"),
+            "site_count": summary.get("site_count"),
+            "sites": summary.get("sites", []),
+        }
+    elif artifact.artifact_type == "homolog_sequences":
+        content_json = {
+            "homolog_count": summary.get("homolog_count"),
+            "homologs": summary.get("homologs", []),
+        }
+
+    if content_text is None and content_json is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="artifact content not available",
+        )
+
+    return AnalysisArtifactContentResponse(
+        artifact_id=artifact.id,
+        artifact_type=artifact.artifact_type,
+        content_type=artifact.content_type,
+        object_key=artifact.object_key,
+        content_text=content_text,
+        content_json=content_json,
+    )
 
 
 def _validate_substrate(db: Session, enzyme: EnzymeEntry, substrate_entry_id: str | None) -> None:
@@ -490,3 +530,29 @@ def list_analysis_artifacts(
         )
         for artifact, job in rows
     ]
+
+
+@router.get(
+    "/{enzyme_id}/analysis-artifacts/{artifact_id}/content",
+    response_model=AnalysisArtifactContentResponse,
+)
+def get_analysis_artifact_content(
+    enzyme_id: str,
+    artifact_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisArtifactContentResponse:
+    _get_enzyme(db, enzyme_id)
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .outerjoin(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.id == artifact_id,
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type.in_(ANALYSIS_ARTIFACT_TYPES),
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
+    artifact, job = row
+    return _artifact_content_from_summary(artifact, job)

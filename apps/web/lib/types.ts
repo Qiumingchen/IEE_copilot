@@ -55,6 +55,15 @@ export type AnalysisArtifactRecord = {
   result_summary_json: Record<string, unknown> | null;
 };
 
+export type AnalysisArtifactContentRecord = {
+  artifact_id: string;
+  artifact_type: string;
+  content_type: string | null;
+  object_key: string;
+  content_text: string | null;
+  content_json: Record<string, unknown> | null;
+};
+
 export type AnalysisJobType = "homolog_collection" | "msa" | "conservation_profile";
 
 export type SubstrateRecord = {

@@ -211,6 +211,46 @@ def test_list_analysis_artifacts_returns_epic_four_artifacts_with_job_status(cli
     assert body[1]["object_key"].endswith("/msa.fasta")
 
 
+def test_get_analysis_artifact_content_returns_worker_payload(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="msa",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "artifact_type": "msa",
+            "msa_fasta": ">query\nACD\n>homolog_1\nACE",
+        },
+    )
+    db_session.add(job)
+    db_session.flush()
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=job.id,
+        artifact_type="msa",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{job.id}/msa.fasta",
+        content_type="text/x-fasta",
+        size_bytes=26,
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    response = client.get(
+        f"/enzymes/{enzyme_id}/analysis-artifacts/{artifact.id}/content",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifact_id"] == artifact.id
+    assert body["artifact_type"] == "msa"
+    assert body["content_type"] == "text/x-fasta"
+    assert body["content_text"] == ">query\nACD\n>homolog_1\nACE"
+    assert body["content_json"] is None
+
+
 def test_create_analysis_job_queues_selected_worker_task(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
