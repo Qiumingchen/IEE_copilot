@@ -31,6 +31,7 @@ import type {
   ConservationSiteView,
   MutationLibraryView,
   MutationRecommendationCandidateView,
+  ScoredMutationSuggestionView,
   RosettaDdgRunView
 } from "./analysis-utils";
 
@@ -601,7 +602,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Scored suggestions</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Rationale</th>
               </tr>
             </thead>
@@ -617,24 +618,14 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                       </span>
                     </td>
                     <td className="px-4 py-3">{candidate.priority_score}</td>
-                    <td className="px-4 py-3">
-                      {candidate.suggested_mutations.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {candidate.suggested_mutations.map((mutation) => (
-                            <button
-                              className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-                              disabled={!token || Boolean(runningRosettaMutation)}
-                              key={mutation}
-                              onClick={() => void runRosettaDdg(mutation)}
-                              type="button"
-                            >
-                              {runningRosettaMutation === mutation ? "Queueing..." : `Run ddG ${mutation}`}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        "-"
-                      )}
+                    <td className="min-w-96 px-4 py-3">
+                      <ScoredSuggestionList
+                        disabled={!token || Boolean(runningRosettaMutation)}
+                        fallbackMutations={candidate.suggested_mutations}
+                        onRunRosettaDdg={(mutation) => void runRosettaDdg(mutation)}
+                        runningMutation={runningRosettaMutation}
+                        suggestions={candidate.scored_suggestions}
+                      />
                     </td>
                     <td className="min-w-80 px-4 py-3 text-xs text-slate-600">{candidate.rationale}</td>
                   </tr>
@@ -924,7 +915,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">WT</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Category</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Suggested mutations</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Scored suggestions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -934,7 +925,15 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
                   <td className="px-4 py-3 font-mono">{candidate.wildtype_residue}</td>
                   <td className="px-4 py-3">{candidate.conservation_category}</td>
                   <td className="px-4 py-3">{candidate.priority_score}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{candidate.suggested_mutations.join(", ")}</td>
+                  <td className="min-w-96 px-4 py-3">
+                    <ScoredSuggestionList
+                      disabled
+                      fallbackMutations={candidate.suggested_mutations}
+                      onRunRosettaDdg={() => undefined}
+                      runningMutation={null}
+                      suggestions={candidate.scored_suggestions}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -983,5 +982,99 @@ function StatusPill({ value }: { value: string }) {
     <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
       {value}
     </span>
+  );
+}
+
+function ScoredSuggestionList({
+  disabled,
+  fallbackMutations,
+  onRunRosettaDdg,
+  runningMutation,
+  suggestions
+}: {
+  disabled: boolean;
+  fallbackMutations: string[];
+  onRunRosettaDdg: (mutation: string) => void;
+  runningMutation: string | null;
+  suggestions: ScoredMutationSuggestionView[];
+}) {
+  if (suggestions.length > 0) {
+    return (
+      <div className="grid gap-2">
+        {suggestions.map((suggestion) => (
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3" key={suggestion.mutation_string}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-mono text-sm font-semibold text-slate-950">{suggestion.mutation_string}</p>
+                <p className="mt-1 text-xs text-slate-500">Score {suggestion.total_score}</p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={disabled}
+                onClick={() => onRunRosettaDdg(suggestion.mutation_string)}
+                type="button"
+              >
+                {runningMutation === suggestion.mutation_string ? "Queueing..." : "Run ddG"}
+              </button>
+            </div>
+            <RiskTags risks={suggestion.risk_summary} />
+            <ScoreComponents components={suggestion.components} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (fallbackMutations.length === 0) {
+    return <span>-</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {fallbackMutations.map((mutation) => (
+        <button
+          className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+          disabled={disabled}
+          key={mutation}
+          onClick={() => onRunRosettaDdg(mutation)}
+          type="button"
+        >
+          {runningMutation === mutation ? "Queueing..." : `Run ddG ${mutation}`}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RiskTags({ risks }: { risks: string[] }) {
+  if (risks.length === 0) {
+    return <p className="mt-2 text-xs text-slate-500">No scoring risks flagged</p>;
+  }
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {risks.map((risk) => (
+        <span className="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700" key={risk}>
+          {risk}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ScoreComponents({ components }: { components: ScoredMutationSuggestionView["components"] }) {
+  if (components.length === 0) {
+    return null;
+  }
+  return (
+    <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+      {components.map((component) => (
+        <div className="rounded border border-slate-200 bg-white px-2 py-2" key={component.name}>
+          <dt className="text-xs font-medium text-slate-500">{component.name}</dt>
+          <dd className="mt-1 text-xs text-slate-700">
+            value {component.value} x weight {component.weight} = {component.contribution}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

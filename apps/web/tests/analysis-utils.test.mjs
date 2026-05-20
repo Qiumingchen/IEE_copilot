@@ -79,6 +79,23 @@ test("extracts mutation recommendation candidates from artifact content", () => 
           conservation_category: "variable",
           priority_score: 1.8,
           suggested_mutations: ["L10A", "L10V", "L10S"],
+          scored_suggestions: [
+            {
+              mutation_string: "L10A",
+              total_score: 3.2,
+              components: [
+                {
+                  name: "rosetta_stability",
+                  value: 0.4,
+                  weight: 2,
+                  contribution: 0.8,
+                  rationale: "stabilizing prediction"
+                }
+              ],
+              risk_summary: ["medium_solubility_risk"],
+              parsed_mutations: [{ wildtype: "L", position: 10, mutant: "A" }]
+            }
+          ],
           rationale: "variable site"
         }
       ]
@@ -92,6 +109,23 @@ test("extracts mutation recommendation candidates from artifact content", () => 
       conservation_category: "variable",
       priority_score: 1.8,
       suggested_mutations: ["L10A", "L10V", "L10S"],
+      scored_suggestions: [
+        {
+          mutation_string: "L10A",
+          total_score: 3.2,
+          components: [
+            {
+              name: "rosetta_stability",
+              value: 0.4,
+              weight: 2,
+              contribution: 0.8,
+              rationale: "stabilizing prediction"
+            }
+          ],
+          risk_summary: ["medium_solubility_risk"],
+          parsed_mutations: [{ wildtype: "L", position: 10, mutant: "A" }]
+        }
+      ],
       rationale: "variable site"
     }
   ]);

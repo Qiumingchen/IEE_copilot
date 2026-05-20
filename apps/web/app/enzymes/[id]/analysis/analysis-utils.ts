@@ -20,7 +20,24 @@ export type MutationRecommendationCandidateView = {
   conservation_category: string;
   priority_score: number | string;
   suggested_mutations: string[];
+  scored_suggestions: ScoredMutationSuggestionView[];
   rationale: string;
+};
+
+export type MutationScoreComponentView = {
+  name: string;
+  value: number | string;
+  weight: number | string;
+  contribution: number | string;
+  rationale: string;
+};
+
+export type ScoredMutationSuggestionView = {
+  mutation_string: string;
+  total_score: number | string;
+  components: MutationScoreComponentView[];
+  risk_summary: string[];
+  parsed_mutations: Array<Record<string, number | string>>;
 };
 
 export type RosettaDdgResultView = {
@@ -227,7 +244,57 @@ export function getMutationRecommendationCandidates(
       suggested_mutations: Array.isArray(candidate.suggested_mutations)
         ? candidate.suggested_mutations.map(String)
         : [],
+      scored_suggestions: getScoredSuggestions(candidate.scored_suggestions),
       rationale: String(valueOrDash(candidate.rationale))
+    }));
+}
+
+function getScoredSuggestions(value: unknown): ScoredMutationSuggestionView[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((suggestion): suggestion is Record<string, unknown> => (
+      typeof suggestion === "object" && suggestion !== null
+    ))
+    .map((suggestion) => ({
+      mutation_string: String(valueOrDash(suggestion.mutation_string)),
+      total_score: valueOrDash(suggestion.total_score),
+      components: getScoreComponents(suggestion.components),
+      risk_summary: Array.isArray(suggestion.risk_summary) ? suggestion.risk_summary.map(String) : [],
+      parsed_mutations: getParsedMutations(suggestion.parsed_mutations)
+    }));
+}
+
+function getScoreComponents(value: unknown): MutationScoreComponentView[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((component): component is Record<string, unknown> => (
+      typeof component === "object" && component !== null
+    ))
+    .map((component) => ({
+      name: String(valueOrDash(component.name)),
+      value: valueOrDash(component.value),
+      weight: valueOrDash(component.weight),
+      contribution: valueOrDash(component.contribution),
+      rationale: String(valueOrDash(component.rationale))
+    }));
+}
+
+function getParsedMutations(value: unknown): Array<Record<string, number | string>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((mutation): mutation is Record<string, unknown> => (
+      typeof mutation === "object" && mutation !== null
+    ))
+    .map((mutation) => ({
+      wildtype: valueOrDash(mutation.wildtype),
+      position: valueOrDash(mutation.position),
+      mutant: valueOrDash(mutation.mutant)
     }));
 }
 
