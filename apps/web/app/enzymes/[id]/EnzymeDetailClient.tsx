@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -423,14 +424,22 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
             </h1>
             <p className="mt-2 text-sm text-slate-600">Entry id: {enzymeId}</p>
           </div>
-          <button
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-            disabled={!token || isLoading}
-            onClick={() => token && void loadBundle(token)}
-            type="button"
-          >
-            Refresh
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+              href={`/enzymes/${enzymeId}/structures`}
+            >
+              Structure analysis
+            </Link>
+            <button
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+              disabled={!token || isLoading}
+              onClick={() => token && void loadBundle(token)}
+              type="button"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       </header>
 
