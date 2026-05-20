@@ -11,6 +11,7 @@ from app.db.session import SessionLocal
 from app.services.conservation import calculate_conservation_profile
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
 from app.services.library_design import design_mutation_library
+from app.services.mutation_scoring import MutationScore, calculate_general_score
 from app.services.mutations import (
     generate_rosetta_mutation_file,
     normalize_mutation_string,
@@ -18,6 +19,7 @@ from app.services.mutations import (
 )
 from app.services.mutation_recommendation import recommend_mutation_hotspots
 from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence, run_mock_mafft
+from app.services.residue_features import build_residue_feature_records
 from app.tasks.celery_app import celery_app
 
 
@@ -265,6 +267,19 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
     raw_sites = parameters.get("conservation_sites", [])
     conservation_sites = [site for site in raw_sites if isinstance(site, dict)] if isinstance(raw_sites, list) else []
     candidates = recommend_mutation_hotspots(conservation_sites)
+    protein_sequence = db.scalar(
+        select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == job.enzyme_entry_id)
+    )
+    if protein_sequence is not None:
+        sequence = protein_sequence.mature_sequence or protein_sequence.sequence
+        candidates = _score_recommendation_candidates(
+            candidates,
+            sequence=sequence,
+            conservation_sites=conservation_sites,
+            structure_summaries=_list_of_dicts(parameters.get("structure_summaries")),
+            mutation_records=_list_of_dicts(parameters.get("mutation_records")),
+            rosetta_results=_list_of_dicts(parameters.get("rosetta_results")),
+        )
     payload = {
         "candidate_count": len(candidates),
         "candidates": candidates,
@@ -296,6 +311,67 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
     db.commit()
     db.refresh(job)
     return job
+
+
+def _score_recommendation_candidates(
+    candidates: list[dict],
+    *,
+    sequence: str,
+    conservation_sites: list[dict],
+    structure_summaries: list[dict],
+    mutation_records: list[dict],
+    rosetta_results: list[dict],
+) -> list[dict]:
+    residue_features = build_residue_feature_records(
+        sequence,
+        conservation_sites=conservation_sites,
+        structure_summaries=structure_summaries,
+        mutation_records=mutation_records,
+        rosetta_results=rosetta_results,
+    )
+    scored_candidates = []
+    for candidate in candidates:
+        scored_suggestions = [
+            _mutation_score_response(calculate_general_score(str(mutation_string), residue_features))
+            for mutation_string in candidate.get("suggested_mutations", [])
+            if mutation_string
+        ]
+        scored_candidates.append(
+            {
+                **candidate,
+                "scored_suggestions": sorted(
+                    scored_suggestions,
+                    key=lambda suggestion: suggestion["total_score"],
+                    reverse=True,
+                ),
+            }
+        )
+    return scored_candidates
+
+
+def _mutation_score_response(score: MutationScore) -> dict:
+    return {
+        "mutation_string": score.mutation_string,
+        "total_score": score.total_score,
+        "components": [
+            {
+                "name": component.name,
+                "value": component.value,
+                "weight": component.weight,
+                "contribution": component.contribution,
+                "rationale": component.rationale,
+            }
+            for component in score.components
+        ],
+        "risk_summary": score.risk_summary,
+        "parsed_mutations": score.parsed_mutations,
+    }
+
+
+def _list_of_dicts(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:

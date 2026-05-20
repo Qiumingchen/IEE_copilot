@@ -280,6 +280,45 @@ def _rosetta_results_for_library(db: Session, enzyme_id: str) -> list[dict]:
     return results
 
 
+def _mutation_records_for_scoring(db: Session, enzyme_id: str) -> list[dict]:
+    records = db.scalars(
+        select(MutationRecord)
+        .where(
+            MutationRecord.enzyme_entry_id == enzyme_id,
+            MutationRecord.visibility == Visibility.PUBLIC,
+        )
+        .order_by(MutationRecord.created_at)
+    ).all()
+    return [
+        {
+            "mutation_string": record.mutation_string,
+            "mutation_positions": _mutation_positions_response(record),
+            "property_delta": record.property_delta,
+            "source": (record.assay_condition_summary or {}).get("source"),
+        }
+        for record in records
+    ]
+
+
+def _structure_summaries_for_scoring(db: Session, enzyme_id: str) -> list[dict]:
+    structures = db.scalars(
+        select(StructureEntry)
+        .where(StructureEntry.enzyme_entry_id == enzyme_id)
+        .order_by(StructureEntry.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": structure.id,
+            "structure_type": structure.structure_type,
+            "complex_state": structure.complex_state,
+            "source": structure.source,
+            "chain_summary": structure.chain_summary,
+            "ligand_summary": structure.ligand_summary,
+        }
+        for structure in structures
+    ]
+
+
 def _analysis_job_parameters(
     db: Session,
     enzyme_id: str,
@@ -300,6 +339,9 @@ def _analysis_job_parameters(
         ]
     if job_type == "mutation_recommendation":
         parameters["conservation_sites"] = _latest_conservation_sites_for_recommendation(db, enzyme_id)
+        parameters["mutation_records"] = _mutation_records_for_scoring(db, enzyme_id)
+        parameters["rosetta_results"] = _rosetta_results_for_library(db, enzyme_id)
+        parameters["structure_summaries"] = _structure_summaries_for_scoring(db, enzyme_id)
     if job_type == "rosetta_ddg":
         try:
             mutations = parse_mutation_string(str(parameters.get("mutation_string") or ""))

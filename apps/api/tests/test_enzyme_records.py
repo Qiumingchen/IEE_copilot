@@ -9,6 +9,7 @@ from app.db.models import (
     JobStatus,
     MutationRecord,
     ProteinSequence,
+    StructureEntry,
     Visibility,
 )
 
@@ -636,6 +637,53 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     )
     db_session.add(conservation_job)
     db_session.flush()
+    rosetta_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="rosetta_ddg",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "mutation_string": "I8A",
+            "ddg_kcal_per_mol": -0.4,
+            "interpretation": "stabilizing",
+        },
+    )
+    db_session.add(rosetta_job)
+    db_session.flush()
+    db_session.add(
+        MutationRecord(
+            enzyme_entry_id=enzyme_id,
+            mutation_string="I8A",
+            property_delta={"optimal_temperature_delta_degC": 3},
+            visibility=Visibility.PUBLIC,
+        )
+    )
+    db_session.add(
+        StructureEntry(
+            enzyme_entry_id=enzyme_id,
+            structure_type="uploaded_pdb",
+            complex_state="enzyme_substrate_complex",
+            source="test",
+            chain_summary={
+                "chains": [
+                    {
+                        "chain_id": "A",
+                        "residues": [
+                            {
+                                "sequence_position": 8,
+                                "secondary_structure": "loop",
+                                "solvent_accessibility": 0.62,
+                            }
+                        ],
+                    }
+                ]
+            },
+            ligand_summary={
+                "distance_matrix": [
+                    {"sequence_position": 8, "min_distance_angstrom": 3.2}
+                ]
+            },
+        )
+    )
     db_session.add(
         AnalysisArtifact(
             enzyme_entry_id=enzyme_id,
@@ -645,6 +693,17 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
             object_key=f"analysis-jobs/{conservation_job.id}/conservation-profile.json",
             content_type="application/json",
             size_bytes=256,
+        )
+    )
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=rosetta_job.id,
+            artifact_type="rosetta_ddg",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{rosetta_job.id}/rosetta-ddg.json",
+            content_type="application/json",
+            size_bytes=128,
         )
     )
     db_session.commit()
@@ -670,6 +729,11 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     body = response.json()
     assert body["job_type"] == "mutation_recommendation"
     assert body["parameters_json"]["conservation_sites"] == conservation_job.result_summary_json["sites"]
+    assert body["parameters_json"]["rosetta_results"] == [rosetta_job.result_summary_json]
+    assert body["parameters_json"]["mutation_records"][0]["mutation_string"] == "I8A"
+    assert body["parameters_json"]["structure_summaries"][0]["ligand_summary"]["distance_matrix"][0][
+        "min_distance_angstrom"
+    ] == 3.2
 
 
 def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, monkeypatch):

@@ -158,9 +158,7 @@ def _rosetta_value(mutation: ParsedMutation, feature: ResidueFeatureRecord | Non
             if isinstance(result, dict) and str(result.get("mutation_string") or "").upper() == target:
                 matching = result
                 break
-    ddg = _as_float(
-        matching.get("ddg_kcal_per_mol") if matching else feature.rosetta_ddg.get("best_ddg_kcal_per_mol")
-    )
+    ddg = _as_float(matching.get("ddg_kcal_per_mol") if matching else None)
     if ddg is None:
         return 0.0
     if ddg < 0:

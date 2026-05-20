@@ -96,3 +96,36 @@ def test_calculate_general_score_handles_multi_mutation_candidates():
         {"wildtype": "G", "position": 2, "mutant": "V"},
         {"wildtype": "A", "position": 5, "mutant": "S"},
     ]
+
+
+def test_calculate_general_score_uses_only_matching_rosetta_result_for_candidate():
+    features = [
+        ResidueFeatureRecord(
+            position=10,
+            wildtype_aa="L",
+            wildtype_frequency=0.4,
+            rosetta_ddg={
+                "best_mutation": "L10A",
+                "best_ddg_kcal_per_mol": -0.8,
+                "results": [
+                    {
+                        "mutation_string": "L10A",
+                        "ddg_kcal_per_mol": -0.8,
+                        "interpretation": "stabilizing",
+                    }
+                ],
+            },
+        )
+    ]
+
+    matching_score = calculate_general_score("L10A", features)
+    untested_score = calculate_general_score("L10V", features)
+
+    matching_rosetta = next(
+        component for component in matching_score.components if component.name == "rosetta_stability"
+    )
+    untested_rosetta = next(
+        component for component in untested_score.components if component.name == "rosetta_stability"
+    )
+    assert matching_rosetta.value == 0.4
+    assert untested_rosetta.value == 0.0

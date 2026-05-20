@@ -300,6 +300,15 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
         )
         db.add(enzyme)
         db.flush()
+        db.add(
+            ProteinSequence(
+                enzyme_entry_id=enzyme.id,
+                sequence="ACDEFGHIKL",
+                mature_sequence="ACDEFGHIKL",
+                source="test",
+                checksum="worker-recommendation-sequence",
+            )
+        )
         job = AnalysisJob(
             enzyme_entry_id=enzyme.id,
             job_type="mutation_recommendation",
@@ -327,7 +336,20 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
                         "wildtype_frequency": 0.4,
                         "conservation_category": "variable",
                     },
-                ]
+                ],
+                "rosetta_results": [
+                    {
+                        "mutation_string": "L10A",
+                        "ddg_kcal_per_mol": -0.8,
+                        "interpretation": "stabilizing",
+                    }
+                ],
+                "mutation_records": [
+                    {
+                        "mutation_string": "L10A",
+                        "property_delta": {"optimal_temperature_delta_degC": 5},
+                    }
+                ],
             },
         )
         db.add(job)
@@ -347,6 +369,17 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
     assert job.result_summary_json["artifact_type"] == "mutation_recommendations"
     assert [candidate["query_position"] for candidate in job.result_summary_json["candidates"]] == [10, 8]
     assert job.result_summary_json["candidates"][0]["suggested_mutations"] == ["L10A", "L10V", "L10S"]
+    scored_suggestions = job.result_summary_json["candidates"][0]["scored_suggestions"]
+    assert scored_suggestions[0]["mutation_string"] == "L10A"
+    assert scored_suggestions[0]["total_score"] > scored_suggestions[1]["total_score"]
+    assert [component["name"] for component in scored_suggestions[0]["components"]] == [
+        "conservation_tolerance",
+        "reported_benefit",
+        "structure_proximity",
+        "rosetta_stability",
+        "solubility",
+    ]
+    assert "medium_solubility_risk" in scored_suggestions[0]["risk_summary"]
     assert artifact is not None
     assert artifact.object_key == f"analysis-jobs/{job.id}/mutation-recommendations.json"
     assert artifact.content_type == "application/json"
