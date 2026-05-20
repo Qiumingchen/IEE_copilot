@@ -15,7 +15,9 @@ import type {
   SearchResponse,
   StructureRecord,
   SubstrateRecord,
-  TokenResponse
+  TokenResponse,
+  VisibilityRequestDetailRecord,
+  VisibilityRequestRecord
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -287,6 +289,41 @@ export async function importExperiments(
     {
       method: "POST",
       body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function listVisibilityRequests(
+  token: string
+): Promise<VisibilityRequestDetailRecord[]> {
+  return fetchWithTokenAndErrorMessage<VisibilityRequestDetailRecord[]>(
+    "/curation/visibility-requests",
+    token
+  );
+}
+
+export async function approveVisibilityRequest(
+  requestId: string,
+  token: string
+): Promise<VisibilityRequestRecord> {
+  return fetchWithTokenAndErrorMessage<VisibilityRequestRecord>(
+    `/curation/visibility-requests/${requestId}/approve`,
+    token,
+    { method: "POST" }
+  );
+}
+
+export async function rejectVisibilityRequest(
+  requestId: string,
+  token: string,
+  reviewComment: string
+): Promise<VisibilityRequestRecord> {
+  return fetchWithTokenAndErrorMessage<VisibilityRequestRecord>(
+    `/curation/visibility-requests/${requestId}/reject`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ review_comment: reviewComment })
     }
   );
 }

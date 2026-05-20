@@ -213,6 +213,38 @@ export type ExperimentImportResult = {
   experiment_ids: string[];
 };
 
+export type UserExperimentRecord = {
+  id: string;
+  project_id: string;
+  enzyme_entry_id: string | null;
+  variant_name: string;
+  mutation_string: string | null;
+  sequence: string | null;
+  measured_property: string;
+  measured_value: string;
+  unit: string | null;
+  assay_condition_json: Record<string, unknown> | null;
+  visibility: string;
+  curation_status: string;
+  created_by: string;
+};
+
+export type VisibilityRequestRecord = {
+  id: string;
+  project_id: string;
+  target_type: string;
+  target_id: string;
+  requested_visibility: string;
+  status: string;
+  requested_by: string;
+  reviewed_by: string | null;
+  review_comment: string | null;
+};
+
+export type VisibilityRequestDetailRecord = VisibilityRequestRecord & {
+  experiment: UserExperimentRecord;
+};
+
 export type EnzymeRecordBundle = {
   enzyme: EnzymeSummary;
   substrates: SubstrateRecord[];

@@ -33,6 +33,9 @@ export default function DashboardPage() {
           <Link className="rounded-md bg-slate-950 px-3 py-2 font-medium text-white" href="/search">
             Search enzyme
           </Link>
+          <Link className="rounded-md border border-slate-300 bg-white px-3 py-2 text-slate-700" href="/curation">
+            Curation
+          </Link>
         </nav>
       </header>
 
