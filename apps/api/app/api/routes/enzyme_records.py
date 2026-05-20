@@ -1,3 +1,5 @@
+import base64
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,6 +52,7 @@ from app.schemas.job import AnalysisJobCreate, JobResponse
 from app.services.experiment_import import (
     ExperimentImportError,
     parse_experiment_csv,
+    parse_experiment_xlsx,
     validate_experiment_rows,
 )
 from app.services.mutations import (
@@ -736,7 +739,7 @@ def _preview_experiment_import(
     _get_owned_project(db, request.project_id, user.id)
     sequence = _get_engineering_sequence(db, enzyme.id)
     try:
-        parsed = parse_experiment_csv(request.csv_text)
+        parsed = _parse_experiment_import_request(request)
         validated = validate_experiment_rows(parsed.rows, sequence)
     except ExperimentImportError as exc:
         raise HTTPException(
@@ -765,6 +768,27 @@ def _preview_experiment_import(
         records=records,
     )
     return response, records
+
+
+def _parse_experiment_import_request(request: ExperimentImportRequest):
+    if request.file_content_base64:
+        if not request.file_name:
+            raise ExperimentImportError("file_name is required for encoded uploads")
+        try:
+            file_bytes = base64.b64decode(request.file_content_base64, validate=True)
+        except ValueError as exc:
+            raise ExperimentImportError("file_content_base64 is invalid") from exc
+
+        file_name = request.file_name.lower()
+        if file_name.endswith(".xlsx"):
+            return parse_experiment_xlsx(file_bytes)
+        if file_name.endswith(".csv"):
+            return parse_experiment_csv(file_bytes.decode("utf-8-sig"))
+        raise ExperimentImportError("unsupported experiment upload file type")
+
+    if request.csv_text is None or not request.csv_text.strip():
+        raise ExperimentImportError("csv_text or file_content_base64 is required")
+    return parse_experiment_csv(request.csv_text)
 
 
 @router.post(

@@ -11,7 +11,9 @@ import {
 } from "../../../../lib/api";
 import type { ExperimentImportPreview, ProjectRecord } from "../../../../lib/types";
 import {
+  arrayBufferToBase64,
   buildExperimentImportRequest,
+  buildExperimentUploadRequest,
   summarizeExperimentPreview
 } from "./experiment-import-utils";
 
@@ -33,6 +35,8 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectId, setProjectId] = useState("");
   const [csvText, setCsvText] = useState(sampleCsv);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileContentBase64, setFileContentBase64] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExperimentImportPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -70,12 +74,26 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
     setError(null);
     setSuccessMessage(null);
     setPreview(null);
+    setFileName(file.name);
+    if (file.name.toLowerCase().endsWith(".xlsx")) {
+      setFileContentBase64(arrayBufferToBase64(await file.arrayBuffer()));
+      setCsvText("");
+      return;
+    }
+    setFileContentBase64(null);
     setCsvText(await file.text());
+  }
+
+  function importPayload() {
+    if (fileName && fileContentBase64) {
+      return buildExperimentUploadRequest(projectId, fileName, fileContentBase64);
+    }
+    return buildExperimentImportRequest(projectId, csvText);
   }
 
   async function handlePreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!token || !projectId || !csvText.trim()) {
+    if (!token || !projectId || (!csvText.trim() && !fileContentBase64)) {
       return;
     }
     setIsPreviewing(true);
@@ -86,7 +104,7 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
         await previewExperimentImport(
           enzymeId,
           token,
-          buildExperimentImportRequest(projectId, csvText)
+          importPayload()
         )
       );
     } catch (exc) {
@@ -98,7 +116,7 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
   }
 
   async function handleImport() {
-    if (!token || !projectId || !csvText.trim()) {
+    if (!token || !projectId || (!csvText.trim() && !fileContentBase64)) {
       return;
     }
     setIsImporting(true);
@@ -108,7 +126,7 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
       const result = await importExperiments(
         enzymeId,
         token,
-        buildExperimentImportRequest(projectId, csvText)
+        importPayload()
       );
       setSuccessMessage(`Saved ${result.created_count} experiment measurements.`);
     } catch (exc) {
@@ -169,9 +187,9 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
               </select>
             </label>
             <label className="grid gap-1 text-sm font-medium text-slate-700">
-              CSV file
+              CSV or Excel file
               <input
-                accept=".csv,text/csv"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-sm file:font-medium file:text-slate-800"
                 type="file"
                 onChange={handleFileChange}
@@ -186,19 +204,25 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
           </div>
           <textarea
             className="min-h-64 rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-950 outline-none focus:border-slate-500"
+            disabled={Boolean(fileContentBase64)}
             value={csvText}
             onChange={(event) => {
               setCsvText(event.target.value);
+              setFileName(null);
+              setFileContentBase64(null);
               setPreview(null);
               setSuccessMessage(null);
             }}
           />
+          {fileName && fileContentBase64 ? (
+            <p className="text-sm text-slate-600">Selected Excel workbook: {fileName}</p>
+          ) : null}
         </section>
 
         <div className="flex flex-wrap gap-3">
           <button
             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={isPreviewing || !projectId || !csvText.trim()}
+            disabled={isPreviewing || !projectId || (!csvText.trim() && !fileContentBase64)}
             type="submit"
           >
             {isPreviewing ? "Previewing..." : "Preview"}

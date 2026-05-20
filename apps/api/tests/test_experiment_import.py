@@ -1,3 +1,7 @@
+import base64
+from io import BytesIO
+from zipfile import ZipFile, ZIP_DEFLATED
+
 import pytest
 from sqlalchemy import select
 
@@ -5,8 +9,76 @@ from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequen
 from app.services.experiment_import import (
     ExperimentImportError,
     parse_experiment_csv,
+    parse_experiment_xlsx,
     validate_experiment_rows,
 )
+
+
+def _xlsx_bytes(rows: list[list[str]]) -> bytes:
+    def cell_name(row_number: int, column_index: int) -> str:
+        name = ""
+        index = column_index
+        while index:
+            index, remainder = divmod(index - 1, 26)
+            name = chr(65 + remainder) + name
+        return f"{name}{row_number}"
+
+    sheet_rows = []
+    for row_number, row in enumerate(rows, start=1):
+        cells = []
+        for column_index, value in enumerate(row, start=1):
+            escaped = (
+                value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+            )
+            cells.append(
+                f'<c r="{cell_name(row_number, column_index)}" t="inlineStr"><is><t>{escaped}</t></is></c>'
+            )
+        sheet_rows.append(f'<row r="{row_number}">{"".join(cells)}</row>')
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{''.join(sheet_rows)}</sheetData>
+</worksheet>""",
+        )
+    return buffer.getvalue()
 
 
 def test_parse_experiment_csv_returns_fields_and_expands_property_columns():
@@ -42,6 +114,30 @@ def test_parse_experiment_csv_returns_fields_and_expands_property_columns():
     }
     assert validated.records[1].measured_property == "opt_temperature"
     assert validated.records[1].measured_value == "55"
+
+
+def test_parse_experiment_xlsx_returns_fields_and_rows():
+    parsed = parse_experiment_xlsx(
+        _xlsx_bytes(
+            [
+                ["variant_name", "mutation_string", "specific_activity", "substrate"],
+                ["L10A variant", "L10A", "125.4", "casein"],
+            ]
+        )
+    )
+    validated = validate_experiment_rows(parsed.rows, engineering_sequence="M" * 9 + "L" + "A")
+
+    assert parsed.fields == ["variant_name", "mutation_string", "specific_activity", "substrate"]
+    assert parsed.rows == [
+        {
+            "variant_name": "L10A variant",
+            "mutation_string": "L10A",
+            "specific_activity": "125.4",
+            "substrate": "casein",
+        }
+    ]
+    assert validated.records[0].measured_property == "specific_activity"
+    assert validated.records[0].measured_value == "125.4"
 
 
 def test_validate_experiment_rows_accepts_generic_property_value_columns():
@@ -185,6 +281,35 @@ def test_preview_experiment_import_returns_fields_and_validated_records(client, 
     assert body["records"][0]["mutation_string"] == "L10A"
     assert body["records"][0]["measured_property"] == "specific_activity"
     assert body["records"][0]["visibility"] == "private"
+
+
+def test_preview_experiment_import_accepts_xlsx_payload(client, db_session):
+    headers = _auth_headers(client, "experiment-xlsx@example.com")
+    project_id = _project_id(client, headers)
+    enzyme_id = _enzyme_id(db_session)
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/experiments/import-preview",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "file_name": "experiment.xlsx",
+            "file_content_base64": base64.b64encode(
+                _xlsx_bytes(
+                    [
+                        ["variant_name", "mutation_string", "specific_activity"],
+                        ["L10A variant", "L10A", "125.4"],
+                    ]
+                )
+            ).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fields"] == ["variant_name", "mutation_string", "specific_activity"]
+    assert body["record_count"] == 1
+    assert body["records"][0]["mutation_string"] == "L10A"
 
 
 def test_import_experiment_csv_persists_user_experiments(client, db_session):

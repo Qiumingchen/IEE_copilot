@@ -184,7 +184,9 @@ export type ExpressionRecord = {
 
 export type ExperimentImportRequest = {
   project_id: string;
-  csv_text: string;
+  csv_text?: string;
+  file_name?: string;
+  file_content_base64?: string;
 };
 
 export type ExperimentImportRecordPreview = {

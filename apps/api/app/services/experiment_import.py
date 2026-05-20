@@ -1,6 +1,8 @@
 import csv
 from dataclasses import dataclass
-from io import StringIO
+from io import BytesIO, StringIO
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from app.db.models import Visibility
 from app.services.mutations import (
@@ -30,7 +32,7 @@ class ExperimentImportError(ValueError):
 
 
 @dataclass(frozen=True)
-class ParsedExperimentCsv:
+class ParsedExperimentTable:
     fields: list[str]
     rows: list[dict[str, str]]
 
@@ -53,13 +55,103 @@ class ValidatedExperimentRows:
     records: list[ValidatedExperimentRecord]
 
 
-def parse_experiment_csv(csv_text: str) -> ParsedExperimentCsv:
+def parse_experiment_csv(csv_text: str) -> ParsedExperimentTable:
     reader = csv.DictReader(StringIO(csv_text))
     fields = list(reader.fieldnames or [])
     rows: list[dict[str, str]] = []
     for row in reader:
         rows.append({key: (value or "").strip() for key, value in row.items() if key is not None})
-    return ParsedExperimentCsv(fields=fields, rows=rows)
+    return ParsedExperimentTable(fields=fields, rows=rows)
+
+
+def parse_experiment_xlsx(xlsx_bytes: bytes) -> ParsedExperimentTable:
+    try:
+        with ZipFile(BytesIO(xlsx_bytes)) as archive:
+            shared_strings = _read_shared_strings(archive)
+            sheet_xml = archive.read(_first_worksheet_path(archive))
+    except (BadZipFile, KeyError, ElementTree.ParseError) as exc:
+        raise ExperimentImportError("invalid xlsx file") from exc
+
+    matrix = _worksheet_matrix(sheet_xml, shared_strings)
+    if not matrix:
+        return ParsedExperimentTable(fields=[], rows=[])
+
+    fields = [value.strip() for value in matrix[0]]
+    rows = []
+    for values in matrix[1:]:
+        row = {
+            field: (values[index].strip() if index < len(values) else "")
+            for index, field in enumerate(fields)
+            if field
+        }
+        if any(value for value in row.values()):
+            rows.append(row)
+    return ParsedExperimentTable(fields=fields, rows=rows)
+
+
+def _first_worksheet_path(archive: ZipFile) -> str:
+    sheet_names = sorted(
+        name
+        for name in archive.namelist()
+        if name.startswith("xl/worksheets/") and name.endswith(".xml")
+    )
+    if not sheet_names:
+        raise KeyError("worksheet not found")
+    return sheet_names[0]
+
+
+def _read_shared_strings(archive: ZipFile) -> list[str]:
+    if "xl/sharedStrings.xml" not in archive.namelist():
+        return []
+    root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    strings: list[str] = []
+    for item in root.findall("s:si", namespace):
+        strings.append("".join(text.text or "" for text in item.findall(".//s:t", namespace)))
+    return strings
+
+
+def _worksheet_matrix(sheet_xml: bytes, shared_strings: list[str]) -> list[list[str]]:
+    root = ElementTree.fromstring(sheet_xml)
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rows: list[list[str]] = []
+    for row in root.findall(".//s:row", namespace):
+        values: list[str] = []
+        for cell in row.findall("s:c", namespace):
+            column_index = _column_index(cell.attrib.get("r", ""))
+            while len(values) < column_index - 1:
+                values.append("")
+            values.append(_cell_value(cell, shared_strings, namespace))
+        rows.append(values)
+    return rows
+
+
+def _column_index(cell_reference: str) -> int:
+    letters = "".join(character for character in cell_reference if character.isalpha()).upper()
+    if not letters:
+        return 1
+    index = 0
+    for character in letters:
+        index = index * 26 + (ord(character) - ord("A") + 1)
+    return index
+
+
+def _cell_value(cell: ElementTree.Element, shared_strings: list[str], namespace: dict[str, str]) -> str:
+    cell_type = cell.attrib.get("t")
+    if cell_type == "inlineStr":
+        return "".join(text.text or "" for text in cell.findall(".//s:t", namespace))
+
+    value_node = cell.find("s:v", namespace)
+    if value_node is None or value_node.text is None:
+        return ""
+
+    value = value_node.text
+    if cell_type == "s":
+        try:
+            return shared_strings[int(value)]
+        except (ValueError, IndexError) as exc:
+            raise ExperimentImportError("invalid xlsx shared string reference") from exc
+    return value
 
 
 def validate_experiment_rows(

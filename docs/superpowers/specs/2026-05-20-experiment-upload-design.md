@@ -6,7 +6,7 @@ Add the first production-ready backend loop for wet-lab experiment uploads: pars
 
 ## Scope
 
-This slice implements CSV-backed import first. Excel parsing and the frontend upload page will follow as the next slices so the backend contract is stable before UI work.
+This slice implements CSV-backed import first, then extends the same upload contract to `.xlsx` workbooks encoded as base64. The frontend upload page supports both `.csv` text files and `.xlsx` workbooks through the same preview and save flow.
 
 ## API Shape
 

@@ -3,7 +3,9 @@ from pydantic import BaseModel, ConfigDict
 
 class ExperimentImportRequest(BaseModel):
     project_id: str
-    csv_text: str
+    csv_text: str | None = None
+    file_name: str | None = None
+    file_content_base64: str | None = None
 
 
 class ExperimentImportRecordPreview(BaseModel):
