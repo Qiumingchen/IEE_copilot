@@ -85,6 +85,86 @@ export function buildLibraryDesignParameters(
   };
 }
 
+export function buildMutationLibraryWorkbookBytes(library: MutationLibraryView): Uint8Array {
+  const variantRows = [
+    ["variant_id", "mutation_string", "order", "score", "risk_flags", "reasons"],
+    ...library.variants.map((variant) => [
+      variant.variant_id,
+      variant.mutation_string,
+      String(variant.order),
+      String(variant.score),
+      variant.risk_flags.join("; "),
+      variant.reasons.join("; ")
+    ])
+  ];
+  const plateRows = [
+    ["well", "variant_id", "mutation_string", "role", "score", "risk_flags"],
+    ...library.plate_layout.map((well) => [
+      well.well,
+      well.variant_id,
+      well.mutation_string,
+      well.role,
+      String(well.score),
+      well.risk_flags.join("; ")
+    ])
+  ];
+  const worksheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+${worksheetRowsXml([
+  ["Mutation library"],
+  [`library_size: ${library.library_size}`, `plate_format: ${library.plate_format}`, `variant_count: ${library.variant_count}`],
+  [],
+  ["Variants"],
+  ...variantRows,
+  [],
+  ["Plate layout"],
+  ...plateRows
+])}
+  </sheetData>
+</worksheet>`;
+
+  return zipStore([
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Library" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      content: worksheetXml
+    }
+  ]);
+}
+
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
   const rawSites = content.content_json?.sites;
   if (!Array.isArray(rawSites)) {
@@ -244,4 +324,137 @@ function valueOrDash(value: unknown): string | number {
     return value;
   }
   return "-";
+}
+
+function worksheetRowsXml(rows: string[][]): string {
+  return rows
+    .map((row, rowIndex) => {
+      const cells = row
+        .map((value, columnIndex) => {
+          const ref = `${columnName(columnIndex + 1)}${rowIndex + 1}`;
+          return `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+        })
+        .join("");
+      return `    <row r="${rowIndex + 1}">${cells}</row>`;
+    })
+    .join("\n");
+}
+
+function columnName(index: number): string {
+  let name = "";
+  let next = index;
+  while (next > 0) {
+    const remainder = (next - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    next = Math.floor((next - 1) / 26);
+  }
+  return name;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function zipStore(files: Array<{ name: string; content: string }>): Uint8Array {
+  const encoder = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const contentBytes = encoder.encode(file.content);
+    const crc = crc32(contentBytes);
+    const localHeader = concatBytes(
+      u32(0x04034b50),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(contentBytes.length),
+      u32(contentBytes.length),
+      u16(nameBytes.length),
+      u16(0),
+      nameBytes
+    );
+    localParts.push(localHeader, contentBytes);
+
+    centralParts.push(
+      concatBytes(
+        u32(0x02014b50),
+        u16(20),
+        u16(20),
+        u16(0),
+        u16(0),
+        u16(0),
+        u16(0),
+        u32(crc),
+        u32(contentBytes.length),
+        u32(contentBytes.length),
+        u16(nameBytes.length),
+        u16(0),
+        u16(0),
+        u16(0),
+        u16(0),
+        u32(0),
+        u32(offset),
+        nameBytes
+      )
+    );
+    offset += localHeader.length + contentBytes.length;
+  }
+
+  const centralDirectory = concatBytes(...centralParts);
+  const endOfCentralDirectory = concatBytes(
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(files.length),
+    u16(files.length),
+    u32(centralDirectory.length),
+    u32(offset),
+    u16(0)
+  );
+  return concatBytes(...localParts, centralDirectory, endOfCentralDirectory);
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function u16(value: number): Uint8Array {
+  return new Uint8Array([value & 0xff, (value >>> 8) & 0xff]);
+}
+
+function u32(value: number): Uint8Array {
+  return new Uint8Array([
+    value & 0xff,
+    (value >>> 8) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 24) & 0xff
+  ]);
+}
+
+function concatBytes(...chunks: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
   filterConservationSites,
@@ -267,4 +268,40 @@ test("builds mutation library design parameters from selected controls", () => {
     max_order: 3,
     plate_format: 384
   });
+});
+
+test("builds xlsx workbook bytes for mutation library export", () => {
+  const workbookBytes = buildMutationLibraryWorkbookBytes({
+    library_size: 24,
+    plate_format: 96,
+    variant_count: 1,
+    variants: [
+      {
+        variant_id: "VAR-L10A-F12A",
+        mutation_string: "L10A/F12A",
+        order: 2,
+        score: 2.1,
+        risk_flags: ["ddg_destabilizing_member"],
+        reasons: ["test reason"]
+      }
+    ],
+    plate_layout: [
+      {
+        well: "A1",
+        variant_id: "WT",
+        mutation_string: "WT",
+        role: "wt_control",
+        score: "-",
+        risk_flags: []
+      }
+    ],
+    csv_text: "well,variant_id,mutation_string,role,score,risk_flags"
+  });
+
+  assert.equal(workbookBytes[0], 0x50);
+  assert.equal(workbookBytes[1], 0x4b);
+  const workbookText = new TextDecoder().decode(workbookBytes);
+  assert.match(workbookText, /\[Content_Types\]\.xml/);
+  assert.match(workbookText, /xl\/worksheets\/sheet1\.xml/);
+  assert.match(workbookText, /L10A\/F12A/);
 });

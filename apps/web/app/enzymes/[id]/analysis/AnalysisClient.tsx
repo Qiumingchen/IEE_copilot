@@ -18,6 +18,7 @@ import type {
 } from "../../../../lib/types";
 import {
   buildLibraryDesignParameters,
+  buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
@@ -330,6 +331,24 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     const link = document.createElement("a");
     link.href = url;
     link.download = `mutation-library-${enzymeId}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadMutationLibraryXlsx() {
+    if (!mutationLibrary) {
+      return;
+    }
+    const workbookBytes = buildMutationLibraryWorkbookBytes(mutationLibrary);
+    const workbookBuffer = new ArrayBuffer(workbookBytes.byteLength);
+    new Uint8Array(workbookBuffer).set(workbookBytes);
+    const blob = new Blob([workbookBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `mutation-library-${enzymeId}.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -774,6 +793,14 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 type="button"
               >
                 Download CSV
+              </button>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!mutationLibrary}
+                onClick={downloadMutationLibraryXlsx}
+                type="button"
+              >
+                Download XLSX
               </button>
             </div>
           </div>
