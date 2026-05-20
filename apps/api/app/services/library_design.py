@@ -87,7 +87,8 @@ def _single_mutations_from_recommendations(
         priority_score = _as_float(candidate.get("priority_score"))
         category = str(candidate.get("conservation_category") or "unclassified")
         rationale = str(candidate.get("rationale") or "")
-        for mutation_string in candidate.get("suggested_mutations", []):
+        for suggestion in _suggestions_for_candidate(candidate):
+            mutation_string = suggestion["mutation_string"]
             normalized = str(mutation_string).strip().upper()
             if not normalized or normalized in single_mutations:
                 continue
@@ -95,12 +96,16 @@ def _single_mutations_from_recommendations(
             if len(mutations) != 1:
                 continue
             rosetta = rosetta_by_mutation.get(normalized, {})
+            scored_total = _as_float_or_none(suggestion.get("total_score"))
             single_mutations[normalized] = {
                 "mutation_string": normalized,
                 "mutations": mutations,
-                "priority_score": priority_score,
+                "priority_score": scored_total if scored_total is not None else priority_score,
+                "recommendation_score": scored_total,
                 "conservation_category": category,
                 "rationale": rationale,
+                "risk_summary": suggestion.get("risk_summary") or [],
+                "score_components": suggestion.get("components") or [],
                 "ddg_kcal_per_mol": rosetta.get("ddg_kcal_per_mol"),
                 "interpretation": rosetta.get("interpretation"),
             }
@@ -126,9 +131,26 @@ def _score_variant(members: list[dict[str, Any]]) -> dict[str, Any]:
     score = base_score
     reasons = [f"{member['mutation_string']} from {member['conservation_category']} hotspot" for member in members]
     risk_flags: list[str] = []
+    member_scores = []
 
-    ddg_values = [_as_float_or_none(member.get("ddg_kcal_per_mol")) for member in members]
-    for ddg in [value for value in ddg_values if value is not None]:
+    for member in members:
+        recommendation_score = _as_float_or_none(member.get("recommendation_score"))
+        if recommendation_score is not None:
+            member_scores.append(
+                {
+                    "mutation_string": member["mutation_string"],
+                    "total_score": recommendation_score,
+                }
+            )
+            reasons.append(f"{member['mutation_string']} from scored recommendation {recommendation_score:.2f}")
+        risk_flags.extend(str(risk) for risk in member.get("risk_summary", []) if risk)
+
+    legacy_ddg_values = [
+        _as_float_or_none(member.get("ddg_kcal_per_mol"))
+        for member in members
+        if member.get("recommendation_score") is None
+    ]
+    for ddg in [value for value in legacy_ddg_values if value is not None]:
         if ddg < 0:
             score += min(abs(ddg) * 0.5, 1.0)
             reasons.append(f"member has stabilizing Rosetta ddG {ddg:.2f} kcal/mol")
@@ -157,6 +179,7 @@ def _score_variant(members: list[dict[str, Any]]) -> dict[str, Any]:
         "reasons": reasons,
         "risk_flags": sorted(set(risk_flags)),
         "mutations": [mutation.model_dump() for mutation in mutations],
+        "member_scores": member_scores,
     }
 
 
@@ -200,6 +223,20 @@ def _plate_layout_csv(plate_layout: list[dict[str, Any]]) -> str:
             )
         )
     return "\n".join(lines)
+
+
+def _suggestions_for_candidate(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+    scored_suggestions = candidate.get("scored_suggestions")
+    if isinstance(scored_suggestions, list) and scored_suggestions:
+        return [
+            suggestion
+            for suggestion in scored_suggestions
+            if isinstance(suggestion, dict) and suggestion.get("mutation_string")
+        ]
+    return [
+        {"mutation_string": mutation_string}
+        for mutation_string in candidate.get("suggested_mutations", [])
+    ]
 
 
 def _as_float(value: Any) -> float:

@@ -87,3 +87,69 @@ def test_design_mutation_library_supports_384_well_layout():
     assert library["plate_layout"][1]["well"] == "A2"
     assert library["plate_layout"][2]["well"] == "A3"
     assert library["plate_layout"][2]["mutation_string"] == "A5V"
+
+
+def test_design_mutation_library_prefers_scored_suggestions_when_available():
+    library = design_mutation_library(
+        [
+            {
+                "query_position": 20,
+                "wildtype_residue": "L",
+                "conservation_category": "variable",
+                "priority_score": 0.5,
+                "suggested_mutations": ["L20A", "L20V"],
+                "scored_suggestions": [
+                    {
+                        "mutation_string": "L20V",
+                        "total_score": 4.2,
+                        "risk_summary": ["medium_solubility_risk"],
+                        "components": [
+                            {
+                                "name": "rosetta_stability",
+                                "value": 0.6,
+                                "weight": 2.0,
+                                "contribution": 1.2,
+                                "rationale": "stabilizing Rosetta result",
+                            }
+                        ],
+                    },
+                    {
+                        "mutation_string": "L20A",
+                        "total_score": 1.1,
+                        "risk_summary": [],
+                        "components": [],
+                    },
+                ],
+                "rationale": "variable site",
+            },
+            {
+                "query_position": 30,
+                "wildtype_residue": "A",
+                "conservation_category": "variable",
+                "priority_score": 3.0,
+                "suggested_mutations": ["A30V"],
+                "rationale": "legacy high priority site",
+            },
+        ],
+        [
+            {
+                "mutation_string": "L20V",
+                "ddg_kcal_per_mol": -1.0,
+                "interpretation": "stabilizing",
+            }
+        ],
+        library_size=3,
+        max_order=1,
+        plate_format=96,
+    )
+
+    assert [variant["mutation_string"] for variant in library["variants"]] == [
+        "L20V",
+        "A30V",
+        "L20A",
+    ]
+    top_variant = library["variants"][0]
+    assert top_variant["score"] == 4.2
+    assert "medium_solubility_risk" in top_variant["risk_flags"]
+    assert any("scored recommendation" in reason for reason in top_variant["reasons"])
+    assert top_variant["member_scores"] == [{"mutation_string": "L20V", "total_score": 4.2}]
