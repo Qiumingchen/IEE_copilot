@@ -112,6 +112,10 @@ function textOrDash(value: string | null | undefined): string {
   return value && value.trim() ? value : "-";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function summarizeStructureChains(structure: StructureRecord): string {
   const chains = structure.chain_summary?.chains;
   if (!Array.isArray(chains) || chains.length === 0) {
@@ -119,7 +123,7 @@ function summarizeStructureChains(structure: StructureRecord): string {
   }
   return chains
     .map((chain) => {
-      if (!chain || typeof chain !== "object") {
+      if (!isRecord(chain)) {
         return null;
       }
       const chainId = "chain_id" in chain ? String(chain.chain_id) : "-";
@@ -132,25 +136,59 @@ function summarizeStructureChains(structure: StructureRecord): string {
 }
 
 function summarizeStructureLigands(structure: StructureRecord): string {
+  const summaryLigands = structure.ligand_summary?.ligands;
+  if (Array.isArray(summaryLigands) && summaryLigands.length > 0) {
+    return summaryLigands
+      .map((ligand) => {
+        if (!isRecord(ligand)) {
+          return null;
+        }
+        const ligandCode = "ligand_code" in ligand ? String(ligand.ligand_code) : "ligand";
+        const nearestSummary = summarizeNearestResidues(ligand);
+        return nearestSummary ? `${ligandCode} (${nearestSummary})` : ligandCode;
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
   const ligands = structure.ligands
     .map((ligand) => ligand.ligand_code ?? ligand.ligand_name)
     .filter(Boolean);
-  if (ligands.length > 0) {
-    return ligands.join(", ");
-  }
-  const summaryLigands = structure.ligand_summary?.ligands;
-  if (!Array.isArray(summaryLigands) || summaryLigands.length === 0) {
+  if (ligands.length === 0) {
     return "-";
   }
-  return summaryLigands
-    .map((ligand) => {
-      if (!ligand || typeof ligand !== "object" || !("ligand_code" in ligand)) {
+  return ligands.join(", ");
+}
+
+function summarizeNearestResidues(ligand: Record<string, unknown>): string {
+  const nearestResidues = ligand.nearest_residues;
+  if (!isRecord(nearestResidues)) {
+    return "";
+  }
+
+  return ["4A", "6A", "8A"]
+    .map((cutoff) => {
+      const residues = nearestResidues[cutoff];
+      if (!Array.isArray(residues) || residues.length === 0) {
         return null;
       }
-      return String(ligand.ligand_code);
+      const residueText = residues.slice(0, 3).map(formatNearestResidue).filter(Boolean).join(", ");
+      const suffix = residues.length > 3 ? ` +${residues.length - 3}` : "";
+      return residueText ? `${cutoff}: ${residueText}${suffix}` : null;
     })
     .filter(Boolean)
-    .join(", ");
+    .join("; ");
+}
+
+function formatNearestResidue(residue: unknown): string | null {
+  if (!isRecord(residue)) {
+    return null;
+  }
+  const chainId = "chain_id" in residue ? String(residue.chain_id) : "-";
+  const residueNumber = "residue_number" in residue ? String(residue.residue_number) : "?";
+  const oneLetter = "one_letter" in residue ? String(residue.one_letter) : "";
+  const distance = "min_distance_angstrom" in residue ? Number(residue.min_distance_angstrom) : NaN;
+  const distanceText = Number.isFinite(distance) ? ` ${distance.toFixed(1)}A` : "";
+  return `${chainId}${residueNumber}${oneLetter ? ` ${oneLetter}` : ""}${distanceText}`;
 }
 
 export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps) {
