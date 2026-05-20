@@ -209,6 +209,8 @@ def test_owner_can_create_visibility_request_for_private_experiment(client, db_s
     )
     assert request is not None
     assert request.requested_by == owner.id
+    db_session.refresh(experiment)
+    assert experiment.curation_status == CurationStatus.PENDING
 
 
 def test_visibility_request_is_idempotent_for_existing_pending_request(client, db_session):

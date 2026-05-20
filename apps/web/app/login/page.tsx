@@ -7,8 +7,8 @@ import { login } from "../../lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("demo@iee.local");
-  const [password, setPassword] = useState("demo-password");
+  const [email, setEmail] = useState("user@iee.local");
+  const [password, setPassword] = useState("user-password");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -34,7 +34,9 @@ export default function LoginPage() {
       <div className="border-b border-slate-200 pb-5">
         <p className="text-sm font-medium text-slate-500">IEE-Copilot</p>
         <h1 className="mt-2 text-2xl font-semibold text-slate-950">Sign in</h1>
-        <p className="mt-2 text-sm text-slate-600">Development seed account: demo@iee.local</p>
+        <p className="mt-2 text-sm text-slate-600">
+          User seed: user@iee.local / Admin seed: demo@iee.local
+        </p>
       </div>
 
       <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
@@ -43,7 +45,7 @@ export default function LoginPage() {
           <input
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
             name="email"
-            placeholder="demo@iee.local"
+            placeholder="user@iee.local"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -54,7 +56,7 @@ export default function LoginPage() {
           <input
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
             name="password"
-            placeholder="Seed account password"
+            placeholder="user-password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}

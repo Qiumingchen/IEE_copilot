@@ -6,10 +6,16 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   importExperiments,
+  listProjectExperiments,
   listProjects,
-  previewExperimentImport
+  previewExperimentImport,
+  requestExperimentVisibility
 } from "../../../../lib/api";
-import type { ExperimentImportPreview, ProjectRecord } from "../../../../lib/types";
+import type {
+  ExperimentImportPreview,
+  ProjectRecord,
+  UserExperimentRecord
+} from "../../../../lib/types";
 import {
   arrayBufferToBase64,
   buildExperimentImportRequest,
@@ -34,6 +40,7 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
   const [token, setToken] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [experiments, setExperiments] = useState<UserExperimentRecord[]>([]);
   const [csvText, setCsvText] = useState(sampleCsv);
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileContentBase64, setFileContentBase64] = useState<string | null>(null);
@@ -41,8 +48,10 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [isLoadingExperiments, setIsLoadingExperiments] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [activeExperimentId, setActiveExperimentId] = useState<string | null>(null);
 
   const previewSummary = useMemo(
     () => (preview ? summarizeExperimentPreview(preview) : null),
@@ -65,6 +74,27 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
       .catch(() => setError("Unable to load projects. Please check the API service and login."))
       .finally(() => setIsLoadingProjects(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setExperiments([]);
+      return;
+    }
+    void loadExperiments(token, projectId);
+  }, [token, projectId]);
+
+  async function loadExperiments(nextToken: string, nextProjectId: string) {
+    setIsLoadingExperiments(true);
+    setError(null);
+    try {
+      setExperiments(await listProjectExperiments(nextProjectId, nextToken));
+    } catch (exc) {
+      setExperiments([]);
+      setError(exc instanceof Error ? exc.message : "Unable to load saved experiments.");
+    } finally {
+      setIsLoadingExperiments(false);
+    }
+  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -129,11 +159,46 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
         importPayload()
       );
       setSuccessMessage(`Saved ${result.created_count} experiment measurements.`);
+      await loadExperiments(token, projectId);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Unable to save experiment data.");
     } finally {
       setIsImporting(false);
     }
+  }
+
+  async function handleRequestPublic(experimentId: string) {
+    if (!token || !projectId) {
+      return;
+    }
+    setActiveExperimentId(experimentId);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      await requestExperimentVisibility(experimentId, token);
+      setSuccessMessage("Publication request submitted for curator review.");
+      await loadExperiments(token, projectId);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Unable to request public visibility.");
+    } finally {
+      setActiveExperimentId(null);
+    }
+  }
+
+  function publicationAction(experiment: UserExperimentRecord) {
+    if (experiment.visibility === "public" && experiment.curation_status === "approved") {
+      return { label: "Approved", disabled: true };
+    }
+    if (experiment.curation_status === "pending") {
+      return { label: "Pending review", disabled: true };
+    }
+    if (
+      experiment.visibility === "private" &&
+      ["unreviewed", "rejected"].includes(experiment.curation_status)
+    ) {
+      return { label: "Request public", disabled: false };
+    }
+    return { label: "Not available", disabled: true };
   }
 
   return (
@@ -283,6 +348,79 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
           </div>
         </section>
       ) : null}
+
+      <section className="mt-10 border-t border-slate-200 pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-950">Saved experiments</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Submit private wet-lab measurements for curator review when they are ready to publish.
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={!token || !projectId || isLoadingExperiments}
+            onClick={() => token && projectId && void loadExperiments(token, projectId)}
+            type="button"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {isLoadingExperiments ? (
+          <p className="mt-4 text-sm text-slate-600">Loading saved experiments...</p>
+        ) : null}
+
+        {!isLoadingExperiments && experiments.length === 0 ? (
+          <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            No saved experiments for this project yet.
+          </p>
+        ) : null}
+
+        {experiments.length > 0 ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <th className="px-3 py-2">Variant</th>
+                  <th className="px-3 py-2">Mutation</th>
+                  <th className="px-3 py-2">Measurement</th>
+                  <th className="px-3 py-2">Visibility</th>
+                  <th className="px-3 py-2">Curation</th>
+                  <th className="px-3 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {experiments.map((experiment) => {
+                  const action = publicationAction(experiment);
+                  return (
+                    <tr className="border-b border-slate-100 text-slate-800" key={experiment.id}>
+                      <td className="px-3 py-2">{experiment.variant_name}</td>
+                      <td className="px-3 py-2">{experiment.mutation_string ?? "WT"}</td>
+                      <td className="px-3 py-2">
+                        {experiment.measured_property}: {experiment.measured_value}
+                        {experiment.unit ? ` ${experiment.unit}` : ""}
+                      </td>
+                      <td className="px-3 py-2">{experiment.visibility}</td>
+                      <td className="px-3 py-2">{experiment.curation_status}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                          disabled={action.disabled || activeExperimentId === experiment.id}
+                          onClick={() => void handleRequestPublic(experiment.id)}
+                          type="button"
+                        >
+                          {activeExperimentId === experiment.id ? "Submitting..." : action.label}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
     </main>
   );
 }

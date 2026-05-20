@@ -22,6 +22,8 @@ from app.db.session import get_session_local
 
 DEMO_EMAIL = "demo@iee.local"
 DEMO_PASSWORD = "demo-password"
+DEMO_USER_EMAIL = "user@iee.local"
+DEMO_USER_PASSWORD = "user-password"
 
 
 def upsert_family(session, module: EnzymeModule, name: str, description: str) -> EnzymeFamily:
@@ -35,19 +37,90 @@ def upsert_family(session, module: EnzymeModule, name: str, description: str) ->
     return family
 
 
+def upsert_user(
+    session,
+    *,
+    email: str,
+    password: str,
+    display_name: str,
+    role: UserRole,
+) -> User:
+    user = session.scalar(select(User).where(User.email == email))
+    if user is None:
+        user = User(
+            email=email,
+            password_hash=hash_password(password),
+            display_name=display_name,
+            role=role,
+        )
+        session.add(user)
+        session.flush()
+    else:
+        user.display_name = display_name
+        user.role = role
+    return user
+
+
+def upsert_owned_project(
+    session,
+    *,
+    owner: User,
+    name: str,
+    description: str,
+    target_enzyme_module: EnzymeModule,
+) -> Project:
+    project = session.scalar(
+        select(Project).where(Project.owner_user_id == owner.id, Project.name == name)
+    )
+    if project is None:
+        project = Project(
+            owner_user_id=owner.id,
+            name=name,
+            description=description,
+            target_enzyme_module=target_enzyme_module,
+        )
+        session.add(project)
+        session.flush()
+    else:
+        project.description = description
+        project.target_enzyme_module = target_enzyme_module
+
+    membership = session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == owner.id,
+        )
+    )
+    if membership is None:
+        session.add(
+            ProjectMember(
+                project_id=project.id,
+                user_id=owner.id,
+                role=ProjectMemberRole.OWNER,
+            )
+        )
+    elif membership.role != ProjectMemberRole.OWNER:
+        membership.role = ProjectMemberRole.OWNER
+    return project
+
+
 def main() -> None:
     session_factory = get_session_local()
     with session_factory() as session:
-        user = session.scalar(select(User).where(User.email == DEMO_EMAIL))
-        if user is None:
-            user = User(
-                email=DEMO_EMAIL,
-                password_hash=hash_password(DEMO_PASSWORD),
-                display_name="IEE Demo Admin",
-                role=UserRole.ADMIN,
-            )
-            session.add(user)
-            session.flush()
+        admin_user = upsert_user(
+            session,
+            email=DEMO_EMAIL,
+            password=DEMO_PASSWORD,
+            display_name="IEE Demo Admin",
+            role=UserRole.ADMIN,
+        )
+        regular_user = upsert_user(
+            session,
+            email=DEMO_USER_EMAIL,
+            password=DEMO_USER_PASSWORD,
+            display_name="IEE Demo User",
+            role=UserRole.USER,
+        )
 
         upsert_family(
             session,
@@ -62,35 +135,20 @@ def main() -> None:
             "Mature microbial transglutaminase engineering targets.",
         )
 
-        project = session.scalar(
-            select(Project).where(Project.owner_user_id == user.id, Project.name == "Demo project")
+        upsert_owned_project(
+            session,
+            owner=admin_user,
+            name="Demo admin project",
+            description="Seed project for curator and administrator evaluation.",
+            target_enzyme_module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
         )
-        if project is None:
-            project = Project(
-                owner_user_id=user.id,
-                name="Demo project",
-                description="Seed project for IEE-Copilot evaluation.",
-                target_enzyme_module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
-            )
-            session.add(project)
-            session.flush()
-
-        membership = session.scalar(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project.id,
-                ProjectMember.user_id == user.id,
-            )
+        upsert_owned_project(
+            session,
+            owner=regular_user,
+            name="Demo user project",
+            description="Seed project for regular user wet-lab data submission.",
+            target_enzyme_module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
         )
-        if membership is None:
-            session.add(
-                ProjectMember(
-                    project_id=project.id,
-                    user_id=user.id,
-                    role=ProjectMemberRole.OWNER,
-                )
-            )
-        elif membership.role != ProjectMemberRole.OWNER:
-            membership.role = ProjectMemberRole.OWNER
 
         session.commit()
 

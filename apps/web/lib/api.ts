@@ -16,6 +16,7 @@ import type {
   StructureRecord,
   SubstrateRecord,
   TokenResponse,
+  UserExperimentRecord,
   VisibilityRequestDetailRecord,
   VisibilityRequestRecord
 } from "./types";
@@ -102,6 +103,16 @@ export async function getEnzyme(enzymeId: string, token: string): Promise<Enzyme
 
 export async function listProjects(token: string): Promise<ProjectRecord[]> {
   return fetchWithToken<ProjectRecord[]>("/projects", token);
+}
+
+export async function listProjectExperiments(
+  projectId: string,
+  token: string
+): Promise<UserExperimentRecord[]> {
+  return fetchWithTokenAndErrorMessage<UserExperimentRecord[]>(
+    `/projects/${projectId}/experiments`,
+    token
+  );
 }
 
 export async function getEnzymeRecordBundle(
@@ -289,6 +300,20 @@ export async function importExperiments(
     {
       method: "POST",
       body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function requestExperimentVisibility(
+  experimentId: string,
+  token: string
+): Promise<VisibilityRequestRecord> {
+  return fetchWithTokenAndErrorMessage<VisibilityRequestRecord>(
+    `/experiments/${experimentId}/visibility-requests`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ requested_visibility: "public" })
     }
   );
 }

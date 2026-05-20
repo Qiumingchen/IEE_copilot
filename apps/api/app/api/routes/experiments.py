@@ -74,9 +74,12 @@ def create_visibility_request(
         )
     )
     if existing_request is not None:
+        experiment.curation_status = CurationStatus.PENDING
+        db.commit()
         response.status_code = status.HTTP_200_OK
         return existing_request
 
+    experiment.curation_status = CurationStatus.PENDING
     visibility_request = VisibilityRequest(
         project_id=experiment.project_id,
         target_type="user_experiment",
