@@ -1,0 +1,61 @@
+import type { MutationRecord } from "../../../../lib/types";
+
+export type MutationPositionSummary = {
+  position: number;
+  count: number;
+  mutations: string[];
+};
+
+export function buildMutationPositionSummary(
+  records: Array<Pick<MutationRecord, "mutation_string" | "mutation_positions">>
+): MutationPositionSummary[] {
+  const byPosition = new Map<number, Set<string>>();
+  for (const record of records) {
+    for (const mutation of record.mutation_positions) {
+      if (!Number.isFinite(mutation.position)) {
+        continue;
+      }
+      const mutations = byPosition.get(mutation.position) ?? new Set<string>();
+      mutations.add(record.mutation_string);
+      byPosition.set(mutation.position, mutations);
+    }
+  }
+
+  return Array.from(byPosition.entries())
+    .map(([position, mutations]) => ({
+      position,
+      count: mutations.size,
+      mutations: Array.from(mutations).sort((left, right) => left.localeCompare(right))
+    }))
+    .sort((left, right) => left.position - right.position);
+}
+
+export function formatPropertyDelta(delta: Record<string, unknown> | null | undefined): string {
+  if (!delta || Object.keys(delta).length === 0) {
+    return "-";
+  }
+  return Object.entries(delta)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(" · ");
+}
+
+export function formatMutationEvidence(
+  record: Pick<MutationRecord, "assay_condition_summary">
+): string {
+  const summary = record.assay_condition_summary;
+  if (!summary) {
+    return "-";
+  }
+  const source = typeof summary.source === "string" ? summary.source : "";
+  const evidence = typeof summary.evidence === "string" ? summary.evidence : "";
+  return [source, evidence].filter(Boolean).join(" · ") || "-";
+}
+
+export function formatMutationPositions(record: Pick<MutationRecord, "mutation_positions">): string {
+  if (record.mutation_positions.length === 0) {
+    return "-";
+  }
+  return record.mutation_positions
+    .map((mutation) => `${mutation.wildtype}${mutation.position}${mutation.mutant}`)
+    .join(" / ");
+}

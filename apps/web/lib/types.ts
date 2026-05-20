@@ -180,6 +180,36 @@ export type PropertyRankingResponse = {
   groups: PropertyRankingGroupRecord[];
 };
 
+export type MutationPositionRecord = {
+  wildtype: string;
+  position: number;
+  mutant: string;
+};
+
+export type MutationRecord = {
+  id: string;
+  enzyme_entry_id: string;
+  parent_enzyme_entry_id: string | null;
+  mutation_string: string;
+  mutation_positions: MutationPositionRecord[];
+  effect_summary: string | null;
+  property_delta: Record<string, unknown> | null;
+  substrate: string | null;
+  assay_condition_summary: Record<string, unknown> | null;
+  reference_id: string | null;
+  is_user_uploaded: boolean;
+  visibility: string;
+  curation_status: string;
+};
+
+export type MutationQueryFilters = {
+  position?: string;
+  property_delta_key?: string;
+  beneficial_only?: boolean;
+  source?: string;
+  visibility?: "public" | "private";
+};
+
 export type KineticRecord = {
   id: string;
   enzyme_entry_id: string;

@@ -25,13 +25,14 @@ test("utility navigation exposes account destinations", () => {
   );
 });
 
-test("enzyme navigation links detail, structures, properties, analysis, and wet-lab data for the same enzyme", () => {
+test("enzyme navigation links detail, structures, properties, mutations, analysis, and wet-lab data for the same enzyme", () => {
   assert.deepEqual(
     buildEnzymeNavigation("enzyme-123").map((item) => [item.label, item.href]),
     [
       ["Detail", "/enzymes/enzyme-123"],
       ["Structures", "/enzymes/enzyme-123/structures"],
       ["Properties", "/enzymes/enzyme-123/properties"],
+      ["Mutations", "/enzymes/enzyme-123/mutations"],
       ["Analysis", "/enzymes/enzyme-123/analysis"],
       ["Wet-lab data", "/enzymes/enzyme-123/experiments"]
     ]

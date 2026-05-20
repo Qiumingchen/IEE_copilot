@@ -1,0 +1,49 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  buildMutationPositionSummary,
+  formatMutationEvidence,
+  formatPropertyDelta
+} from "../app/enzymes/[id]/mutations/mutation-knowledge-utils.ts";
+
+const records = [
+  {
+    mutation_string: "S2P",
+    mutation_positions: [{ wildtype: "S", position: 2, mutant: "P" }],
+    property_delta: { optimal_temperature_delta_degC: 5 },
+    assay_condition_summary: {
+      source: "enzyme_data_mock",
+      evidence: "Mock mutant data record"
+    }
+  },
+  {
+    mutation_string: "S2P/D3Y",
+    mutation_positions: [
+      { wildtype: "S", position: 2, mutant: "P" },
+      { wildtype: "D", position: 3, mutant: "Y" }
+    ],
+    property_delta: { specific_activity_fold_change: 1.8 },
+    assay_condition_summary: { source: "literature" }
+  }
+];
+
+test("buildMutationPositionSummary counts records per mutated site", () => {
+  assert.deepEqual(buildMutationPositionSummary(records), [
+    { position: 2, count: 2, mutations: ["S2P", "S2P/D3Y"] },
+    { position: 3, count: 1, mutations: ["S2P/D3Y"] }
+  ]);
+});
+
+test("formatPropertyDelta renders key value pairs", () => {
+  assert.equal(
+    formatPropertyDelta({ optimal_temperature_delta_degC: 5, specific_activity_fold_change: 1.8 }),
+    "optimal_temperature_delta_degC: 5 · specific_activity_fold_change: 1.8"
+  );
+  assert.equal(formatPropertyDelta(null), "-");
+});
+
+test("formatMutationEvidence combines source and evidence text", () => {
+  assert.equal(formatMutationEvidence(records[0]), "enzyme_data_mock · Mock mutant data record");
+  assert.equal(formatMutationEvidence({ assay_condition_summary: null }), "-");
+});

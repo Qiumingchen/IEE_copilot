@@ -17,6 +17,7 @@ export function buildEnzymeNavigation(enzymeId: string): NavigationItem[] {
     { label: "Detail", href: `/enzymes/${encodedId}` },
     { label: "Structures", href: `/enzymes/${encodedId}/structures` },
     { label: "Properties", href: `/enzymes/${encodedId}/properties` },
+    { label: "Mutations", href: `/enzymes/${encodedId}/mutations` },
     { label: "Analysis", href: `/enzymes/${encodedId}/analysis` },
     { label: "Wet-lab data", href: `/enzymes/${encodedId}/experiments` }
   ];

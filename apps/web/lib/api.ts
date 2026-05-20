@@ -10,6 +10,8 @@ import type {
   ExperimentImportResult,
   JobResponse,
   KineticRecord,
+  MutationQueryFilters,
+  MutationRecord,
   PropertyRankingMode,
   PropertyRankingResponse,
   PropertyRecord,
@@ -221,6 +223,35 @@ export async function getPropertyRanking(
   });
   return fetchWithToken<PropertyRankingResponse>(
     `/enzymes/${enzymeId}/property-rankings?${params.toString()}`,
+    token
+  );
+}
+
+export async function listMutationRecords(
+  enzymeId: string,
+  token: string,
+  filters: MutationQueryFilters = {}
+): Promise<MutationRecord[]> {
+  const params = new URLSearchParams();
+  if (filters.position?.trim()) {
+    params.set("position", filters.position.trim());
+  }
+  if (filters.property_delta_key?.trim()) {
+    params.set("property_delta_key", filters.property_delta_key.trim());
+  }
+  if (filters.beneficial_only) {
+    params.set("beneficial_only", "true");
+  }
+  if (filters.source?.trim()) {
+    params.set("source", filters.source.trim());
+  }
+  if (filters.visibility) {
+    params.set("visibility", filters.visibility);
+  }
+
+  const query = params.toString();
+  return fetchWithToken<MutationRecord[]>(
+    `/enzymes/${enzymeId}/mutations${query ? `?${query}` : ""}`,
     token
   );
 }
