@@ -14,6 +14,7 @@ from app.db.models import (
 from worker.jobs import (
     finish_conservation_profile_job,
     finish_homology_collection_job,
+    finish_library_design_job,
     finish_mutation_recommendation_job,
     finish_msa_job,
     finish_placeholder_job,
@@ -398,6 +399,84 @@ def test_finish_rosetta_ddg_job_creates_mock_ddg_artifact():
     assert job.result_summary_json["artifact_type"] == "rosetta_ddg"
     assert artifact is not None
     assert artifact.object_key == f"analysis-jobs/{job.id}/rosetta-ddg.json"
+    assert artifact.content_type == "application/json"
+    assert artifact.size_bytes > 0
+
+
+def test_finish_library_design_job_creates_mutation_library_artifact():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Worker library family",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker library test mTGase",
+            organism="Streptomyces mobaraensis",
+            source="test",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="library_design",
+            status=JobStatus.QUEUED,
+            parameters_json={
+                "library_size": 6,
+                "max_order": 2,
+                "plate_format": 96,
+                "recommendation_candidates": [
+                    {
+                        "query_position": 10,
+                        "wildtype_residue": "L",
+                        "conservation_category": "variable",
+                        "priority_score": 1.8,
+                        "suggested_mutations": ["L10A"],
+                    },
+                    {
+                        "query_position": 12,
+                        "wildtype_residue": "F",
+                        "conservation_category": "moderately_conserved",
+                        "priority_score": 1.2,
+                        "suggested_mutations": ["F12A"],
+                    },
+                ],
+                "rosetta_results": [
+                    {
+                        "mutation_string": "L10A",
+                        "ddg_kcal_per_mol": -0.6,
+                        "interpretation": "stabilizing",
+                    }
+                ],
+            },
+        )
+        db.add(job)
+        db.commit()
+
+        finish_library_design_job(db, job.id, bucket="iee-artifacts")
+
+        artifact = db.scalar(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.job_id == job.id,
+                AnalysisArtifact.artifact_type == "mutation_library",
+            )
+        )
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json["message"] == "mutation library design completed"
+    assert job.result_summary_json["artifact_type"] == "mutation_library"
+    assert job.result_summary_json["variant_count"] > 0
+    assert job.result_summary_json["plate_layout"][0]["role"] == "wt_control"
+    assert job.result_summary_json["plate_layout"][1]["role"] == "blank_control"
+    assert job.result_summary_json["csv_text"].startswith("well,variant_id")
+    assert artifact is not None
+    assert artifact.object_key == f"analysis-jobs/{job.id}/mutation-library.json"
     assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
 

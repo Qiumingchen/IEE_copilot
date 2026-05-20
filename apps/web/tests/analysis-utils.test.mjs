@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildLibraryDesignParameters,
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
+  getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
   getRosettaDdgRunViews
@@ -194,4 +196,75 @@ test("builds rosetta ddg run views with status and error messages", () => {
       finished_at: "2026-05-19T10:01:05"
     }
   ]);
+});
+
+test("extracts mutation library variants and plate layout from artifact content", () => {
+  const content = {
+    artifact_id: "artifact-4",
+    artifact_type: "mutation_library",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-4/mutation-library.json",
+    content_text: null,
+    content_json: {
+      library_size: 24,
+      plate_format: 96,
+      variant_count: 1,
+      variants: [
+        {
+          variant_id: "VAR-L10A-F12A",
+          mutation_string: "L10A/F12A",
+          order: 2,
+          score: 2.1,
+          risk_flags: ["ddg_destabilizing_member"],
+          reasons: ["test reason"]
+        }
+      ],
+      plate_layout: [
+        {
+          well: "A1",
+          variant_id: "WT",
+          mutation_string: "WT",
+          role: "wt_control",
+          score: null,
+          risk_flags: []
+        }
+      ],
+      csv_text: "well,variant_id,mutation_string,role,score,risk_flags"
+    }
+  };
+
+  assert.deepEqual(getMutationLibrary(content), {
+    library_size: 24,
+    plate_format: 96,
+    variant_count: 1,
+    variants: [
+      {
+        variant_id: "VAR-L10A-F12A",
+        mutation_string: "L10A/F12A",
+        order: 2,
+        score: 2.1,
+        risk_flags: ["ddg_destabilizing_member"],
+        reasons: ["test reason"]
+      }
+    ],
+    plate_layout: [
+      {
+        well: "A1",
+        variant_id: "WT",
+        mutation_string: "WT",
+        role: "wt_control",
+        score: "-",
+        risk_flags: []
+      }
+    ],
+    csv_text: "well,variant_id,mutation_string,role,score,risk_flags"
+  });
+});
+
+test("builds mutation library design parameters from selected controls", () => {
+  assert.deepEqual(buildLibraryDesignParameters(384, 3, 384), {
+    library_size: 384,
+    max_order: 3,
+    plate_format: 384
+  });
 });

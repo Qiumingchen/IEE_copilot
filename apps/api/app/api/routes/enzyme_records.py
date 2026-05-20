@@ -46,6 +46,7 @@ from app.services.mutations import (
 from worker.jobs import (
     run_conservation_profile,
     run_homology_collection,
+    run_library_design,
     run_msa,
     run_mutation_recommendation,
     run_rosetta_ddg,
@@ -62,6 +63,7 @@ ANALYSIS_ARTIFACT_TYPES = {
     "conservation_profile",
     "mutation_recommendations",
     "rosetta_ddg",
+    "mutation_library",
 }
 
 ANALYSIS_JOB_TYPES = {
@@ -70,6 +72,7 @@ ANALYSIS_JOB_TYPES = {
     "conservation_profile",
     "mutation_recommendation",
     "rosetta_ddg",
+    "library_design",
 }
 
 
@@ -202,6 +205,46 @@ def _latest_conservation_sites_for_recommendation(db: Session, enzyme_id: str) -
     return [site for site in sites if isinstance(site, dict)]
 
 
+def _latest_recommendation_candidates_for_library(db: Session, enzyme_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "mutation_recommendations",
+        )
+        .order_by(AnalysisArtifact.created_at.desc())
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    candidates = summary.get("candidates", [])
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _rosetta_results_for_library(db: Session, enzyme_id: str) -> list[dict]:
+    rows = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "rosetta_ddg",
+        )
+        .order_by(AnalysisArtifact.created_at)
+    ).all()
+
+    results = []
+    for _artifact, job in rows:
+        summary = job.result_summary_json or {}
+        if summary.get("mutation_string"):
+            results.append(summary)
+    return results
+
+
 def _analysis_job_parameters(
     db: Session,
     enzyme_id: str,
@@ -230,6 +273,12 @@ def _analysis_job_parameters(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         parameters["mutation_string"] = normalize_mutation_string(mutations)
         parameters["parsed_mutations"] = [mutation.model_dump() for mutation in mutations]
+    if job_type == "library_design":
+        parameters["recommendation_candidates"] = _latest_recommendation_candidates_for_library(db, enzyme_id)
+        parameters["rosetta_results"] = _rosetta_results_for_library(db, enzyme_id)
+        parameters["library_size"] = int(parameters.get("library_size") or 24)
+        parameters["max_order"] = int(parameters.get("max_order") or 2)
+        parameters["plate_format"] = int(parameters.get("plate_format") or 96)
     return parameters
 
 
@@ -248,6 +297,9 @@ def _enqueue_analysis_job(job_type: str, job_id: str) -> None:
         return
     if job_type == "rosetta_ddg":
         run_rosetta_ddg.delay(job_id)
+        return
+    if job_type == "library_design":
+        run_library_design.delay(job_id)
         return
     raise ValueError(f"unsupported analysis job type: {job_type}")
 
@@ -288,6 +340,15 @@ def _artifact_content_from_summary(
             "interpretation": summary.get("interpretation"),
             "structure_id": summary.get("structure_id"),
             "runner": summary.get("runner"),
+        }
+    elif artifact.artifact_type == "mutation_library":
+        content_json = {
+            "library_size": summary.get("library_size"),
+            "plate_format": summary.get("plate_format"),
+            "variant_count": summary.get("variant_count"),
+            "variants": summary.get("variants", []),
+            "plate_layout": summary.get("plate_layout", []),
+            "csv_text": summary.get("csv_text", ""),
         }
 
     if content_text is None and content_json is None:

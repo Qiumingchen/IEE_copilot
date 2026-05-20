@@ -295,6 +295,68 @@ def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, 
     assert content_json["parsed_mutations"] == [{"wildtype": "L", "position": 10, "mutant": "A"}]
 
 
+def test_get_mutation_library_artifact_content_returns_library_payload(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="library_design",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "artifact_type": "mutation_library",
+            "library_size": 24,
+            "plate_format": 96,
+            "variant_count": 1,
+            "variants": [
+                {
+                    "variant_id": "VAR-L10A-F12A",
+                    "mutation_string": "L10A/F12A",
+                    "order": 2,
+                    "score": 2.1,
+                    "risk_flags": ["ddg_destabilizing_member"],
+                    "reasons": ["test reason"],
+                }
+            ],
+            "plate_layout": [
+                {
+                    "well": "A1",
+                    "variant_id": "WT",
+                    "mutation_string": "WT",
+                    "role": "wt_control",
+                    "score": None,
+                    "risk_flags": [],
+                }
+            ],
+            "csv_text": "well,variant_id,mutation_string,role,score,risk_flags",
+        },
+    )
+    db_session.add(job)
+    db_session.flush()
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=job.id,
+        artifact_type="mutation_library",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{job.id}/mutation-library.json",
+        content_type="application/json",
+        size_bytes=512,
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    response = client.get(
+        f"/enzymes/{enzyme_id}/analysis-artifacts/{artifact.id}/content",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    content_json = response.json()["content_json"]
+    assert content_json["library_size"] == 24
+    assert content_json["variants"][0]["mutation_string"] == "L10A/F12A"
+    assert content_json["plate_layout"][0]["role"] == "wt_control"
+    assert content_json["csv_text"].startswith("well,variant_id")
+
+
 def test_create_analysis_job_queues_selected_worker_task(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
@@ -636,6 +698,106 @@ def test_create_rosetta_ddg_job_rejects_wildtype_mismatch(client, db_session, mo
 
     assert response.status_code == 422
     assert "expected G at position 2 but found C" in response.json()["error"]["message"]
+
+
+def test_create_library_design_job_uses_latest_recommendation_and_rosetta_artifacts(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="library-design-sequence",
+        )
+    )
+    recommendation_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="mutation_recommendation",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "candidates": [
+                {
+                    "query_position": 10,
+                    "wildtype_residue": "L",
+                    "conservation_category": "variable",
+                    "priority_score": 1.8,
+                    "suggested_mutations": ["L10A"],
+                    "rationale": "variable site",
+                }
+            ]
+        },
+    )
+    rosetta_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="rosetta_ddg",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "mutation_string": "L10A",
+            "ddg_kcal_per_mol": -0.6,
+            "interpretation": "stabilizing",
+        },
+    )
+    db_session.add_all([recommendation_job, rosetta_job])
+    db_session.flush()
+    db_session.add_all(
+        [
+            AnalysisArtifact(
+                enzyme_entry_id=enzyme_id,
+                job_id=recommendation_job.id,
+                artifact_type="mutation_recommendations",
+                bucket="iee-artifacts",
+                object_key=f"analysis-jobs/{recommendation_job.id}/mutation-recommendations.json",
+                content_type="application/json",
+                size_bytes=256,
+            ),
+            AnalysisArtifact(
+                enzyme_entry_id=enzyme_id,
+                job_id=rosetta_job.id,
+                artifact_type="rosetta_ddg",
+                bucket="iee-artifacts",
+                object_key=f"analysis-jobs/{rosetta_job.id}/rosetta-ddg.json",
+                content_type="application/json",
+                size_bytes=128,
+            ),
+        ]
+    )
+    db_session.commit()
+    enqueued_job_ids = []
+
+    class LibraryDesignTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_library_design",
+        LibraryDesignTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "library_design",
+            "parameters_json": {"library_size": 48, "plate_format": 384},
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["job_type"] == "library_design"
+    assert body["parameters_json"]["library_size"] == 48
+    assert body["parameters_json"]["plate_format"] == 384
+    assert body["parameters_json"]["recommendation_candidates"] == recommendation_job.result_summary_json["candidates"]
+    assert body["parameters_json"]["rosetta_results"] == [rosetta_job.result_summary_json]
+    assert enqueued_job_ids == [body["id"]]
 
 
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):

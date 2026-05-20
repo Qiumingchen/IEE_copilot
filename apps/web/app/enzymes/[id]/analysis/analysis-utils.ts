@@ -46,6 +46,45 @@ export type RosettaDdgRunView = {
   finished_at: string | null;
 };
 
+export type MutationLibraryVariantView = {
+  variant_id: string;
+  mutation_string: string;
+  order: number | string;
+  score: number | string;
+  risk_flags: string[];
+  reasons: string[];
+};
+
+export type MutationLibraryPlateWellView = {
+  well: string;
+  variant_id: string;
+  mutation_string: string;
+  role: string;
+  score: number | string;
+  risk_flags: string[];
+};
+
+export type MutationLibraryView = {
+  library_size: number | string;
+  plate_format: number | string;
+  variant_count: number | string;
+  variants: MutationLibraryVariantView[];
+  plate_layout: MutationLibraryPlateWellView[];
+  csv_text: string;
+};
+
+export function buildLibraryDesignParameters(
+  librarySize: number,
+  maxOrder: number,
+  plateFormat: number
+): Record<string, number> {
+  return {
+    library_size: librarySize,
+    max_order: maxOrder,
+    plate_format: plateFormat
+  };
+}
+
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
   const rawSites = content.content_json?.sites;
   if (!Array.isArray(rawSites)) {
@@ -156,6 +195,48 @@ export function getRosettaDdgRunViews(
         finished_at: job.finished_at
       };
     });
+}
+
+export function getMutationLibrary(content: AnalysisArtifactContentRecord): MutationLibraryView | null {
+  if (content.artifact_type !== "mutation_library" || !content.content_json) {
+    return null;
+  }
+  const rawVariants = content.content_json.variants;
+  const rawPlateLayout = content.content_json.plate_layout;
+  return {
+    library_size: valueOrDash(content.content_json.library_size),
+    plate_format: valueOrDash(content.content_json.plate_format),
+    variant_count: valueOrDash(content.content_json.variant_count),
+    variants: Array.isArray(rawVariants)
+      ? rawVariants
+        .filter((variant): variant is Record<string, unknown> => (
+          typeof variant === "object" && variant !== null
+        ))
+        .map((variant) => ({
+          variant_id: String(valueOrDash(variant.variant_id)),
+          mutation_string: String(valueOrDash(variant.mutation_string)),
+          order: valueOrDash(variant.order),
+          score: valueOrDash(variant.score),
+          risk_flags: Array.isArray(variant.risk_flags) ? variant.risk_flags.map(String) : [],
+          reasons: Array.isArray(variant.reasons) ? variant.reasons.map(String) : []
+        }))
+      : [],
+    plate_layout: Array.isArray(rawPlateLayout)
+      ? rawPlateLayout
+        .filter((well): well is Record<string, unknown> => (
+          typeof well === "object" && well !== null
+        ))
+        .map((well) => ({
+          well: String(valueOrDash(well.well)),
+          variant_id: String(valueOrDash(well.variant_id)),
+          mutation_string: String(valueOrDash(well.mutation_string)),
+          role: String(valueOrDash(well.role)),
+          score: valueOrDash(well.score),
+          risk_flags: Array.isArray(well.risk_flags) ? well.risk_flags.map(String) : []
+        }))
+      : [],
+    csv_text: typeof content.content_json.csv_text === "string" ? content.content_json.csv_text : ""
+  };
 }
 
 function valueOrDash(value: unknown): string | number {
