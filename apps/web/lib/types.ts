@@ -148,6 +148,38 @@ export type PropertyRecord = {
   curation_status: string;
 };
 
+export type PropertyRankingMode = "reported_value" | "condition_grouped";
+
+export type PropertyRankingItemRecord = {
+  rank: number;
+  property_record_id: string;
+  enzyme_entry_id: string;
+  enzyme_name: string;
+  organism: string | null;
+  value_original: string;
+  unit_original: string | null;
+  value_standardized: string | null;
+  unit_standardized: string | null;
+  substrate: string | null;
+  assay_temperature: string | null;
+  assay_pH: string | null;
+  method: string | null;
+  reference_id: string | null;
+};
+
+export type PropertyRankingGroupRecord = {
+  condition_key: Record<string, string | null>;
+  items: PropertyRankingItemRecord[];
+};
+
+export type PropertyRankingResponse = {
+  property_type: string;
+  ranking_mode: PropertyRankingMode;
+  comparison_warnings: string[];
+  items: PropertyRankingItemRecord[];
+  groups: PropertyRankingGroupRecord[];
+};
+
 export type KineticRecord = {
   id: string;
   enzyme_entry_id: string;

@@ -10,6 +10,8 @@ import type {
   ExperimentImportResult,
   JobResponse,
   KineticRecord,
+  PropertyRankingMode,
+  PropertyRankingResponse,
   PropertyRecord,
   ProjectRecord,
   SearchResponse,
@@ -205,6 +207,22 @@ export async function createPropertyRecord(
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+export async function getPropertyRanking(
+  enzymeId: string,
+  token: string,
+  propertyType: string,
+  rankingMode: PropertyRankingMode
+): Promise<PropertyRankingResponse> {
+  const params = new URLSearchParams({
+    property_type: propertyType,
+    ranking_mode: rankingMode
+  });
+  return fetchWithToken<PropertyRankingResponse>(
+    `/enzymes/${enzymeId}/property-rankings?${params.toString()}`,
+    token
+  );
 }
 
 export async function createStructureRecord(
