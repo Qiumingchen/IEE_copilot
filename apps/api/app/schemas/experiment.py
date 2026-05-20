@@ -48,3 +48,21 @@ class UserExperimentResponse(BaseModel):
     created_by: str
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class VisibilityRequestCreate(BaseModel):
+    requested_visibility: str
+
+
+class VisibilityRequestResponse(BaseModel):
+    id: str
+    project_id: str
+    target_type: str
+    target_id: str
+    requested_visibility: str
+    status: str
+    requested_by: str
+    reviewed_by: str | None = None
+    review_comment: str | None = None
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
