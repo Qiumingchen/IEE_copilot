@@ -7,7 +7,9 @@ from app.db.models import (
     EnzymeFamily,
     EnzymeModule,
     JobStatus,
+    MutationRecord,
     ProteinSequence,
+    Visibility,
 )
 
 
@@ -867,6 +869,66 @@ def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
 
     assert response.status_code == 400
     assert response.json()["error"]["message"] == "unsupported analysis job type"
+
+
+def test_list_mutations_filters_by_position_property_source_and_visibility(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add_all(
+        [
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="L10A",
+                effect_summary="Improved thermostability",
+                property_delta={"optimal_temperature_delta_degC": 5},
+                substrate="casein",
+                assay_condition_summary={"source": "literature", "evidence": "PMID:1"},
+                visibility=Visibility.PUBLIC,
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="F12A",
+                effect_summary="Reduced activity",
+                property_delta={"specific_activity_fold_change": -0.4},
+                assay_condition_summary={"source": "literature", "evidence": "PMID:2"},
+                visibility=Visibility.PUBLIC,
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="L10V",
+                effect_summary="Private candidate",
+                property_delta={"optimal_temperature_delta_degC": 2},
+                assay_condition_summary={"source": "user_upload", "evidence": "internal"},
+                visibility=Visibility.PRIVATE,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        (
+            f"/enzymes/{enzyme_id}/mutations"
+            "?position=10&property_delta_key=optimal_temperature_delta_degC"
+            "&beneficial_only=true&source=literature"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [record["mutation_string"] for record in body] == ["L10A"]
+    assert body[0]["mutation_positions"] == [
+        {"wildtype": "L", "position": 10, "mutant": "A"}
+    ]
+    assert body[0]["assay_condition_summary"]["evidence"] == "PMID:1"
+
+    private_response = client.get(
+        f"/enzymes/{enzyme_id}/mutations?visibility=private",
+        headers=headers,
+    )
+
+    assert private_response.status_code == 200
+    assert [record["mutation_string"] for record in private_response.json()] == ["L10V"]
 
 
 def test_create_enzyme_domain_record_returns_404_for_missing_enzyme(client, db_session):

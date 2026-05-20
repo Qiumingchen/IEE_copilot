@@ -15,6 +15,7 @@ from app.db.models import (
     KineticRecord,
     LigandEntry,
     JobStatus,
+    MutationRecord,
     PropertyRecord,
     ProteinSequence,
     Project,
@@ -35,6 +36,7 @@ from app.schemas.enzyme_record import (
     KineticRecordCreate,
     KineticRecordResponse,
     LigandResponse,
+    MutationRecordResponse,
     PropertyRecordCreate,
     PropertyRankingResponse,
     PropertyRecordResponse,
@@ -472,6 +474,88 @@ def _property_ranking_response(ranking) -> PropertyRankingResponse:
     )
 
 
+def _mutation_positions_response(record: MutationRecord) -> list[dict]:
+    if isinstance(record.mutation_positions, list):
+        return record.mutation_positions
+    if isinstance(record.mutation_positions, dict):
+        mutations = record.mutation_positions.get("mutations")
+        if isinstance(mutations, list):
+            return mutations
+
+    try:
+        return [mutation.model_dump() for mutation in parse_mutation_string(record.mutation_string)]
+    except MutationParseError:
+        return []
+
+
+def _mutation_response(record: MutationRecord) -> MutationRecordResponse:
+    return MutationRecordResponse(
+        id=record.id,
+        enzyme_entry_id=record.enzyme_entry_id,
+        parent_enzyme_entry_id=record.parent_enzyme_entry_id,
+        mutation_string=record.mutation_string,
+        mutation_positions=_mutation_positions_response(record),
+        effect_summary=record.effect_summary,
+        property_delta=record.property_delta,
+        substrate=record.substrate,
+        assay_condition_summary=record.assay_condition_summary,
+        reference_id=record.reference_id,
+        is_user_uploaded=record.is_user_uploaded,
+        visibility=record.visibility,
+        curation_status=record.curation_status,
+    )
+
+
+def _mutation_record_matches_position(record: MutationRecord, position: int | None) -> bool:
+    if position is None:
+        return True
+    return any(
+        mutation.get("position") == position for mutation in _mutation_positions_response(record)
+    )
+
+
+def _mutation_record_matches_source(record: MutationRecord, source: str | None) -> bool:
+    if not source:
+        return True
+    if not isinstance(record.assay_condition_summary, dict):
+        return False
+    record_source = str(record.assay_condition_summary.get("source") or "")
+    return source.lower() in record_source.lower()
+
+
+def _mutation_record_matches_property_delta(
+    record: MutationRecord,
+    property_delta_key: str | None,
+    beneficial_only: bool,
+) -> bool:
+    if not property_delta_key and not beneficial_only:
+        return True
+    if not isinstance(record.property_delta, dict):
+        return False
+    if property_delta_key and property_delta_key not in record.property_delta:
+        return False
+    if not beneficial_only:
+        return True
+
+    values = (
+        [record.property_delta[property_delta_key]]
+        if property_delta_key
+        else record.property_delta.values()
+    )
+    return any(_is_beneficial_delta_value(value) for value in values)
+
+
+def _is_beneficial_delta_value(value) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value > 0
+    try:
+        return float(str(value)) > 0
+    except (TypeError, ValueError):
+        return str(value).lower() in {"improved", "beneficial", "increase", "increased"}
+
+
 @router.get("/{enzyme_id}/substrates", response_model=list[SubstrateResponse])
 def list_substrates(
     enzyme_id: str,
@@ -756,6 +840,37 @@ def get_property_ranking(
         ranking_mode=ranking_mode,
     )
     return _property_ranking_response(ranking)
+
+
+@router.get("/{enzyme_id}/mutations", response_model=list[MutationRecordResponse])
+def list_mutations(
+    enzyme_id: str,
+    position: int | None = None,
+    property_delta_key: str | None = None,
+    beneficial_only: bool = False,
+    source: str | None = None,
+    visibility: Visibility = Visibility.PUBLIC,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[MutationRecordResponse]:
+    enzyme = _get_enzyme(db, enzyme_id)
+    records = list(
+        db.scalars(
+            select(MutationRecord)
+            .where(
+                MutationRecord.enzyme_entry_id == enzyme.id,
+                MutationRecord.visibility == visibility,
+            )
+            .order_by(MutationRecord.created_at)
+        )
+    )
+    return [
+        _mutation_response(record)
+        for record in records
+        if _mutation_record_matches_position(record, position)
+        and _mutation_record_matches_source(record, source)
+        and _mutation_record_matches_property_delta(record, property_delta_key, beneficial_only)
+    ]
 
 
 @router.get("/{enzyme_id}/kinetics", response_model=list[KineticRecordResponse])

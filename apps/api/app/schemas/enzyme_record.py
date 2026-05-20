@@ -132,6 +132,24 @@ class PropertyRankingResponse(BaseModel):
     comparison_warnings: list[str] = Field(default_factory=list)
 
 
+class MutationRecordResponse(BaseModel):
+    id: str
+    enzyme_entry_id: str
+    parent_enzyme_entry_id: str | None = None
+    mutation_string: str
+    mutation_positions: list[dict[str, Any]] = Field(default_factory=list)
+    effect_summary: str | None = None
+    property_delta: dict[str, Any] | None = None
+    substrate: str | None = None
+    assay_condition_summary: dict[str, Any] | None = None
+    reference_id: str | None = None
+    is_user_uploaded: bool
+    visibility: Visibility
+    curation_status: CurationStatus
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
 class KineticRecordCreate(BaseModel):
     substrate: str | None = None
     km: str | None = None
