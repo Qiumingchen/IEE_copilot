@@ -10,6 +10,7 @@ from app.db.models import AnalysisArtifact, AnalysisJob, JobStatus, ProteinSeque
 from app.db.session import SessionLocal
 from app.services.conservation import calculate_conservation_profile
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
+from app.services.library_design import design_mutation_library
 from app.services.mutations import (
     generate_rosetta_mutation_file,
     normalize_mutation_string,
@@ -355,6 +356,63 @@ def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
     return job
 
 
+def finish_library_design_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise ValueError(f"analysis job not found: {job_id}")
+    if job.enzyme_entry_id is None:
+        raise ValueError(f"analysis job has no enzyme entry: {job_id}")
+
+    parameters = job.parameters_json or {}
+    recommendation_candidates = parameters.get("recommendation_candidates", [])
+    rosetta_results = parameters.get("rosetta_results", [])
+
+    now = datetime.utcnow()
+    job.status = JobStatus.RUNNING
+    job.started_at = now
+    db.commit()
+
+    payload = design_mutation_library(
+        recommendation_candidates=[
+            candidate for candidate in recommendation_candidates if isinstance(candidate, dict)
+        ]
+        if isinstance(recommendation_candidates, list)
+        else [],
+        rosetta_results=[result for result in rosetta_results if isinstance(result, dict)]
+        if isinstance(rosetta_results, list)
+        else [],
+        library_size=int(parameters.get("library_size") or 24),
+        max_order=int(parameters.get("max_order") or 2),
+        plate_format=int(parameters.get("plate_format") or 96),
+    )
+    payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+
+    db.add(
+        AnalysisArtifact(
+            project_id=job.project_id,
+            enzyme_entry_id=job.enzyme_entry_id,
+            job_id=job.id,
+            artifact_type="mutation_library",
+            bucket=bucket,
+            object_key=f"analysis-jobs/{job.id}/mutation-library.json",
+            checksum=hashlib.sha256(payload_bytes).hexdigest(),
+            content_type="application/json",
+            size_bytes=len(payload_bytes),
+        )
+    )
+
+    job.status = JobStatus.FINISHED
+    job.finished_at = datetime.utcnow()
+    job.result_summary_json = {
+        "message": "mutation library design completed",
+        "artifact_type": "mutation_library",
+        **payload,
+    }
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_failed(db: Session, job_id: str, error_message: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -433,6 +491,18 @@ def run_rosetta_ddg(_task, job_id: str) -> str:
     try:
         with SessionLocal() as db:
             job = finish_rosetta_ddg_job(db, job_id, bucket=get_settings().minio_bucket)
+            return job.id
+    except Exception as exc:
+        with SessionLocal() as db:
+            mark_job_failed(db, job_id, str(exc))
+        raise
+
+
+@celery_app.task(bind=True, name="worker.jobs.run_library_design")
+def run_library_design(_task, job_id: str) -> str:
+    try:
+        with SessionLocal() as db:
+            job = finish_library_design_job(db, job_id, bucket=get_settings().minio_bucket)
             return job.id
     except Exception as exc:
         with SessionLocal() as db:

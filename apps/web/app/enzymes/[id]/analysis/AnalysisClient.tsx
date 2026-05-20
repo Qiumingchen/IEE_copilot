@@ -20,6 +20,7 @@ import {
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
+  getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
   getRosettaDdgRunViews
@@ -27,6 +28,7 @@ import {
 import type {
   ConservationCategoryFilter,
   ConservationSiteView,
+  MutationLibraryView,
   MutationRecommendationCandidateView,
   RosettaDdgRunView
 } from "./analysis-utils";
@@ -90,7 +92,12 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [recommendationObjectKey, setRecommendationObjectKey] = useState<string | null>(null);
   const [rosettaRuns, setRosettaRuns] = useState<RosettaDdgRunView[]>([]);
   const [rosettaObjectKey, setRosettaObjectKey] = useState<string | null>(null);
+  const [mutationLibrary, setMutationLibrary] = useState<MutationLibraryView | null>(null);
+  const [libraryObjectKey, setLibraryObjectKey] = useState<string | null>(null);
+  const [librarySize, setLibrarySize] = useState(24);
+  const [plateFormat, setPlateFormat] = useState(96);
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
+  const [isRunningLibraryDesign, setIsRunningLibraryDesign] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +112,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       await loadLatestConservationProfile(nextArtifacts, nextToken);
       await loadLatestRecommendations(nextArtifacts, nextToken);
       loadLatestRosettaDdgArtifact(nextArtifacts);
+      await loadLatestMutationLibrary(nextArtifacts, nextToken);
       await loadRosettaDdgRuns(nextToken);
     } catch {
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
@@ -183,6 +191,28 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setRosettaObjectKey(latestRosettaArtifact.object_key);
   }
 
+  async function loadLatestMutationLibrary(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const libraryArtifacts = nextArtifacts.filter((artifact) => artifact.artifact_type === "mutation_library");
+    const latestLibraryArtifact = libraryArtifacts[libraryArtifacts.length - 1];
+    if (!latestLibraryArtifact) {
+      setMutationLibrary(null);
+      setLibraryObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestLibraryArtifact.id, nextToken);
+      setMutationLibrary(getMutationLibrary(content));
+      setLibraryObjectKey(content.object_key);
+    } catch {
+      setMutationLibrary(null);
+      setLibraryObjectKey(latestLibraryArtifact.object_key);
+    }
+  }
+
   async function runAnalysis(jobType: AnalysisJobType) {
     if (!token) {
       return;
@@ -240,6 +270,28 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     }
   }
 
+  async function runLibraryDesign() {
+    if (!token) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setIsRunningLibraryDesign(true);
+    try {
+      const job = await createAnalysisJob(enzymeId, token, "library_design", {
+        library_size: librarySize,
+        max_order: 2,
+        plate_format: plateFormat
+      });
+      setNotice(`${job.job_type} job queued: ${job.id}`);
+      await loadArtifacts(token);
+    } catch {
+      setError("Unable to queue mutation library design. Please run hotspot recommendations first.");
+    } finally {
+      setIsRunningLibraryDesign(false);
+    }
+  }
+
   async function viewArtifactContent(artifact: AnalysisArtifactRecord) {
     if (!token) {
       return;
@@ -265,6 +317,19 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     const link = document.createElement("a");
     link.href = url;
     link.download = `conservation-profile-${enzymeId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadMutationLibraryCsv() {
+    if (!mutationLibrary?.csv_text) {
+      return;
+    }
+    const blob = new Blob([mutationLibrary.csv_text], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `mutation-library-${enzymeId}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -642,6 +707,119 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
           </table>
         </div>
       </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Mutation library</h2>
+              {libraryObjectKey ? (
+                <p className="mt-1 break-words font-mono text-xs text-slate-500">{libraryObjectKey}</p>
+              ) : null}
+              <p className="mt-1 text-xs text-slate-500">
+                {mutationLibrary ? `${mutationLibrary.variant_count} variants` : "No mutation library artifact"}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="library-size">
+                Size
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="library-size"
+                onChange={(event) => setLibrarySize(Number(event.target.value))}
+                value={librarySize}
+              >
+                <option value={24}>24</option>
+                <option value={48}>48</option>
+                <option value={96}>96</option>
+                <option value={384}>384</option>
+              </select>
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="plate-format">
+                Plate
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="plate-format"
+                onChange={(event) => setPlateFormat(Number(event.target.value))}
+                value={plateFormat}
+              >
+                <option value={96}>96</option>
+                <option value={384}>384</option>
+              </select>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!token || isRunningLibraryDesign}
+                onClick={() => void runLibraryDesign()}
+                type="button"
+              >
+                {isRunningLibraryDesign ? "Queueing..." : "Run library"}
+              </button>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!mutationLibrary?.csv_text}
+                onClick={downloadMutationLibraryCsv}
+                type="button"
+              >
+                Download CSV
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Variant</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Order</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Risk</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {mutationLibrary?.variants.length ? (
+                mutationLibrary.variants.map((variant) => (
+                  <tr key={variant.variant_id}>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-950">{variant.variant_id}</td>
+                    <td className="px-4 py-3 font-mono text-slate-950">{variant.mutation_string}</td>
+                    <td className="px-4 py-3">{variant.order}</td>
+                    <td className="px-4 py-3">{variant.score}</td>
+                    <td className="px-4 py-3 text-xs">{variant.risk_flags.join(", ") || "-"}</td>
+                    <td className="min-w-80 px-4 py-3 text-xs text-slate-600">
+                      {variant.reasons.join("; ")}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                    No mutation library artifact
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {mutationLibrary?.plate_layout.length ? (
+          <div className="border-t border-slate-200">
+            <div className="grid grid-cols-6 gap-2 p-4 sm:grid-cols-8 md:grid-cols-12">
+              {mutationLibrary.plate_layout.slice(0, 96).map((well) => (
+                <div
+                  className="min-h-20 rounded-md border border-slate-200 bg-slate-50 p-2"
+                  key={`${well.well}-${well.variant_id}`}
+                  title={well.mutation_string}
+                >
+                  <p className="font-mono text-xs font-semibold text-slate-950">{well.well}</p>
+                  <p className="mt-1 truncate font-mono text-xs text-slate-700">{well.variant_id}</p>
+                  <p className="mt-1 truncate font-mono text-xs text-slate-500">{well.mutation_string || "-"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
     </main>
   );
 }
@@ -650,6 +828,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
   const sites = getConservationSites(content);
   const candidates = getMutationRecommendationCandidates(content);
   const rosettaResults = getRosettaDdgResults(content);
+  const mutationLibrary = getMutationLibrary(content);
   return (
     <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
@@ -678,6 +857,29 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
                   <td className="px-4 py-3">{result.interpretation}</td>
                   <td className="px-4 py-3 font-mono text-xs">{result.structure_id}</td>
                   <td className="px-4 py-3 font-mono text-xs">{result.runner}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : mutationLibrary ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Variant</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Risk</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {mutationLibrary.variants.map((variant) => (
+                <tr key={variant.variant_id}>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-950">{variant.variant_id}</td>
+                  <td className="px-4 py-3 font-mono text-slate-950">{variant.mutation_string}</td>
+                  <td className="px-4 py-3">{variant.score}</td>
+                  <td className="px-4 py-3 text-xs">{variant.risk_flags.join(", ") || "-"}</td>
                 </tr>
               ))}
             </tbody>

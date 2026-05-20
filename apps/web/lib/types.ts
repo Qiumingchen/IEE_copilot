@@ -69,7 +69,8 @@ export type AnalysisJobType =
   | "msa"
   | "conservation_profile"
   | "mutation_recommendation"
-  | "rosetta_ddg";
+  | "rosetta_ddg"
+  | "library_design";
 
 export type SubstrateRecord = {
   id: string;
