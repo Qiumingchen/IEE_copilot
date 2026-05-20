@@ -17,6 +17,7 @@ import type {
   AnalysisJobType
 } from "../../../../lib/types";
 import {
+  buildLibraryDesignParameters,
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
@@ -95,6 +96,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [mutationLibrary, setMutationLibrary] = useState<MutationLibraryView | null>(null);
   const [libraryObjectKey, setLibraryObjectKey] = useState<string | null>(null);
   const [librarySize, setLibrarySize] = useState(24);
+  const [maxOrder, setMaxOrder] = useState(2);
   const [plateFormat, setPlateFormat] = useState(96);
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
   const [isRunningLibraryDesign, setIsRunningLibraryDesign] = useState(false);
@@ -279,9 +281,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setIsRunningLibraryDesign(true);
     try {
       const job = await createAnalysisJob(enzymeId, token, "library_design", {
-        library_size: librarySize,
-        max_order: 2,
-        plate_format: plateFormat
+        ...buildLibraryDesignParameters(librarySize, maxOrder, plateFormat)
       });
       setNotice(`${job.job_type} job queued: ${job.id}`);
       await loadArtifacts(token);
@@ -734,6 +734,18 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <option value={48}>48</option>
                 <option value={96}>96</option>
                 <option value={384}>384</option>
+              </select>
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="max-order">
+                Max sites
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="max-order"
+                onChange={(event) => setMaxOrder(Number(event.target.value))}
+                value={maxOrder}
+              >
+                <option value={2}>2</option>
+                <option value={3}>3</option>
               </select>
               <label className="text-xs font-medium uppercase text-slate-500" htmlFor="plate-format">
                 Plate

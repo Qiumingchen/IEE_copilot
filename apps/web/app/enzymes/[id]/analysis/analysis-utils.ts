@@ -73,6 +73,18 @@ export type MutationLibraryView = {
   csv_text: string;
 };
 
+export function buildLibraryDesignParameters(
+  librarySize: number,
+  maxOrder: number,
+  plateFormat: number
+): Record<string, number> {
+  return {
+    library_size: librarySize,
+    max_order: maxOrder,
+    plate_format: plateFormat
+  };
+}
+
 export function getConservationSites(content: AnalysisArtifactContentRecord): ConservationSiteView[] {
   const rawSites = content.content_json?.sites;
   if (!Array.isArray(rawSites)) {

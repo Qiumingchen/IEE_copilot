@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildLibraryDesignParameters,
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
@@ -257,5 +258,13 @@ test("extracts mutation library variants and plate layout from artifact content"
       }
     ],
     csv_text: "well,variant_id,mutation_string,role,score,risk_flags"
+  });
+});
+
+test("builds mutation library design parameters from selected controls", () => {
+  assert.deepEqual(buildLibraryDesignParameters(384, 3, 384), {
+    library_size: 384,
+    max_order: 3,
+    plate_format: 384
   });
 });
