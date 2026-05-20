@@ -36,6 +36,7 @@ from app.schemas.enzyme_record import (
     KineticRecordResponse,
     LigandResponse,
     PropertyRecordCreate,
+    PropertyRankingResponse,
     PropertyRecordResponse,
     StructureCreate,
     StructureArtifactResponse,
@@ -57,6 +58,8 @@ from app.services.experiment_import import (
     validate_experiment_rows,
 )
 from app.services.object_storage import store_structure_file
+from app.services.property_ranking import build_property_ranking
+from app.services.property_standardization import standardize_property_value
 from app.services.structure_parser import StructureParseError, parse_structure_text
 from app.services.mutations import (
     MutationParseError,
@@ -453,6 +456,22 @@ def _structure_response(
     )
 
 
+def _property_ranking_response(ranking) -> PropertyRankingResponse:
+    return PropertyRankingResponse(
+        property_type=ranking.property_type,
+        ranking_mode=ranking.ranking_mode,
+        items=[item.__dict__ for item in ranking.items],
+        groups=[
+            {
+                "condition_key": group.condition_key,
+                "items": [item.__dict__ for item in group.items],
+            }
+            for group in ranking.groups
+        ],
+        comparison_warnings=ranking.comparison_warnings,
+    )
+
+
 @router.get("/{enzyme_id}/substrates", response_model=list[SubstrateResponse])
 def list_substrates(
     enzyme_id: str,
@@ -684,11 +703,59 @@ def create_property(
     db: Session = Depends(get_db),
 ) -> PropertyRecord:
     enzyme = _get_enzyme(db, enzyme_id)
-    record = PropertyRecord(enzyme_entry_id=enzyme.id, **request.model_dump())
+    payload = request.model_dump()
+    if (
+        payload.get("value_standardized") is None
+        and payload.get("unit_standardized") is None
+        and payload.get("standardization_status") == "not_attempted"
+    ):
+        standardized = standardize_property_value(
+            request.property_type,
+            request.value_original,
+            request.unit_original,
+        )
+        payload["value_standardized"] = standardized.value_standardized
+        payload["unit_standardized"] = standardized.unit_standardized
+        payload["standardization_status"] = standardized.standardization_status
+    record = PropertyRecord(enzyme_entry_id=enzyme.id, **payload)
     db.add(record)
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.get("/{enzyme_id}/property-rankings", response_model=PropertyRankingResponse)
+def get_property_ranking(
+    enzyme_id: str,
+    property_type: str,
+    ranking_mode: str = "reported_value",
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> PropertyRankingResponse:
+    enzyme = _get_enzyme(db, enzyme_id)
+    records = list(
+        db.scalars(
+            select(PropertyRecord)
+            .where(
+                PropertyRecord.property_type == property_type,
+                PropertyRecord.visibility == Visibility.PUBLIC,
+            )
+            .order_by(PropertyRecord.created_at)
+        )
+    )
+    enzyme_ids = {record.enzyme_entry_id for record in records}
+    enzyme_ids.add(enzyme.id)
+    enzymes_by_id = {
+        item.id: item
+        for item in db.scalars(select(EnzymeEntry).where(EnzymeEntry.id.in_(enzyme_ids)))
+    }
+    ranking = build_property_ranking(
+        [record for record in records if record.enzyme_entry_id in enzymes_by_id],
+        enzymes_by_id,
+        property_type=property_type,
+        ranking_mode=ranking_mode,
+    )
+    return _property_ranking_response(ranking)
 
 
 @router.get("/{enzyme_id}/kinetics", response_model=list[KineticRecordResponse])

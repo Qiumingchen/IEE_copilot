@@ -102,6 +102,36 @@ class PropertyRecordResponse(PropertyRecordCreate):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
+class PropertyRankingItemResponse(BaseModel):
+    rank: int
+    enzyme_entry_id: str
+    enzyme_name: str
+    property_record_id: str
+    value_original: str
+    unit_original: str | None = None
+    value_standardized: str | None = None
+    unit_standardized: str | None = None
+    standardization_status: str
+    substrate: str | None = None
+    assay_temperature: str | None = None
+    assay_pH: str | None = None
+    method: str | None = None
+    reference_id: str | None = None
+
+
+class PropertyRankingGroupResponse(BaseModel):
+    condition_key: dict[str, Any]
+    items: list[PropertyRankingItemResponse]
+
+
+class PropertyRankingResponse(BaseModel):
+    property_type: str
+    ranking_mode: str
+    items: list[PropertyRankingItemResponse] = Field(default_factory=list)
+    groups: list[PropertyRankingGroupResponse] = Field(default_factory=list)
+    comparison_warnings: list[str] = Field(default_factory=list)
+
+
 class KineticRecordCreate(BaseModel):
     substrate: str | None = None
     km: str | None = None
