@@ -5,9 +5,13 @@ import type {
   EnzymeRecordBundle,
   EnzymeSummary,
   ExpressionRecord,
+  ExperimentImportPreview,
+  ExperimentImportRequest,
+  ExperimentImportResult,
   JobResponse,
   KineticRecord,
   PropertyRecord,
+  ProjectRecord,
   SearchResponse,
   StructureRecord,
   SubstrateRecord,
@@ -66,8 +70,36 @@ async function fetchWithToken<T>(path: string, token: string, init?: RequestInit
   return response.json() as Promise<T>;
 }
 
+async function fetchWithTokenAndErrorMessage<T>(
+  path: string,
+  token: string,
+  init?: RequestInit
+): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+      ...init?.headers
+    }
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null;
+    throw new Error(body?.error?.message ?? `API request failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export async function getEnzyme(enzymeId: string, token: string): Promise<EnzymeSummary> {
   return fetchWithToken<EnzymeSummary>(`/enzymes/${enzymeId}`, token);
+}
+
+export async function listProjects(token: string): Promise<ProjectRecord[]> {
+  return fetchWithToken<ProjectRecord[]>("/projects", token);
 }
 
 export async function getEnzymeRecordBundle(
@@ -227,4 +259,34 @@ export async function createExpressionRecord(
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+export async function previewExperimentImport(
+  enzymeId: string,
+  token: string,
+  payload: ExperimentImportRequest
+): Promise<ExperimentImportPreview> {
+  return fetchWithTokenAndErrorMessage<ExperimentImportPreview>(
+    `/enzymes/${enzymeId}/experiments/import-preview`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function importExperiments(
+  enzymeId: string,
+  token: string,
+  payload: ExperimentImportRequest
+): Promise<ExperimentImportResult> {
+  return fetchWithTokenAndErrorMessage<ExperimentImportResult>(
+    `/enzymes/${enzymeId}/experiments/import`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
 }

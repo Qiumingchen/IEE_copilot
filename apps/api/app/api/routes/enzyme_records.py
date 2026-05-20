@@ -6,6 +6,7 @@ from app.api.routes.auth import current_user
 from app.db.models import (
     AnalysisArtifact,
     AnalysisJob,
+    CurationStatus,
     EnzymeEntry,
     ExperimentCondition,
     ExpressionRecord,
@@ -14,9 +15,12 @@ from app.db.models import (
     JobStatus,
     PropertyRecord,
     ProteinSequence,
+    Project,
     StructureEntry,
     SubstrateEntry,
     User,
+    UserExperiment,
+    Visibility,
 )
 from app.db.session import get_db
 from app.schemas.enzyme_record import (
@@ -36,7 +40,18 @@ from app.schemas.enzyme_record import (
     SubstrateCreate,
     SubstrateResponse,
 )
+from app.schemas.experiment import (
+    ExperimentImportPreviewResponse,
+    ExperimentImportRecordPreview,
+    ExperimentImportRequest,
+    ExperimentImportResponse,
+)
 from app.schemas.job import AnalysisJobCreate, JobResponse
+from app.services.experiment_import import (
+    ExperimentImportError,
+    parse_experiment_csv,
+    validate_experiment_rows,
+)
 from app.services.mutations import (
     MutationParseError,
     normalize_mutation_string,
@@ -93,6 +108,15 @@ def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
             detail="protein sequence not found for analysis job",
         )
     return protein_sequence.mature_sequence or protein_sequence.sequence
+
+
+def _get_owned_project(db: Session, project_id: str, user_id: str) -> Project:
+    project = db.scalar(
+        select(Project).where(Project.id == project_id, Project.owner_user_id == user_id)
+    )
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    return project
 
 
 def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
@@ -701,6 +725,101 @@ def create_expression(
     if condition is not None:
         db.refresh(condition)
     return _expression_response(expression, condition)
+
+
+def _preview_experiment_import(
+    db: Session,
+    enzyme: EnzymeEntry,
+    request: ExperimentImportRequest,
+    user: User,
+) -> tuple[ExperimentImportPreviewResponse, list[ExperimentImportRecordPreview]]:
+    _get_owned_project(db, request.project_id, user.id)
+    sequence = _get_engineering_sequence(db, enzyme.id)
+    try:
+        parsed = parse_experiment_csv(request.csv_text)
+        validated = validate_experiment_rows(parsed.rows, sequence)
+    except ExperimentImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    records = [
+        ExperimentImportRecordPreview(
+            row_number=record.row_number,
+            variant_name=record.variant_name,
+            mutation_string=record.mutation_string,
+            sequence=record.sequence,
+            measured_property=record.measured_property,
+            measured_value=record.measured_value,
+            unit=record.unit,
+            assay_condition_json=record.assay_condition_json,
+            visibility=record.visibility,
+        )
+        for record in validated.records
+    ]
+    response = ExperimentImportPreviewResponse(
+        fields=parsed.fields,
+        row_count=len(parsed.rows),
+        record_count=len(records),
+        records=records,
+    )
+    return response, records
+
+
+@router.post(
+    "/{enzyme_id}/experiments/import-preview",
+    response_model=ExperimentImportPreviewResponse,
+)
+def preview_experiment_import(
+    enzyme_id: str,
+    request: ExperimentImportRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ExperimentImportPreviewResponse:
+    enzyme = _get_enzyme(db, enzyme_id)
+    response, _records = _preview_experiment_import(db, enzyme, request, user)
+    return response
+
+
+@router.post(
+    "/{enzyme_id}/experiments/import",
+    response_model=ExperimentImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_experiments(
+    enzyme_id: str,
+    request: ExperimentImportRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ExperimentImportResponse:
+    enzyme = _get_enzyme(db, enzyme_id)
+    _response, records = _preview_experiment_import(db, enzyme, request, user)
+    experiments = [
+        UserExperiment(
+            project_id=request.project_id,
+            enzyme_entry_id=enzyme.id,
+            variant_name=record.variant_name,
+            mutation_string=record.mutation_string,
+            sequence=record.sequence,
+            measured_property=record.measured_property,
+            measured_value=record.measured_value,
+            unit=record.unit,
+            assay_condition_json=record.assay_condition_json,
+            visibility=Visibility(record.visibility),
+            curation_status=CurationStatus.UNREVIEWED,
+            created_by=user.id,
+        )
+        for record in records
+    ]
+    db.add_all(experiments)
+    db.commit()
+    for experiment in experiments:
+        db.refresh(experiment)
+    return ExperimentImportResponse(
+        created_count=len(experiments),
+        experiment_ids=[experiment.id for experiment in experiments],
+    )
 
 
 @router.post("/{enzyme_id}/analysis-jobs", response_model=JobResponse, status_code=status.HTTP_201_CREATED)

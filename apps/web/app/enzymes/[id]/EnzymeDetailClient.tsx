@@ -333,6 +333,12 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
           >
             MSA / Conservation
           </Link>
+          <Link
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+            href={`/enzymes/${enzymeId}/experiments`}
+          >
+            Experiment upload
+          </Link>
         </div>
       </header>
 

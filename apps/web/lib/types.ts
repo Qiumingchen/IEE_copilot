@@ -23,6 +23,15 @@ export type TokenResponse = {
   token_type: string;
 };
 
+export type ProjectRecord = {
+  id: string;
+  owner_user_id: string;
+  name: string;
+  description: string | null;
+  target_enzyme_module: string | null;
+  default_visibility: string;
+};
+
 export type JobResponse = {
   id: string;
   project_id: string | null;
@@ -171,6 +180,35 @@ export type ExpressionRecord = {
   reference_id: string | null;
   visibility: string;
   curation_status: string;
+};
+
+export type ExperimentImportRequest = {
+  project_id: string;
+  csv_text: string;
+};
+
+export type ExperimentImportRecordPreview = {
+  row_number: number;
+  variant_name: string;
+  mutation_string: string | null;
+  sequence: string | null;
+  measured_property: string;
+  measured_value: string;
+  unit: string | null;
+  assay_condition_json: Record<string, string>;
+  visibility: string;
+};
+
+export type ExperimentImportPreview = {
+  fields: string[];
+  row_count: number;
+  record_count: number;
+  records: ExperimentImportRecordPreview[];
+};
+
+export type ExperimentImportResult = {
+  created_count: number;
+  experiment_ids: string[];
 };
 
 export type EnzymeRecordBundle = {
