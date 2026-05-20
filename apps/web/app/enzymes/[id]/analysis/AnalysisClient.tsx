@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -374,22 +373,14 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
             <h1 className="text-2xl font-semibold text-slate-950">Evolutionary analysis</h1>
             <p className="mt-2 text-sm text-slate-600">Entry id: {enzymeId}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-              disabled={!token || isLoading}
-              onClick={() => token && void loadArtifacts(token)}
-              type="button"
-            >
-              Refresh
-            </button>
-            <Link
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
-              href={`/enzymes/${enzymeId}`}
-            >
-              Back to enzyme
-            </Link>
-          </div>
+          <button
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={!token || isLoading}
+            onClick={() => token && void loadArtifacts(token)}
+            type="button"
+          >
+            Refresh
+          </button>
         </div>
       </header>
 

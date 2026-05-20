@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 const dashboardCards = [
   {
     title: "Projects",
@@ -21,22 +19,11 @@ const dashboardCards = [
 export default function DashboardPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="mb-8 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
+      <header className="mb-8 border-b border-slate-200 pb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-normal text-slate-950">IEE-Copilot</h1>
           <p className="mt-1 text-sm text-slate-600">Industrial enzyme engineering workbench</p>
         </div>
-        <nav className="flex flex-wrap gap-2 text-sm">
-          <Link className="rounded-md border border-slate-300 bg-white px-3 py-2 text-slate-700" href="/login">
-            Sign in
-          </Link>
-          <Link className="rounded-md bg-slate-950 px-3 py-2 font-medium text-white" href="/search">
-            Search enzyme
-          </Link>
-          <Link className="rounded-md border border-slate-300 bg-white px-3 py-2 text-slate-700" href="/curation">
-            Curation
-          </Link>
-        </nav>
       </header>
 
       <section className="grid gap-4 md:grid-cols-3">

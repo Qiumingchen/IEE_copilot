@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -100,22 +99,14 @@ export default function CurationClient() {
               Review user-uploaded experiment data before it enters the public knowledge base.
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-              disabled={!token || isLoading}
-              onClick={() => token && void loadRequests(token)}
-              type="button"
-            >
-              Refresh
-            </button>
-            <Link
-              className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
-              href="/search"
-            >
-              Search
-            </Link>
-          </div>
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={!token || isLoading}
+            onClick={() => token && void loadRequests(token)}
+            type="button"
+          >
+            Refresh
+          </button>
         </div>
       </header>
 

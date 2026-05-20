@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -205,18 +204,8 @@ export default function ExperimentImportClient({ enzymeId }: ExperimentImportCli
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
         <p className="text-sm font-medium text-slate-500">Wet-lab data</p>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-950">Experiment upload</h1>
-            <p className="mt-2 text-sm text-slate-600">Enzyme id: {enzymeId}</p>
-          </div>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
-            href={`/enzymes/${enzymeId}`}
-          >
-            Enzyme detail
-          </Link>
-        </div>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-950">Experiment upload</h1>
+        <p className="mt-2 text-sm text-slate-600">Enzyme id: {enzymeId}</p>
       </header>
 
       {error ? (
