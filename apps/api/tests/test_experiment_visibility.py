@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.db.models import (
+    AuditLog,
     CurationStatus,
     EnzymeEntry,
     EnzymeFamily,
@@ -8,6 +9,7 @@ from app.db.models import (
     Project,
     User,
     UserExperiment,
+    UserRole,
     Visibility,
     VisibilityRequest,
 )
@@ -32,6 +34,13 @@ def _auth_headers(client, email: str) -> dict[str, str]:
 def _user(db_session, email: str) -> User:
     user = db_session.scalar(select(User).where(User.email == email))
     assert user is not None
+    return user
+
+
+def _set_role(db_session, user: User, role: UserRole) -> User:
+    user.role = role
+    db_session.commit()
+    db_session.refresh(user)
     return user
 
 
@@ -254,3 +263,131 @@ def test_non_owner_cannot_create_visibility_request(client, db_session):
 
     assert response.status_code == 404
     assert response.json()["error"]["message"] == "experiment not found"
+
+
+def test_regular_user_cannot_list_pending_visibility_requests(client, db_session):
+    headers = _auth_headers(client, "curation-regular@example.com")
+
+    response = client.get("/curation/visibility-requests", headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "curator role required"
+
+
+def test_curator_can_list_pending_visibility_requests(client, db_session):
+    owner_headers = _auth_headers(client, "curation-owner@example.com")
+    owner = _user(db_session, "curation-owner@example.com")
+    project = _project(db_session, owner)
+    enzyme = _enzyme(db_session)
+    experiment = _experiment(db_session, project, owner, enzyme, variant_name="Pending public")
+    create_response = client.post(
+        f"/experiments/{experiment.id}/visibility-requests",
+        headers=owner_headers,
+        json={"requested_visibility": "public"},
+    )
+    curator_headers = _auth_headers(client, "curation-curator@example.com")
+    curator = _user(db_session, "curation-curator@example.com")
+    _set_role(db_session, curator, UserRole.CURATOR)
+
+    response = client.get("/curation/visibility-requests", headers=curator_headers)
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [create_response.json()["id"]]
+    assert response.json()[0]["experiment"]["id"] == experiment.id
+
+
+def test_curator_can_approve_visibility_request_and_audit_it(client, db_session):
+    owner_headers = _auth_headers(client, "curation-approve-owner@example.com")
+    owner = _user(db_session, "curation-approve-owner@example.com")
+    project = _project(db_session, owner)
+    enzyme = _enzyme(db_session)
+    experiment = _experiment(db_session, project, owner, enzyme, variant_name="Approve public")
+    request_id = client.post(
+        f"/experiments/{experiment.id}/visibility-requests",
+        headers=owner_headers,
+        json={"requested_visibility": "public"},
+    ).json()["id"]
+    curator_headers = _auth_headers(client, "curation-approve-curator@example.com")
+    curator = _user(db_session, "curation-approve-curator@example.com")
+    _set_role(db_session, curator, UserRole.CURATOR)
+
+    response = client.post(
+        f"/curation/visibility-requests/{request_id}/approve",
+        headers=curator_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "approved"
+    db_session.refresh(experiment)
+    assert experiment.visibility == Visibility.PUBLIC
+    assert experiment.curation_status == CurationStatus.APPROVED
+    audit = db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "visibility_request.approve",
+            AuditLog.target_id == request_id,
+        )
+    )
+    assert audit is not None
+    assert audit.actor_user_id == curator.id
+
+
+def test_curator_can_reject_visibility_request_with_comment_and_audit_it(client, db_session):
+    owner_headers = _auth_headers(client, "curation-reject-owner@example.com")
+    owner = _user(db_session, "curation-reject-owner@example.com")
+    project = _project(db_session, owner)
+    enzyme = _enzyme(db_session)
+    experiment = _experiment(db_session, project, owner, enzyme, variant_name="Reject public")
+    request_id = client.post(
+        f"/experiments/{experiment.id}/visibility-requests",
+        headers=owner_headers,
+        json={"requested_visibility": "public"},
+    ).json()["id"]
+    curator_headers = _auth_headers(client, "curation-reject-curator@example.com")
+    curator = _user(db_session, "curation-reject-curator@example.com")
+    _set_role(db_session, curator, UserRole.CURATOR)
+
+    response = client.post(
+        f"/curation/visibility-requests/{request_id}/reject",
+        headers=curator_headers,
+        json={"review_comment": "Missing raw assay condition."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+    assert response.json()["review_comment"] == "Missing raw assay condition."
+    db_session.refresh(experiment)
+    assert experiment.visibility == Visibility.PRIVATE
+    assert experiment.curation_status == CurationStatus.REJECTED
+    audit = db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "visibility_request.reject",
+            AuditLog.target_id == request_id,
+        )
+    )
+    assert audit is not None
+    assert audit.metadata_json == {"review_comment": "Missing raw assay condition."}
+
+
+def test_reject_visibility_request_requires_comment(client, db_session):
+    owner_headers = _auth_headers(client, "curation-reject-empty-owner@example.com")
+    owner = _user(db_session, "curation-reject-empty-owner@example.com")
+    project = _project(db_session, owner)
+    enzyme = _enzyme(db_session)
+    experiment = _experiment(db_session, project, owner, enzyme, variant_name="Reject empty")
+    request_id = client.post(
+        f"/experiments/{experiment.id}/visibility-requests",
+        headers=owner_headers,
+        json={"requested_visibility": "public"},
+    ).json()["id"]
+    curator_headers = _auth_headers(client, "curation-reject-empty-curator@example.com")
+    curator = _user(db_session, "curation-reject-empty-curator@example.com")
+    _set_role(db_session, curator, UserRole.CURATOR)
+
+    response = client.post(
+        f"/curation/visibility-requests/{request_id}/reject",
+        headers=curator_headers,
+        json={"review_comment": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["message"] == "review_comment is required"

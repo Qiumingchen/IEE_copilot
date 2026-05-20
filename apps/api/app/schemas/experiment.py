@@ -66,3 +66,11 @@ class VisibilityRequestResponse(BaseModel):
     review_comment: str | None = None
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class VisibilityRequestDetailResponse(VisibilityRequestResponse):
+    experiment: UserExperimentResponse
+
+
+class VisibilityRequestReject(BaseModel):
+    review_comment: str
