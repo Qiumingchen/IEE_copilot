@@ -45,7 +45,7 @@ export default function DashboardPage() {
           </div>
           <div>
             <p className="font-medium text-slate-950">Structure input</p>
-            <p className="mt-1 text-slate-600">PDB upload placeholder is ready for the next slice.</p>
+            <p className="mt-1 text-slate-600">PDB and CIF upload is available from enzyme detail records.</p>
           </div>
           <div>
             <p className="font-medium text-slate-950">Jobs</p>

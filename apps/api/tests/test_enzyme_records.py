@@ -11,6 +11,17 @@ from app.db.models import (
 )
 
 
+PDB_COMPLEX_UPLOAD = """\
+ATOM      1  N   MET A   1      11.104  13.207   9.342  1.00 20.00           N
+ATOM      2  CA  MET A   1      12.560  13.407   9.142  1.00 20.00           C
+ATOM      3  N   GLY A   2      14.104  11.907   8.242  1.00 20.00           N
+ATOM      4  CA  GLY A   2      15.560  11.407   8.142  1.00 20.00           C
+HETATM    5  C1  AQ1 B 501      16.000  11.000   8.000  1.00 20.00           C
+HETATM    6 ZN    ZN C 601      18.000  10.000   8.000  1.00 20.00          ZN
+END
+"""
+
+
 def _auth_headers(client) -> dict[str, str]:
     client.post(
         "/auth/register",
@@ -147,6 +158,50 @@ def test_create_and_list_enzyme_domain_records(client, db_session):
     assert list_properties.json()[0]["value_original"] == "55"
     assert list_kinetics.json()[0]["km"] == "1.8"
     assert list_expression.json()[0]["condition"]["method"] == "shake flask expression"
+
+
+def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    def fake_store_structure_file(*, file_name, content, content_type):
+        assert file_name == "complex.pdb"
+        assert b"AQ1" in content
+        assert content_type == "chemical/x-pdb"
+        return {
+            "bucket": "iee-artifacts",
+            "object_key": "structures/test/complex.pdb",
+            "checksum": "checksum",
+            "content_type": content_type,
+            "size_bytes": len(content),
+        }
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.store_structure_file",
+        fake_store_structure_file,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures/upload",
+        headers=headers,
+        files={
+            "file": (
+                "complex.pdb",
+                PDB_COMPLEX_UPLOAD.encode(),
+                "chemical/x-pdb",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["structure_type"] == "uploaded_pdb"
+    assert body["complex_state"] == "enzyme_substrate_complex"
+    assert body["artifact"]["object_key"] == "structures/test/complex.pdb"
+    assert body["chain_summary"]["chains"][0]["sequence"] == "MG"
+    assert body["ligand_summary"]["ligands"][0]["ligand_code"] == "AQ1"
+    assert body["ligand_summary"]["metal_ions"][0]["ligand_code"] == "ZN"
+    assert body["ligands"][0]["ligand_code"] == "AQ1"
 
 
 def test_enzyme_domain_records_require_authentication(client, db_session):

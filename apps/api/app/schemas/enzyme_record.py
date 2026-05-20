@@ -50,6 +50,17 @@ class StructureCreate(BaseModel):
     ligands: list[LigandCreate] = Field(default_factory=list)
 
 
+class StructureArtifactResponse(BaseModel):
+    id: str
+    bucket: str
+    object_key: str
+    checksum: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class StructureResponse(BaseModel):
     id: str
     enzyme_entry_id: str
@@ -58,6 +69,8 @@ class StructureResponse(BaseModel):
     pdb_id: str | None = None
     chain_summary: dict[str, Any] | None = None
     ligand_summary: dict[str, Any] | None = None
+    artifact_id: str | None = None
+    artifact: StructureArtifactResponse | None = None
     source: str
     ligands: list[LigandResponse] = Field(default_factory=list)
 

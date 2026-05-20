@@ -105,6 +105,15 @@ export type LigandRecord = {
   metadata_json: Record<string, unknown> | null;
 };
 
+export type StructureArtifactRecord = {
+  id: string;
+  bucket: string;
+  object_key: string;
+  checksum: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+};
+
 export type StructureRecord = {
   id: string;
   enzyme_entry_id: string;
@@ -113,6 +122,8 @@ export type StructureRecord = {
   pdb_id: string | null;
   chain_summary: Record<string, unknown> | null;
   ligand_summary: Record<string, unknown> | null;
+  artifact_id: string | null;
+  artifact: StructureArtifactRecord | null;
   source: string;
   ligands: LigandRecord[];
 };
