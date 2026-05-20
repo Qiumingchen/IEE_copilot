@@ -137,7 +137,7 @@ export default function SearchPage() {
       <section className="mt-8 border-t border-slate-200 pt-6">
         <h2 className="text-base font-semibold text-slate-950">PDB upload</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Apo and enzyme-substrate complex upload enters this workflow after the skeleton is stable.
+          Open an enzyme detail record to upload apo or enzyme-substrate complex PDB/CIF files.
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border border-slate-200 p-4">

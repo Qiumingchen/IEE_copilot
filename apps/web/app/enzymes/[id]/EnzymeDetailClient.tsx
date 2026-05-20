@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -9,9 +9,10 @@ import {
   createPropertyRecord,
   createStructureRecord,
   createSubstrate,
-  getEnzymeRecordBundle
+  getEnzymeRecordBundle,
+  uploadStructureFile
 } from "../../../lib/api";
-import type { EnzymeRecordBundle } from "../../../lib/types";
+import type { EnzymeRecordBundle, StructureRecord } from "../../../lib/types";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -111,6 +112,85 @@ function textOrDash(value: string | null | undefined): string {
   return value && value.trim() ? value : "-";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function summarizeStructureChains(structure: StructureRecord): string {
+  const chains = structure.chain_summary?.chains;
+  if (!Array.isArray(chains) || chains.length === 0) {
+    return "-";
+  }
+  return chains
+    .map((chain) => {
+      if (!isRecord(chain)) {
+        return null;
+      }
+      const chainId = "chain_id" in chain ? String(chain.chain_id) : "-";
+      const residueCount = "residue_count" in chain ? String(chain.residue_count) : "?";
+      const sequence = "sequence" in chain ? String(chain.sequence) : "";
+      return `${chainId}: ${residueCount} aa${sequence ? ` (${sequence})` : ""}`;
+    })
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function summarizeStructureLigands(structure: StructureRecord): string {
+  const summaryLigands = structure.ligand_summary?.ligands;
+  if (Array.isArray(summaryLigands) && summaryLigands.length > 0) {
+    return summaryLigands
+      .map((ligand) => {
+        if (!isRecord(ligand)) {
+          return null;
+        }
+        const ligandCode = "ligand_code" in ligand ? String(ligand.ligand_code) : "ligand";
+        const nearestSummary = summarizeNearestResidues(ligand);
+        return nearestSummary ? `${ligandCode} (${nearestSummary})` : ligandCode;
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+  const ligands = structure.ligands
+    .map((ligand) => ligand.ligand_code ?? ligand.ligand_name)
+    .filter(Boolean);
+  if (ligands.length === 0) {
+    return "-";
+  }
+  return ligands.join(", ");
+}
+
+function summarizeNearestResidues(ligand: Record<string, unknown>): string {
+  const nearestResidues = ligand.nearest_residues;
+  if (!isRecord(nearestResidues)) {
+    return "";
+  }
+
+  return ["4A", "6A", "8A"]
+    .map((cutoff) => {
+      const residues = nearestResidues[cutoff];
+      if (!Array.isArray(residues) || residues.length === 0) {
+        return null;
+      }
+      const residueText = residues.slice(0, 3).map(formatNearestResidue).filter(Boolean).join(", ");
+      const suffix = residues.length > 3 ? ` +${residues.length - 3}` : "";
+      return residueText ? `${cutoff}: ${residueText}${suffix}` : null;
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function formatNearestResidue(residue: unknown): string | null {
+  if (!isRecord(residue)) {
+    return null;
+  }
+  const chainId = "chain_id" in residue ? String(residue.chain_id) : "-";
+  const residueNumber = "residue_number" in residue ? String(residue.residue_number) : "?";
+  const oneLetter = "one_letter" in residue ? String(residue.one_letter) : "";
+  const distance = "min_distance_angstrom" in residue ? Number(residue.min_distance_angstrom) : NaN;
+  const distanceText = Number.isFinite(distance) ? ` ${distance.toFixed(1)}A` : "";
+  return `${chainId}${residueNumber}${oneLetter ? ` ${oneLetter}` : ""}${distanceText}`;
+}
+
 export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -120,6 +200,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
   const [isSavingSubstrate, setIsSavingSubstrate] = useState(false);
   const [isSavingProperty, setIsSavingProperty] = useState(false);
   const [isSavingStructure, setIsSavingStructure] = useState(false);
+  const [isUploadingStructure, setIsUploadingStructure] = useState(false);
   const [isSavingKinetic, setIsSavingKinetic] = useState(false);
   const [isSavingExpression, setIsSavingExpression] = useState(false);
   const [substrateName, setSubstrateName] = useState("");
@@ -127,6 +208,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
   const [substrateSmiles, setSubstrateSmiles] = useState("");
   const [propertyForm, setPropertyForm] = useState<PropertyFormState>(emptyPropertyForm);
   const [structureForm, setStructureForm] = useState<StructureFormState>(emptyStructureForm);
+  const [structureFile, setStructureFile] = useState<File | null>(null);
   const [kineticForm, setKineticForm] = useState<KineticFormState>(emptyKineticForm);
   const [expressionForm, setExpressionForm] = useState<ExpressionFormState>(emptyExpressionForm);
 
@@ -239,6 +321,29 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
       setError("Unable to save structure record.");
     } finally {
       setIsSavingStructure(false);
+    }
+  }
+
+  function handleStructureFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setStructureFile(event.target.files?.[0] ?? null);
+    setError(null);
+  }
+
+  async function handleUploadStructureFile() {
+    if (!token || !structureFile) {
+      return;
+    }
+
+    setIsUploadingStructure(true);
+    setError(null);
+    try {
+      await uploadStructureFile(enzymeId, token, structureFile);
+      setStructureFile(null);
+      await loadBundle(token);
+    } catch {
+      setError("Unable to upload or parse structure file.");
+    } finally {
+      setIsUploadingStructure(false);
     }
   }
 
@@ -487,6 +592,23 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
             <form className="rounded-md border border-slate-200 bg-white p-5" onSubmit={handleCreateStructure}>
               <h2 className="text-base font-semibold text-slate-950">Structure</h2>
               <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  PDB or CIF file
+                  <input
+                    accept=".pdb,.cif,chemical/x-pdb,chemical/x-mmcif"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-sm file:font-medium file:text-slate-800"
+                    type="file"
+                    onChange={handleStructureFileChange}
+                  />
+                </label>
+                <button
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                  disabled={isUploadingStructure || !structureFile}
+                  onClick={() => void handleUploadStructureFile()}
+                  type="button"
+                >
+                  {isUploadingStructure ? "Uploading..." : "Upload and parse"}
+                </button>
                 <label className="grid gap-1 text-sm font-medium text-slate-700">
                   Type
                   <select
@@ -784,12 +906,13 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
               title="Substrates"
             />
             <RecordTable
-              columns={["Type", "State", "Source", "Ligands"]}
+              columns={["Type", "State", "Chains", "Ligands", "Artifact"]}
               rows={bundle.structures.map((item) => [
                 item.structure_type,
                 item.complex_state,
-                item.source,
-                item.ligands.map((ligand) => ligand.ligand_code ?? ligand.ligand_name).join(", ") || "-"
+                summarizeStructureChains(item),
+                summarizeStructureLigands(item),
+                item.artifact?.object_key ?? "-"
               ])}
               title="Structures"
             />

@@ -1,0 +1,337 @@
+from dataclasses import dataclass
+from math import dist
+from pathlib import Path
+from typing import Any
+
+
+AMINO_ACIDS = {
+    "ALA": "A",
+    "ARG": "R",
+    "ASN": "N",
+    "ASP": "D",
+    "CYS": "C",
+    "GLN": "Q",
+    "GLU": "E",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LEU": "L",
+    "LYS": "K",
+    "MET": "M",
+    "PHE": "F",
+    "PRO": "P",
+    "SER": "S",
+    "THR": "T",
+    "TRP": "W",
+    "TYR": "Y",
+    "VAL": "V",
+}
+
+WATER_CODES = {"HOH", "WAT", "DOD"}
+METAL_CODES = {
+    "CA",
+    "CD",
+    "CO",
+    "CU",
+    "FE",
+    "K",
+    "MG",
+    "MN",
+    "NA",
+    "NI",
+    "ZN",
+}
+
+
+class StructureParseError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class ParsedStructure:
+    structure_type: str
+    complex_state: str
+    chain_summary: dict[str, Any]
+    ligand_summary: dict[str, Any]
+    ligands: list[dict[str, Any]]
+
+
+def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
+    extension = Path(file_name).suffix.lower()
+    if extension == ".pdb":
+        atom_rows = _parse_pdb_rows(text)
+        structure_type = "uploaded_pdb"
+    elif extension == ".cif":
+        atom_rows = _parse_cif_rows(text)
+        structure_type = "uploaded_cif"
+    else:
+        raise StructureParseError("unsupported structure file type")
+
+    if not atom_rows:
+        raise StructureParseError("structure file does not contain atom records")
+
+    protein_residues = _collect_protein_residues(atom_rows)
+    chains = _summarize_chains(protein_residues)
+    ligand_summary, ligands = _summarize_ligands(atom_rows, protein_residues)
+    complex_state = "enzyme_substrate_complex" if ligand_summary["ligand_count"] > 0 else "apo"
+    return ParsedStructure(
+        structure_type=structure_type,
+        complex_state=complex_state,
+        chain_summary={
+            "format": extension.lstrip("."),
+            "chain_count": len(chains),
+            "chains": chains,
+            "warnings": [],
+        },
+        ligand_summary=ligand_summary,
+        ligands=ligands,
+    )
+
+
+def _parse_pdb_rows(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        record = line[0:6].strip()
+        if record not in {"ATOM", "HETATM"}:
+            continue
+        rows.append(
+            {
+                "record": record,
+                "atom_name": line[12:16].strip(),
+                "residue_name": line[17:20].strip().upper(),
+                "chain_id": line[21:22].strip() or "-",
+                "residue_number": line[22:26].strip(),
+                "insertion_code": line[26:27].strip(),
+                "element": (line[76:78].strip() or line[12:16].strip()[:2]).upper(),
+                "coord": _parse_pdb_coord(line),
+            }
+        )
+    return rows
+
+
+def _parse_cif_rows(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("ATOM ", "HETATM ")):
+            continue
+        parts = stripped.split()
+        if len(parts) < 9:
+            continue
+        rows.append(
+            {
+                "record": parts[0],
+                "atom_name": parts[3],
+                "residue_name": parts[5].upper(),
+                "chain_id": parts[6] or "-",
+                "residue_number": parts[8],
+                "insertion_code": "",
+                "element": parts[2].upper(),
+                "coord": _parse_cif_coord(parts),
+            }
+        )
+    return rows
+
+
+def _parse_pdb_coord(line: str) -> tuple[float, float, float] | None:
+    try:
+        return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+    except ValueError:
+        return None
+
+
+def _parse_cif_coord(parts: list[str]) -> tuple[float, float, float] | None:
+    for start in (10, 9):
+        try:
+            return (float(parts[start]), float(parts[start + 1]), float(parts[start + 2]))
+        except (IndexError, ValueError):
+            continue
+    return None
+
+
+def _collect_protein_residues(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    residues_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        if row["record"] != "ATOM" or row["residue_name"] not in AMINO_ACIDS:
+            continue
+        key = (row["chain_id"], row["residue_number"], row["insertion_code"])
+        if key not in residues_by_key:
+            residues_by_key[key] = {
+                "chain_id": row["chain_id"],
+                "residue_number": row["residue_number"],
+                "insertion_code": row["insertion_code"],
+                "residue_name": row["residue_name"],
+                "one_letter": AMINO_ACIDS[row["residue_name"]],
+                "atoms": [],
+            }
+        if row["coord"] is not None:
+            residues_by_key[key]["atoms"].append(row["coord"])
+
+    sequence_positions: dict[str, int] = {}
+    residues: list[dict[str, Any]] = []
+    for residue in residues_by_key.values():
+        chain_id = residue["chain_id"]
+        sequence_positions[chain_id] = sequence_positions.get(chain_id, 0) + 1
+        residue["sequence_position"] = sequence_positions[chain_id]
+        residues.append(residue)
+    return residues
+
+
+def _summarize_chains(protein_residues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    chain_residues: dict[str, list[dict[str, Any]]] = {}
+    for residue in protein_residues:
+        chain_residues.setdefault(residue["chain_id"], []).append(residue)
+
+    chains: list[dict[str, Any]] = []
+    for chain_id, residues in sorted(chain_residues.items()):
+        sequence = "".join(residue["one_letter"] for residue in residues)
+        chains.append(
+            {
+                "chain_id": chain_id,
+                "residue_count": len(residues),
+                "sequence": sequence,
+                "residue_numbers": [
+                    f"{residue['residue_number']}{residue['insertion_code']}"
+                    if residue["insertion_code"]
+                    else residue["residue_number"]
+                    for residue in residues
+                ],
+                "residues": [
+                    {
+                        "chain_id": residue["chain_id"],
+                        "residue_number": residue["residue_number"],
+                        "insertion_code": residue["insertion_code"],
+                        "sequence_position": residue["sequence_position"],
+                        "residue_name": residue["residue_name"],
+                        "one_letter": residue["one_letter"],
+                    }
+                    for residue in residues
+                ],
+                "mapping_quality": "complete",
+            }
+        )
+    return chains
+
+
+def _summarize_ligands(
+    rows: list[dict[str, Any]], protein_residues: list[dict[str, Any]]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ligand_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    metal_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for row in rows:
+        if row["record"] != "HETATM":
+            continue
+        residue_name = row["residue_name"]
+        if residue_name in WATER_CODES:
+            continue
+        group_key = (residue_name, row["chain_id"], row["residue_number"])
+        target = metal_groups if _is_metal(row) else ligand_groups
+        if group_key not in target:
+            target[group_key] = {
+                "ligand_name": residue_name,
+                "ligand_code": residue_name,
+                "chain_id": row["chain_id"],
+                "residue_number": row["residue_number"],
+                "atom_count": 0,
+                "atoms": [],
+                "ligand_type": "metal_ion" if target is metal_groups else "hetero_ligand",
+            }
+        target[group_key]["atom_count"] += 1
+        if row["coord"] is not None:
+            target[group_key]["atoms"].append(row["coord"])
+
+    distance_matrix: list[dict[str, Any]] = []
+    for ligand in ligand_groups.values():
+        residue_distances = _calculate_ligand_residue_distances(ligand, protein_residues)
+        ligand["nearest_residues"] = {
+            f"{cutoff}A": [
+                residue for residue in residue_distances if residue["min_distance_angstrom"] <= cutoff
+            ]
+            for cutoff in (4, 6, 8)
+        }
+        ligand["residue_distances"] = residue_distances
+        for residue_distance in residue_distances:
+            distance_matrix.append(
+                {
+                    "ligand_code": ligand["ligand_code"],
+                    "ligand_chain_id": ligand["chain_id"],
+                    "ligand_residue_number": ligand["residue_number"],
+                    "residue_chain_id": residue_distance["chain_id"],
+                    "residue_number": residue_distance["residue_number"],
+                    "insertion_code": residue_distance["insertion_code"],
+                    "sequence_position": residue_distance["sequence_position"],
+                    "min_distance_angstrom": residue_distance["min_distance_angstrom"],
+                }
+            )
+
+    ligands = [_public_ligand(ligand) for ligand in sorted(ligand_groups.values(), key=_ligand_sort_key)]
+    metal_ions = [_public_ligand(ligand) for ligand in sorted(metal_groups.values(), key=_ligand_sort_key)]
+    distance_matrix.sort(
+        key=lambda item: (
+            item["min_distance_angstrom"],
+            item["residue_chain_id"],
+            item["sequence_position"],
+            item["ligand_code"],
+        )
+    )
+    return (
+        {
+            "ligand_count": len(ligands),
+            "metal_count": len(metal_ions),
+            "ligands": ligands,
+            "metal_ions": metal_ions,
+            "distance_matrix": distance_matrix,
+        },
+        ligands + metal_ions,
+    )
+
+
+def _calculate_ligand_residue_distances(
+    ligand: dict[str, Any], protein_residues: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    distances: list[dict[str, Any]] = []
+    if not ligand["atoms"]:
+        return distances
+
+    for residue in protein_residues:
+        if not residue["atoms"]:
+            continue
+        min_distance = min(
+            dist(ligand_atom, residue_atom)
+            for ligand_atom in ligand["atoms"]
+            for residue_atom in residue["atoms"]
+        )
+        distances.append(
+            {
+                "chain_id": residue["chain_id"],
+                "residue_number": residue["residue_number"],
+                "insertion_code": residue["insertion_code"],
+                "sequence_position": residue["sequence_position"],
+                "residue_name": residue["residue_name"],
+                "one_letter": residue["one_letter"],
+                "min_distance_angstrom": round(min_distance, 1),
+            }
+        )
+    distances.sort(
+        key=lambda item: (
+            item["min_distance_angstrom"],
+            item["chain_id"],
+            item["sequence_position"],
+        )
+    )
+    return distances
+
+
+def _public_ligand(ligand: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in ligand.items() if key != "atoms"}
+
+
+def _ligand_sort_key(item: dict[str, Any]) -> tuple[str, str]:
+    return (item["chain_id"], item["residue_number"])
+
+
+def _is_metal(row: dict[str, Any]) -> bool:
+    residue_name = row["residue_name"].upper()
+    element = row["element"].upper()
+    return residue_name in METAL_CODES or element in METAL_CODES

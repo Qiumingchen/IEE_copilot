@@ -1,6 +1,6 @@
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ from app.schemas.enzyme_record import (
     PropertyRecordCreate,
     PropertyRecordResponse,
     StructureCreate,
+    StructureArtifactResponse,
     StructureResponse,
     SubstrateCreate,
     SubstrateResponse,
@@ -55,6 +56,8 @@ from app.services.experiment_import import (
     parse_experiment_xlsx,
     validate_experiment_rows,
 )
+from app.services.object_storage import store_structure_file
+from app.services.structure_parser import StructureParseError, parse_structure_text
 from app.services.mutations import (
     MutationParseError,
     normalize_mutation_string,
@@ -433,6 +436,7 @@ def _expression_response(
 def _structure_response(
     structure: StructureEntry,
     ligands: list[LigandEntry],
+    artifact: AnalysisArtifact | None = None,
 ) -> StructureResponse:
     return StructureResponse(
         id=structure.id,
@@ -442,6 +446,8 @@ def _structure_response(
         pdb_id=structure.pdb_id,
         chain_summary=structure.chain_summary,
         ligand_summary=structure.ligand_summary,
+        artifact_id=structure.artifact_id,
+        artifact=StructureArtifactResponse.model_validate(artifact) if artifact is not None else None,
         source=structure.source,
         ligands=[LigandResponse.model_validate(ligand) for ligand in ligands],
     )
@@ -514,6 +520,7 @@ def list_structures(
                     .order_by(LigandEntry.created_at)
                 )
             ),
+            db.get(AnalysisArtifact, structure.artifact_id) if structure.artifact_id else None,
         )
         for structure in structures
     ]
@@ -562,6 +569,91 @@ def create_structure(
     for ligand in ligands:
         db.refresh(ligand)
     return _structure_response(structure, ligands)
+
+
+@router.post(
+    "/{enzyme_id}/structures/upload",
+    response_model=StructureResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_structure(
+    enzyme_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> StructureResponse:
+    enzyme = _get_enzyme(db, enzyme_id)
+    file_name = file.filename or "structure.pdb"
+    if not file_name.lower().endswith((".pdb", ".cif")):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="only .pdb and .cif structure files are supported",
+        )
+
+    content = await file.read()
+    try:
+        parsed = parse_structure_text(content.decode("utf-8"), file_name=file_name)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="structure file must be UTF-8 text",
+        ) from exc
+    except StructureParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    stored = store_structure_file(
+        file_name=file_name,
+        content=content,
+        content_type=file.content_type,
+    )
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme.id,
+        artifact_type="structure_file",
+        bucket=str(stored["bucket"]),
+        object_key=str(stored["object_key"]),
+        checksum=stored["checksum"],
+        content_type=stored["content_type"],
+        size_bytes=stored["size_bytes"],
+        source="user_upload",
+        visibility=Visibility.PRIVATE,
+    )
+    db.add(artifact)
+    db.flush()
+
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme.id,
+        structure_type=parsed.structure_type,
+        complex_state=parsed.complex_state,
+        chain_summary=parsed.chain_summary,
+        ligand_summary=parsed.ligand_summary,
+        artifact_id=artifact.id,
+        source="user_upload",
+    )
+    db.add(structure)
+    db.flush()
+
+    ligands = [
+        LigandEntry(
+            structure_entry_id=structure.id,
+            ligand_name=ligand["ligand_name"],
+            ligand_code=ligand["ligand_code"],
+            ligand_type=ligand["ligand_type"],
+            chain_id=ligand["chain_id"],
+            residue_number=ligand["residue_number"],
+            metadata_json={"atom_count": ligand["atom_count"]},
+        )
+        for ligand in parsed.ligands
+    ]
+    db.add_all(ligands)
+    db.commit()
+    db.refresh(artifact)
+    db.refresh(structure)
+    for ligand in ligands:
+        db.refresh(ligand)
+    return _structure_response(structure, ligands, artifact)
 
 
 @router.get("/{enzyme_id}/properties", response_model=list[PropertyRecordResponse])

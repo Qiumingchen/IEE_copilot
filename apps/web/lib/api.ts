@@ -229,6 +229,31 @@ export async function createStructureRecord(
   });
 }
 
+export async function uploadStructureFile(
+  enzymeId: string,
+  token: string,
+  file: File
+): Promise<StructureRecord> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${API_BASE}/enzymes/${enzymeId}/structures/upload`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null;
+    throw new Error(body?.error?.message ?? `Structure upload failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<StructureRecord>;
+}
+
 export async function createKineticRecord(
   enzymeId: string,
   token: string,
