@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app.core.config import get_settings
+from app.services.provenance import build_real_provenance
+
 
 MOCK_MTGASE_SEQUENCE = (
     "AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNGTVVQSPY"
@@ -108,7 +111,94 @@ class MockUniProtClient:
         }
 
 
-def get_uniprot_client() -> MockUniProtClient:
+def _first_ec_number(description: dict) -> str | None:
+    recommended = description.get("recommendedName") or {}
+    ec_numbers = recommended.get("ecNumbers") or []
+    if ec_numbers and isinstance(ec_numbers[0], dict):
+        return ec_numbers[0].get("value")
+    return None
+
+
+def _protein_name(description: dict) -> str:
+    recommended = description.get("recommendedName") or {}
+    full_name = recommended.get("fullName") or {}
+    return full_name.get("value") or "Unknown UniProt protein"
+
+
+def parse_uniprot_entry_payload(payload: dict) -> UniProtEntry:
+    cross_references = {
+        str(item.get("database")): str(item.get("id"))
+        for item in payload.get("uniProtKBCrossReferences", [])
+        if item.get("database") and item.get("id")
+    }
+    description = payload.get("proteinDescription") or {}
+    return UniProtEntry(
+        accession=str(payload.get("primaryAccession") or ""),
+        protein_name=_protein_name(description),
+        organism=(payload.get("organism") or {}).get("scientificName"),
+        ec_number=_first_ec_number(description),
+        sequence=(payload.get("sequence") or {}).get("value"),
+        cross_references=cross_references,
+    )
+
+
+def parse_uniprot_search_hits(payload: dict) -> list[UniProtSearchHit]:
+    hits = []
+    for item in payload.get("results", []):
+        entry = parse_uniprot_entry_payload(item)
+        hits.append(
+            UniProtSearchHit(
+                accession=entry.accession,
+                protein_name=entry.protein_name,
+                organism=entry.organism,
+                ec_number=entry.ec_number,
+                score=item.get("score"),
+            )
+        )
+    return hits
+
+
+class RealUniProtClient:
+    source = "uniprot"
+    base_url = "https://rest.uniprot.org"
+
+    def __init__(self, timeout: float = 15.0):
+        self.timeout = timeout
+
+    def search_by_keyword(self, keyword: str, size: int = 5) -> list[UniProtSearchHit]:
+        params = {"query": keyword, "format": "json", "size": size}
+        response = httpx.get(f"{self.base_url}/uniprotkb/search", params=params, timeout=self.timeout)
+        response.raise_for_status()
+        return parse_uniprot_search_hits(response.json())[:size]
+
+    def search_by_ec(self, ec_number: str, size: int = 5) -> list[UniProtSearchHit]:
+        return self.search_by_keyword(f"ec:{ec_number}", size=size)
+
+    def search_by_organism(self, organism: str, size: int = 5) -> list[UniProtSearchHit]:
+        return self.search_by_keyword(f"organism_name:{organism}", size=size)
+
+    def fetch_entry(self, accession: str) -> UniProtEntry:
+        response = httpx.get(f"{self.base_url}/uniprotkb/{accession}.json", timeout=self.timeout)
+        response.raise_for_status()
+        entry = parse_uniprot_entry_payload(response.json())
+        entry.cross_references["provenance"] = build_real_provenance(
+            provider="uniprot",
+            source_url=f"{self.base_url}/uniprotkb/{accession}.json",
+        )
+        return entry
+
+    def fetch_fasta(self, accession: str) -> str:
+        response = httpx.get(f"{self.base_url}/uniprotkb/{accession}.fasta", timeout=self.timeout)
+        response.raise_for_status()
+        return response.text
+
+    def fetch_cross_references(self, accession: str) -> dict[str, str]:
+        return self.fetch_entry(accession).cross_references
+
+
+def get_uniprot_client() -> MockUniProtClient | RealUniProtClient:
+    if get_settings().use_real_science_providers:
+        return RealUniProtClient()
     return MockUniProtClient()
 
 

@@ -1,4 +1,10 @@
-from app.external.uniprot import MockUniProtClient, parse_fasta_sequence
+from app.core.config import get_settings
+from app.external.uniprot import (
+    MockUniProtClient,
+    RealUniProtClient,
+    parse_fasta_sequence,
+    parse_uniprot_entry_payload,
+)
 
 
 def test_mock_uniprot_search_by_keyword_returns_structured_hit():
@@ -39,3 +45,44 @@ def test_mock_uniprot_fetch_cross_references_includes_structure_sources():
 
     assert cross_references["UniProtKB"] == "P81453"
     assert "AlphaFoldDB" in cross_references
+
+
+def test_parse_uniprot_entry_payload_extracts_core_fields():
+    payload = {
+        "primaryAccession": "P81453",
+        "proteinDescription": {
+            "recommendedName": {
+                "fullName": {"value": "Protein-glutamine gamma-glutamyltransferase"},
+                "ecNumbers": [{"value": "2.3.2.13"}],
+            }
+        },
+        "organism": {"scientificName": "Streptomyces mobaraensis"},
+        "sequence": {"value": "ACDEFG"},
+        "uniProtKBCrossReferences": [
+            {"database": "AlphaFoldDB", "id": "AF-P81453-F1"},
+            {"database": "PDB", "id": "1IU4"},
+        ],
+    }
+
+    entry = parse_uniprot_entry_payload(payload)
+
+    assert entry.accession == "P81453"
+    assert entry.protein_name == "Protein-glutamine gamma-glutamyltransferase"
+    assert entry.organism == "Streptomyces mobaraensis"
+    assert entry.ec_number == "2.3.2.13"
+    assert entry.sequence == "ACDEFG"
+    assert entry.cross_references["AlphaFoldDB"] == "AF-P81453-F1"
+    assert entry.cross_references["PDB"] == "1IU4"
+
+
+def test_get_uniprot_client_returns_real_client_when_enabled(monkeypatch):
+    from app.external.uniprot import get_uniprot_client
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+
+    client = get_uniprot_client()
+
+    assert isinstance(client, RealUniProtClient)
+    assert client.source == "uniprot"
+    get_settings.cache_clear()
