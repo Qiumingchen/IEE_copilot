@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
 from collections.abc import Iterable
+from typing import Protocol
 
 from app.services.similarity_matching import calculate_ungapped_similarity
 
@@ -23,6 +24,16 @@ class HomologSequence:
     coverage: float | None = None
 
 
+class UniProtHomologClient(Protocol):
+    source: str
+
+    def search_by_ec(self, ec_number: str, size: int = 5): ...
+
+    def search_by_keyword(self, keyword: str, size: int = 5): ...
+
+    def fetch_entry(self, accession: str): ...
+
+
 def collect_homologs(
     query_sequence: str,
     candidates: Iterable[HomologSequence],
@@ -43,6 +54,36 @@ def collect_homologs(
         ),
         max_sequences=params.max_sequences,
     )
+
+
+def fetch_uniprot_homolog_candidates(
+    *,
+    enzyme_name: str,
+    ec_number: str | None,
+    uniprot_client: UniProtHomologClient,
+    size: int,
+) -> list[HomologSequence]:
+    hits = (
+        uniprot_client.search_by_ec(ec_number, size=size)
+        if ec_number
+        else uniprot_client.search_by_keyword(enzyme_name, size=size)
+    )
+    candidates: list[HomologSequence] = []
+    for hit in hits:
+        entry = uniprot_client.fetch_entry(hit.accession)
+        sequence = getattr(entry, "sequence", None)
+        if not sequence:
+            continue
+        candidates.append(
+            HomologSequence(
+                accession=entry.accession,
+                name=entry.protein_name,
+                organism=entry.organism,
+                sequence=sequence,
+                source=getattr(uniprot_client, "source", "uniprot"),
+            )
+        )
+    return candidates
 
 
 def filter_by_identity(

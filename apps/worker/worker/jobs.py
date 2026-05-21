@@ -8,8 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import AnalysisArtifact, AnalysisJob, EnzymeEntry, EnzymeFamily, JobStatus, ProteinSequence
 from app.db.session import SessionLocal
+from app.external.uniprot import get_uniprot_client
 from app.services.conservation import calculate_conservation_profile
-from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
+from app.services.homology import (
+    HomologSearchParameters,
+    HomologSequence,
+    collect_homologs,
+    fetch_uniprot_homolog_candidates,
+)
 from app.services.library_design import design_mutation_library
 from app.services.mutation_scoring import MutationScore, calculate_general_score, calculate_module_specific_score
 from app.services.mutations import (
@@ -20,6 +26,7 @@ from app.services.mutations import (
 from app.services.mutation_recommendation import recommend_mutation_hotspots
 from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence
 from app.services.msa_runner import run_msa_with_runner
+from app.services.provenance import build_fallback_provenance, build_real_provenance
 from app.services.residue_features import build_residue_feature_records
 from app.services.rosetta_runner import run_rosetta_ddg_with_runner
 from app.tasks.celery_app import celery_app
@@ -73,11 +80,23 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
     job.started_at = now
     db.commit()
 
+    enzyme = db.get(EnzymeEntry, job.enzyme_entry_id)
+    if enzyme is None:
+        raise ValueError(f"enzyme entry not found: {job.enzyme_entry_id}")
+
     query_sequence = protein_sequence.mature_sequence or protein_sequence.sequence
     parameters = _homolog_parameters_from_job(job)
+    settings = get_settings()
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence=query_sequence,
+        max_sequences=parameters.max_sequences,
+        use_real_provider=settings.use_real_science_providers,
+        allow_fallback=settings.allow_science_fallbacks,
+    )
     homologs = collect_homologs(
         query_sequence,
-        _mock_homolog_candidates(query_sequence),
+        candidates,
         parameters=parameters,
     )
     payload = {
@@ -100,6 +119,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
             }
             for homolog in homologs
         ],
+        "runner": runner,
     }
     payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
 
@@ -124,6 +144,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         "homolog_count": len(homologs),
         "artifact_type": "homolog_sequences",
         "homologs": payload["homologs"],
+        "runner": runner,
     }
     db.commit()
     db.refresh(job)
@@ -392,6 +413,44 @@ def _list_of_dicts(value) -> list[dict]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _homolog_candidates_for_job(
+    enzyme: EnzymeEntry,
+    *,
+    query_sequence: str,
+    max_sequences: int,
+    use_real_provider: bool,
+    allow_fallback: bool,
+) -> tuple[list[HomologSequence], dict]:
+    if use_real_provider:
+        try:
+            candidates = fetch_uniprot_homolog_candidates(
+                enzyme_name=enzyme.name,
+                ec_number=enzyme.ec_number,
+                uniprot_client=get_uniprot_client(),
+                size=max_sequences,
+            )
+            if candidates:
+                return candidates, build_real_provenance(
+                    provider="uniprot",
+                    extra={"candidate_count": len(candidates)},
+                )
+        except Exception as exc:
+            if not allow_fallback:
+                raise RuntimeError(f"UniProt homolog collection failed: {exc}") from exc
+            return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
+                provider="uniprot",
+                warning=f"UniProt homolog collection failed; mock homolog candidates used: {exc}",
+            )
+
+    if not allow_fallback:
+        raise RuntimeError("UniProt homolog collection is unavailable and science fallbacks are disabled")
+
+    return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
+        provider="uniprot",
+        warning="Real UniProt homolog collection disabled; mock homolog candidates used.",
+    )
 
 
 def _enzyme_module(db: Session, enzyme_id: str):

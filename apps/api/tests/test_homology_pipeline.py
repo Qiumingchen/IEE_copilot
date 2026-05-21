@@ -3,10 +3,12 @@ from app.services.homology import (
     HomologSequence,
     collect_homologs,
     deduplicate_sequences,
+    fetch_uniprot_homolog_candidates,
     filter_by_coverage,
     filter_by_identity,
     limit_max_sequences,
 )
+from app.external.uniprot import UniProtEntry, UniProtSearchHit
 
 
 QUERY_SEQUENCE = "ACDEFGHIKL"
@@ -117,3 +119,49 @@ def test_collect_homologs_accepts_custom_parameters():
     )
 
     assert [homolog.accession for homolog in homologs] == ["CLOSE"]
+
+
+def test_fetch_uniprot_homolog_candidates_converts_search_hits_to_sequences():
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number, size=5):
+            assert ec_number == "2.3.2.13"
+            return [
+                UniProtSearchHit(
+                    accession="P11111",
+                    protein_name="Candidate transglutaminase",
+                    organism="Streptomyces testensis",
+                    ec_number=ec_number,
+                )
+            ]
+
+        def search_by_keyword(self, keyword, size=5):
+            raise AssertionError("EC search should be preferred when EC number is available")
+
+        def fetch_entry(self, accession):
+            assert accession == "P11111"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Candidate transglutaminase",
+                organism="Streptomyces testensis",
+                ec_number="2.3.2.13",
+                sequence="ACDEFGHIVL",
+            )
+
+    candidates = fetch_uniprot_homolog_candidates(
+        enzyme_name="Microbial transglutaminase",
+        ec_number="2.3.2.13",
+        uniprot_client=FakeUniProtClient(),
+        size=5,
+    )
+
+    assert candidates == [
+        HomologSequence(
+            accession="P11111",
+            name="Candidate transglutaminase",
+            organism="Streptomyces testensis",
+            sequence="ACDEFGHIVL",
+            source="uniprot",
+        )
+    ]

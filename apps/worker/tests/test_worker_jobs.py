@@ -98,6 +98,8 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
     assert job.result_summary_json["message"] == "homolog collection completed"
     assert job.result_summary_json["homolog_count"] == 2
     assert job.result_summary_json["artifact_type"] == "homolog_sequences"
+    assert job.result_summary_json["runner"]["provider"] == "uniprot"
+    assert job.result_summary_json["runner"]["mode"] == "fallback"
     assert [homolog["accession"] for homolog in job.result_summary_json["homologs"]] == [
         "MOCK_HOMOLOG_90",
         "MOCK_HOMOLOG_80",
