@@ -439,11 +439,13 @@ def test_finish_rosetta_ddg_job_creates_mock_ddg_artifact():
         )
 
     assert job.status == JobStatus.FINISHED
-    assert job.result_summary_json["message"] == "Rosetta ddG placeholder completed"
+    assert job.result_summary_json["message"] == "Rosetta ddG completed"
     assert job.result_summary_json["mutation_string"] == "L10A"
     assert job.result_summary_json["mutation_file"] == "L 10 A"
     assert job.result_summary_json["ddg_kcal_per_mol"] == -0.6
     assert job.result_summary_json["artifact_type"] == "rosetta_ddg"
+    assert job.result_summary_json["runner"]["provider"] == "rosetta"
+    assert job.result_summary_json["runner"]["mode"] == "fallback"
     assert artifact is not None
     assert artifact.object_key == f"analysis-jobs/{job.id}/rosetta-ddg.json"
     assert artifact.content_type == "application/json"

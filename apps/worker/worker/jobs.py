@@ -21,6 +21,7 @@ from app.services.mutation_recommendation import recommend_mutation_hotspots
 from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence
 from app.services.msa_runner import run_msa_with_runner
 from app.services.residue_features import build_residue_feature_records
+from app.services.rosetta_runner import run_rosetta_ddg_with_runner
 from app.tasks.celery_app import celery_app
 
 
@@ -422,15 +423,17 @@ def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
     job.started_at = now
     db.commit()
 
-    ddg = _mock_ddg_for_mutation(normalized_mutation_string)
+    settings = get_settings()
+    rosetta_result = run_rosetta_ddg_with_runner(
+        mutation_string=normalized_mutation_string,
+        mutations=mutations,
+        mutation_file=mutation_file,
+        command=settings.rosetta_ddg_command or settings.rosetta_ddg_bin,
+        allow_fallback=settings.allow_science_fallbacks,
+    )
     payload = {
-        "mutation_string": normalized_mutation_string,
-        "mutation_file": mutation_file,
-        "parsed_mutations": [mutation.model_dump() for mutation in mutations],
         "structure_id": parameters.get("structure_id"),
-        "ddg_kcal_per_mol": ddg,
-        "interpretation": "stabilizing" if ddg < 0 else "destabilizing_or_neutral",
-        "runner": "mock_rosetta_ddg",
+        **rosetta_result.payload,
     }
     payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
 
@@ -451,7 +454,7 @@ def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
     job.status = JobStatus.FINISHED
     job.finished_at = datetime.utcnow()
     job.result_summary_json = {
-        "message": "Rosetta ddG placeholder completed",
+        "message": "Rosetta ddG completed",
         "artifact_type": "rosetta_ddg",
         **payload,
     }
