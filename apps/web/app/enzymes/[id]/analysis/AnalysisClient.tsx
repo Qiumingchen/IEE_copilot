@@ -21,11 +21,13 @@ import {
   buildHomologFasta,
   buildMsaJobParameters,
   buildMsaDownloadFasta,
+  buildMutationRecommendationJobParameters,
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
   filterConservationSites,
   getArtifactRunnerLabel,
+  getConservationArtifactOptions,
   getConservationSites,
   getHomologArtifactOptions,
   getHomologDiagnostics,
@@ -46,6 +48,7 @@ import type {
   HomologSequenceView,
   MsaInputMode,
   MsaRecordView,
+  MutationRecommendationInputMode,
   MutationLibraryView,
   MutationRecommendationCandidateView,
   ScoredMutationSuggestionView,
@@ -120,6 +123,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [customMsaFasta, setCustomMsaFasta] = useState("");
   const [conservationInputMode, setConservationInputMode] = useState<ConservationInputMode>("latest");
   const [selectedMsaArtifactId, setSelectedMsaArtifactId] = useState("");
+  const [recommendationInputMode, setRecommendationInputMode] =
+    useState<MutationRecommendationInputMode>("latest");
+  const [selectedConservationArtifactId, setSelectedConservationArtifactId] = useState("");
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
@@ -406,6 +412,14 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
         selectedMsaArtifactId || fallbackArtifactId
       );
     }
+    if (jobType === "mutation_recommendation") {
+      const fallbackArtifactId =
+        conservationArtifactOptions[conservationArtifactOptions.length - 1]?.id ?? "";
+      return buildMutationRecommendationJobParameters(
+        recommendationInputMode,
+        selectedConservationArtifactId || fallbackArtifactId
+      );
+    }
     return undefined;
   }
 
@@ -480,6 +494,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const homologDiagnostics = latestHomologContent ? getHomologDiagnostics(latestHomologContent) : null;
   const homologArtifactOptions = getHomologArtifactOptions(artifacts);
   const msaArtifactOptions = getMsaArtifactOptions(artifacts);
+  const conservationArtifactOptions = getConservationArtifactOptions(artifacts);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -529,6 +544,10 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
             item.jobType === "conservation_profile" &&
             conservationInputMode === "artifact" &&
             msaArtifactOptions.length === 0;
+          const isRecommendationBlocked =
+            item.jobType === "mutation_recommendation" &&
+            recommendationInputMode === "artifact" &&
+            conservationArtifactOptions.length === 0;
           return (
             <article className="rounded-md border border-slate-200 bg-white p-4" key={item.artifactType}>
               <div className="flex items-start justify-between gap-3">
@@ -666,9 +685,57 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                   ) : null}
                 </div>
               ) : null}
+              {item.jobType === "mutation_recommendation" ? (
+                <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Input source
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => (
+                        setRecommendationInputMode(event.target.value as MutationRecommendationInputMode)
+                      )}
+                      value={recommendationInputMode}
+                    >
+                      <option value="latest">Latest conservation</option>
+                      <option value="artifact">Previous conservation run</option>
+                    </select>
+                  </label>
+                  {recommendationInputMode === "artifact" ? (
+                    <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                      Conservation run
+                      <select
+                        className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={conservationArtifactOptions.length === 0}
+                        onChange={(event) => setSelectedConservationArtifactId(event.target.value)}
+                        value={
+                          selectedConservationArtifactId ||
+                          conservationArtifactOptions[conservationArtifactOptions.length - 1]?.id ||
+                          ""
+                        }
+                      >
+                        {conservationArtifactOptions.length === 0 ? (
+                          <option value="">No conservation runs</option>
+                        ) : (
+                          conservationArtifactOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 className="mt-4 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-                disabled={!token || Boolean(runningJobType) || isMsaBlocked || isConservationBlocked}
+                disabled={
+                  !token ||
+                  Boolean(runningJobType) ||
+                  isMsaBlocked ||
+                  isConservationBlocked ||
+                  isRecommendationBlocked
+                }
                 onClick={() => void runAnalysis(item.jobType)}
                 type="button"
               >

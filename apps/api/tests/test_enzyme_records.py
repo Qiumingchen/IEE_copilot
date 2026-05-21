@@ -1006,6 +1006,105 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     ] == 3.2
 
 
+def test_create_mutation_recommendation_job_uses_selected_conservation_artifact(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="selected-mutation-recommendation-sequence",
+        )
+    )
+    older_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="conservation_profile",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "sites": [
+                {
+                    "query_position": 2,
+                    "wildtype_residue": "C",
+                    "shannon_entropy": 0.2,
+                    "wildtype_frequency": 0.9,
+                    "conservation_category": "highly_conserved",
+                }
+            ]
+        },
+    )
+    newer_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="conservation_profile",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "sites": [
+                {
+                    "query_position": 8,
+                    "wildtype_residue": "I",
+                    "shannon_entropy": 0.918,
+                    "wildtype_frequency": 0.667,
+                    "conservation_category": "moderately_conserved",
+                }
+            ]
+        },
+    )
+    db_session.add_all([older_job, newer_job])
+    db_session.flush()
+    older_artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=older_job.id,
+        artifact_type="conservation_profile",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{older_job.id}/conservation-profile.json",
+        content_type="application/json",
+        size_bytes=256,
+    )
+    db_session.add(older_artifact)
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=newer_job.id,
+            artifact_type="conservation_profile",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{newer_job.id}/conservation-profile.json",
+            content_type="application/json",
+            size_bytes=256,
+        )
+    )
+    db_session.commit()
+
+    class MutationRecommendationTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_mutation_recommendation",
+        MutationRecommendationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "mutation_recommendation",
+            "parameters_json": {"conservation_artifact_id": older_artifact.id},
+        },
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert parameters["conservation_sites"] == older_job.result_summary_json["sites"]
+    assert parameters["conservation_source"]["artifact_id"] == older_artifact.id
+
+
 def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

@@ -6,12 +6,14 @@ import {
   buildHomologCsv,
   buildHomologFasta,
   buildMsaJobParameters,
+  buildMutationRecommendationJobParameters,
   buildMsaDownloadFasta,
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
+  getConservationArtifactOptions,
   getArtifactRunnerLabel,
   getHomologDiagnostics,
   getHomologArtifactOptions,
@@ -328,6 +330,60 @@ test("builds MSA artifact options for conservation selection", () => {
     {
       id: "artifact-1",
       label: "2026-05-21T10:00:00 | 3 seqs | 120 aa | mafft fallback"
+    }
+  ]);
+});
+
+test("builds mutation recommendation parameters from selected conservation source", () => {
+  assert.equal(buildMutationRecommendationJobParameters("latest", "artifact-conservation"), undefined);
+  assert.deepEqual(buildMutationRecommendationJobParameters("artifact", "artifact-conservation"), {
+    conservation_artifact_id: "artifact-conservation"
+  });
+});
+
+test("builds conservation artifact options for mutation recommendation selection", () => {
+  const options = getConservationArtifactOptions([
+    {
+      id: "artifact-1",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-1",
+      job_status: "finished",
+      artifact_type: "conservation_profile",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-1/conservation-profile.json",
+      checksum: null,
+      content_type: "application/json",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T10:00:00",
+      result_summary_json: {
+        site_count: 10,
+        sequence_count: 3
+      }
+    },
+    {
+      id: "artifact-2",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-2",
+      job_status: "finished",
+      artifact_type: "msa",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-2/msa.fasta",
+      checksum: null,
+      content_type: "text/x-fasta",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T11:00:00",
+      result_summary_json: {}
+    }
+  ]);
+
+  assert.deepEqual(options, [
+    {
+      id: "artifact-1",
+      label: "2026-05-21T10:00:00 | 10 sites | 3 seqs"
     }
   ]);
 });

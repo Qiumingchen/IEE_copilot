@@ -43,12 +43,19 @@ export type MsaInputMode = "latest" | "artifact" | "custom_fasta";
 
 export type ConservationInputMode = "latest" | "artifact";
 
+export type MutationRecommendationInputMode = "latest" | "artifact";
+
 export type HomologArtifactOption = {
   id: string;
   label: string;
 };
 
 export type MsaArtifactOption = {
+  id: string;
+  label: string;
+};
+
+export type ConservationArtifactOption = {
   id: string;
   label: string;
 };
@@ -178,6 +185,16 @@ export function buildConservationJobParameters(
   return undefined;
 }
 
+export function buildMutationRecommendationJobParameters(
+  inputMode: MutationRecommendationInputMode,
+  conservationArtifactId: string
+): Record<string, string> | undefined {
+  if (inputMode === "artifact" && conservationArtifactId.trim()) {
+    return { conservation_artifact_id: conservationArtifactId.trim() };
+  }
+  return undefined;
+}
+
 export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): HomologArtifactOption[] {
   return artifacts
     .filter((artifact) => artifact.artifact_type === "homolog_sequences")
@@ -188,6 +205,22 @@ export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): 
       return {
         id: artifact.id,
         label: `${artifact.created_at} | ${homologCount} hits | ${runner}`
+      };
+    });
+}
+
+export function getConservationArtifactOptions(
+  artifacts: AnalysisArtifactRecord[]
+): ConservationArtifactOption[] {
+  return artifacts
+    .filter((artifact) => artifact.artifact_type === "conservation_profile")
+    .map((artifact) => {
+      const summary = artifact.result_summary_json ?? {};
+      const siteCount = typeof summary.site_count === "number" ? summary.site_count : 0;
+      const sequenceCount = typeof summary.sequence_count === "number" ? summary.sequence_count : 0;
+      return {
+        id: artifact.id,
+        label: `${artifact.created_at} | ${siteCount} sites | ${sequenceCount} seqs`
       };
     });
 }

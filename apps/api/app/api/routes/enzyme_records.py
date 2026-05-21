@@ -294,6 +294,27 @@ def _latest_conservation_sites_for_recommendation(db: Session, enzyme_id: str) -
     return [site for site in sites if isinstance(site, dict)]
 
 
+def _conservation_sites_from_artifact(db: Session, enzyme_id: str, artifact_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.id == artifact_id,
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "conservation_profile",
+        )
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    sites = summary.get("sites", [])
+    if not isinstance(sites, list):
+        return []
+    return [site for site in sites if isinstance(site, dict)]
+
+
 def _latest_recommendation_candidates_for_library(db: Session, enzyme_id: str) -> list[dict]:
     row = db.execute(
         select(AnalysisArtifact, AnalysisJob)
@@ -428,7 +449,22 @@ def _analysis_job_parameters(
             {"identifier": "query", "aligned_sequence": sequence},
         ]
     if job_type == "mutation_recommendation":
-        parameters["conservation_sites"] = _latest_conservation_sites_for_recommendation(db, enzyme_id)
+        conservation_artifact_id = parameters.get("conservation_artifact_id")
+        if isinstance(conservation_artifact_id, str) and conservation_artifact_id.strip():
+            conservation_sites = _conservation_sites_from_artifact(db, enzyme_id, conservation_artifact_id)
+            parameters["conservation_source"] = {
+                "type": "conservation_artifact",
+                "artifact_id": conservation_artifact_id,
+                "site_count": len(conservation_sites),
+            }
+        else:
+            conservation_sites = _latest_conservation_sites_for_recommendation(db, enzyme_id)
+            if conservation_sites:
+                parameters["conservation_source"] = {
+                    "type": "latest_conservation_artifact",
+                    "site_count": len(conservation_sites),
+                }
+        parameters["conservation_sites"] = conservation_sites
         parameters["mutation_records"] = _mutation_records_for_scoring(db, enzyme_id)
         parameters["rosetta_results"] = _rosetta_results_for_library(db, enzyme_id)
         parameters["structure_summaries"] = _structure_summaries_for_scoring(db, enzyme_id)
