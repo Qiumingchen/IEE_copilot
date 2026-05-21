@@ -113,3 +113,20 @@ test("formatImportedReference shows DOI title and source", () => {
     "10.1000/curated · Curated MTGase paper · curated_literature"
   );
 });
+
+test("formatImportedReference normalizes DOI URLs for display", () => {
+  assert.equal(
+    formatImportedReference({
+      id: "ref-1",
+      title: "DOI URL paper",
+      authors: null,
+      journal: null,
+      year: null,
+      doi: "https://doi.org/10.1000/MixedCase",
+      pubmed_id: null,
+      source: "curated_literature",
+      provenance: null
+    }),
+    "10.1000/mixedcase · DOI URL paper · curated_literature"
+  );
+});

@@ -31,9 +31,22 @@ export function summarizeCuratedEvidenceImport(result: CuratedEvidenceImportResp
 }
 
 export function formatImportedReference(reference: LiteratureReferenceRecord): string {
-  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
+  const identifier = normalizeDoiForDisplay(reference.doi) || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
   const label = [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
   return `${label} · ${reference.source}`;
+}
+
+export function normalizeDoiForDisplay(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+  let doi = value.trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+  for (const prefix of ["https://doi.org/", "http://doi.org/", "doi:"]) {
+    if (doi.startsWith(prefix)) {
+      doi = doi.slice(prefix.length);
+    }
+  }
+  return doi.trim();
 }
 
 export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewResponse): string {

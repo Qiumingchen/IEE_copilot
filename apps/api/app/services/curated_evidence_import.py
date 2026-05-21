@@ -216,7 +216,7 @@ def _format_preview_errors(errors: list[CuratedEvidencePreviewError]) -> str:
 
 
 def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureReference | None:
-    doi = _value(row, "doi")
+    doi = _normalize_doi(_value(row, "doi"))
     pubmed_id = _value(row, "pubmed_id")
     if doi:
         existing = db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi))
@@ -373,7 +373,15 @@ def _summarize_row(record_type: str, row: dict[str, str]) -> str:
 
 
 def _reference_key(row: dict[str, str]) -> str | None:
-    return _value(row, "doi") or _value(row, "pubmed_id") or _value(row, "reference_title") or None
+    return _normalize_doi(_value(row, "doi")) or _value(row, "pubmed_id") or _value(row, "reference_title") or None
+
+
+def _normalize_doi(value: str) -> str:
+    doi = value.strip().strip("'\"").lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if doi.startswith(prefix):
+            doi = doi.removeprefix(prefix)
+    return doi.strip()
 
 
 def _required(row: dict[str, str], key: str) -> str:
