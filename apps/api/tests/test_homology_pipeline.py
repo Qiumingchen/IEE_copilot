@@ -220,3 +220,49 @@ def test_fetch_uniprot_homolog_candidates_converts_search_hits_to_sequences():
             source="uniprot",
         ),
     ]
+
+
+def test_fetch_uniprot_homolog_candidates_uses_canonical_query_for_mock_mtgase():
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def __init__(self):
+            self.searches = []
+
+        def search_by_keyword(self, keyword, size=5):
+            self.searches.append(("keyword", keyword, size))
+            if keyword == "Microbial transglutaminase":
+                return [
+                    UniProtSearchHit(
+                        accession="P11111",
+                        protein_name="Canonical mTGase candidate",
+                        organism="Streptomyces testensis",
+                        ec_number="2.3.2.13",
+                    )
+                ]
+            return []
+
+        def search_by_ec(self, ec_number, size=5):
+            self.searches.append(("ec", ec_number, size))
+            return []
+
+        def fetch_entry(self, accession):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Canonical mTGase candidate",
+                organism="Streptomyces testensis",
+                ec_number="2.3.2.13",
+                sequence="ACDEFGHIVL",
+            )
+
+    fake_client = FakeUniProtClient()
+
+    candidates = fetch_uniprot_homolog_candidates(
+        enzyme_name="Mock microbial transglutaminase",
+        ec_number="2.3.2.13",
+        uniprot_client=fake_client,
+        size=5,
+    )
+
+    assert fake_client.searches[0] == ("keyword", "Microbial transglutaminase", 5)
+    assert [candidate.accession for candidate in candidates] == ["P11111"]

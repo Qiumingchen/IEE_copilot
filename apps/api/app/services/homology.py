@@ -121,7 +121,7 @@ def _search_uniprot_homolog_hits(
     size: int,
 ):
     hits_by_accession = {}
-    keyword = enzyme_name.strip()
+    keyword = _canonical_homolog_keyword(enzyme_name)
     if keyword:
         for hit in uniprot_client.search_by_keyword(keyword, size=size):
             hits_by_accession.setdefault(hit.accession, hit)
@@ -140,6 +140,13 @@ def _search_uniprot_homolog_hits(
             hits_by_accession.setdefault(hit.accession, hit)
 
     return list(hits_by_accession.values())[:size]
+
+
+def _canonical_homolog_keyword(enzyme_name: str) -> str:
+    keyword = enzyme_name.strip()
+    if keyword.lower() == "mock microbial transglutaminase":
+        return "Microbial transglutaminase"
+    return keyword
 
 
 def filter_by_identity(
