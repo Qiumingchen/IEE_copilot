@@ -1,3 +1,6 @@
+import threading
+import time
+
 from app.services.homology import (
     HomologSearchParameters,
     HomologSequence,
@@ -266,3 +269,54 @@ def test_fetch_uniprot_homolog_candidates_uses_canonical_query_for_mock_mtgase()
 
     assert fake_client.searches[0] == ("keyword", "Microbial transglutaminase", 5)
     assert [candidate.accession for candidate in candidates] == ["P11111"]
+
+
+def test_fetch_uniprot_homolog_candidates_fetches_entries_concurrently_in_hit_order():
+    class SlowUniProtClient:
+        source = "uniprot"
+
+        def __init__(self):
+            self.active_fetches = 0
+            self.max_active_fetches = 0
+            self.lock = threading.Lock()
+
+        def search_by_keyword(self, keyword, size=5):
+            return [
+                UniProtSearchHit(
+                    accession=f"P{i}",
+                    protein_name=f"Candidate {i}",
+                    organism="Streptomyces testensis",
+                    ec_number="2.3.2.13",
+                )
+                for i in range(4)
+            ]
+
+        def search_by_ec(self, ec_number, size=5):
+            return []
+
+        def fetch_entry(self, accession):
+            with self.lock:
+                self.active_fetches += 1
+                self.max_active_fetches = max(self.max_active_fetches, self.active_fetches)
+            time.sleep(0.03)
+            with self.lock:
+                self.active_fetches -= 1
+            return UniProtEntry(
+                accession=accession,
+                protein_name=f"Candidate {accession}",
+                organism="Streptomyces testensis",
+                ec_number="2.3.2.13",
+                sequence="ACDEFGHIVL",
+            )
+
+    fake_client = SlowUniProtClient()
+
+    candidates = fetch_uniprot_homolog_candidates(
+        enzyme_name="Microbial transglutaminase",
+        ec_number="2.3.2.13",
+        uniprot_client=fake_client,
+        size=4,
+    )
+
+    assert fake_client.max_active_fetches > 1
+    assert [candidate.accession for candidate in candidates] == ["P0", "P1", "P2", "P3"]

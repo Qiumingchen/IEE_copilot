@@ -1,8 +1,12 @@
 from dataclasses import dataclass, replace
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 from app.services.similarity_matching import calculate_ungapped_similarity
+
+
+MAX_UNIPROT_ENTRY_FETCH_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -96,8 +100,10 @@ def fetch_uniprot_homolog_candidates(
         size=size,
     )
     candidates: list[HomologSequence] = []
-    for hit in hits:
-        entry = uniprot_client.fetch_entry(hit.accession)
+    for entry in _fetch_uniprot_entries_in_hit_order(
+        hits,
+        uniprot_client=uniprot_client,
+    ):
         sequence = getattr(entry, "mature_sequence", None) or getattr(entry, "sequence", None)
         if not sequence:
             continue
@@ -111,6 +117,18 @@ def fetch_uniprot_homolog_candidates(
             )
         )
     return candidates
+
+
+def _fetch_uniprot_entries_in_hit_order(
+    hits,
+    *,
+    uniprot_client: UniProtHomologClient,
+):
+    if not hits:
+        return []
+    max_workers = min(MAX_UNIPROT_ENTRY_FETCH_WORKERS, len(hits))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(lambda hit: uniprot_client.fetch_entry(hit.accession), hits))
 
 
 def _search_uniprot_homolog_hits(
