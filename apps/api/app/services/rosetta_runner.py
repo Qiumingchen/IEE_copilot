@@ -31,28 +31,32 @@ def run_rosetta_ddg_with_runner(
             shell=True,
         )
         if completed.returncode == 0 and completed.stdout.strip():
-            parsed = json.loads(completed.stdout)
-            ddg = float(parsed["ddg_kcal_per_mol"])
-            return RosettaRunResult(
-                payload={
-                    "mutation_string": mutation_string,
-                    "mutation_file": mutation_file,
-                    "parsed_mutations": [mutation.model_dump() for mutation in mutations],
-                    "ddg_kcal_per_mol": ddg,
-                    "interpretation": parsed.get("interpretation")
-                    or ("stabilizing" if ddg < 0 else "destabilizing_or_neutral"),
-                    "runner": build_real_provenance(
-                        provider="rosetta",
-                        extra={
-                            "exit_code": completed.returncode,
-                            "command_source": "configured",
-                        },
-                    ),
-                }
-            )
-        failure_warning = (
-            f"Rosetta ddG runner failed with exit code {completed.returncode}: {completed.stderr}"
-        ).strip()
+            try:
+                parsed = _parse_rosetta_stdout(completed.stdout)
+                ddg = float(parsed["ddg_kcal_per_mol"])
+                return RosettaRunResult(
+                    payload={
+                        "mutation_string": mutation_string,
+                        "mutation_file": mutation_file,
+                        "parsed_mutations": [mutation.model_dump() for mutation in mutations],
+                        "ddg_kcal_per_mol": ddg,
+                        "interpretation": parsed.get("interpretation")
+                        or ("stabilizing" if ddg < 0 else "destabilizing_or_neutral"),
+                        "runner": build_real_provenance(
+                            provider="rosetta",
+                            extra={
+                                "exit_code": completed.returncode,
+                                "command_source": "configured",
+                            },
+                        ),
+                    }
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                failure_warning = f"Rosetta ddG runner output could not be parsed: {exc}"
+        else:
+            failure_warning = (
+                f"Rosetta ddG runner failed with exit code {completed.returncode}: {completed.stderr}"
+            ).strip()
         if not allow_fallback:
             raise RuntimeError(failure_warning)
 
@@ -78,3 +82,12 @@ def run_rosetta_ddg_with_runner(
 def _fallback_ddg_for_mutation(mutation_string: str) -> float:
     total = sum(ord(char) for char in mutation_string)
     return round(((total % 21) - 10) / 5, 2)
+
+
+def _parse_rosetta_stdout(stdout: str) -> dict[str, Any]:
+    parsed = json.loads(stdout)
+    if not isinstance(parsed, dict):
+        raise TypeError("Rosetta ddG output must be a JSON object")
+    if "ddg_kcal_per_mol" not in parsed:
+        raise KeyError("ddg_kcal_per_mol")
+    return parsed
