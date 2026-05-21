@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     api_secret_key: str = "dev-secret"
     access_token_expire_minutes: int = 1440
     skip_db_healthcheck: bool = False
+    allow_science_fallbacks: bool = True
+    use_real_science_providers: bool = False
+    mafft_bin: str | None = None
+    rosetta_ddg_bin: str | None = None
+    rosetta_ddg_command: str | None = None
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
