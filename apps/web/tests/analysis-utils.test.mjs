@@ -11,6 +11,7 @@ import {
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
+  formatAnalysisArtifactSource,
   filterConservationSites,
   getConservationSites,
   getConservationArtifactOptions,
@@ -502,6 +503,57 @@ test("formats fallback artifact runner labels", () => {
 
   assert.equal(label.text, "mafft fallback");
   assert.equal(label.warning, "MAFFT executable not configured; mock alignment used.");
+});
+
+test("formats artifact input source lineage from summaries", () => {
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        homolog_source: {
+          type: "homolog_artifact",
+          artifact_id: "homolog-artifact-1",
+          sequence_count: 12
+        }
+      }
+    }),
+    "homolog_artifact | 12 seqs | homolog-artifact-1"
+  );
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        msa_source: {
+          type: "latest_msa_artifact",
+          sequence_count: 3
+        }
+      }
+    }),
+    "latest_msa_artifact | 3 seqs"
+  );
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        conservation_source: {
+          type: "conservation_artifact",
+          artifact_id: "conservation-artifact-1",
+          site_count: 20
+        }
+      }
+    }),
+    "conservation_artifact | 20 sites | conservation-artifact-1"
+  );
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        recommendation_source: {
+          type: "recommendation_artifact",
+          artifact_id: "recommendation-artifact-1",
+          candidate_count: 4
+        }
+      }
+    }),
+    "recommendation_artifact | 4 candidates | recommendation-artifact-1"
+  );
+  assert.equal(formatAnalysisArtifactSource({ result_summary_json: null }), "-");
 });
 
 test("builds rosetta ddg run views with status and error messages", () => {

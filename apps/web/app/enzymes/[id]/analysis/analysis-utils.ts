@@ -268,6 +268,35 @@ export function getMsaArtifactOptions(artifacts: AnalysisArtifactRecord[]): MsaA
     });
 }
 
+export function formatAnalysisArtifactSource(
+  artifact: Pick<AnalysisArtifactRecord, "result_summary_json">
+): string {
+  const summary = artifact.result_summary_json ?? {};
+  const source =
+    sourceRecord(summary.homolog_source) ??
+    sourceRecord(summary.msa_source) ??
+    sourceRecord(summary.conservation_source) ??
+    sourceRecord(summary.recommendation_source);
+  if (!source) {
+    return "-";
+  }
+
+  const parts = [String(source.type ?? "source")];
+  if (typeof source.sequence_count === "number") {
+    parts.push(`${source.sequence_count} seqs`);
+  }
+  if (typeof source.site_count === "number") {
+    parts.push(`${source.site_count} sites`);
+  }
+  if (typeof source.candidate_count === "number") {
+    parts.push(`${source.candidate_count} candidates`);
+  }
+  if (typeof source.artifact_id === "string" && source.artifact_id.length > 0) {
+    parts.push(source.artifact_id);
+  }
+  return parts.join(" | ");
+}
+
 export function buildMutationLibraryWorkbookBytes(library: MutationLibraryView): Uint8Array {
   const variantRows = [
     ["variant_id", "mutation_string", "order", "score", "member_scores", "risk_flags", "reasons"],
@@ -699,6 +728,13 @@ function runnerLabelFromUnknown(value: unknown): ArtifactRunnerLabel {
     ? runner.warning
     : null;
   return { text: `${provider} ${mode}`, warning, mode };
+}
+
+function sourceRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  return value as Record<string, unknown>;
 }
 
 export function getMutationLibrary(content: AnalysisArtifactContentRecord): MutationLibraryView | null {

@@ -25,6 +25,7 @@ import {
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
+  formatAnalysisArtifactSource,
   filterConservationSites,
   getArtifactRunnerLabel,
   getConservationArtifactOptions,
@@ -777,6 +778,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                   Object key
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Input source
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
                   Size
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
@@ -795,6 +799,11 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                     <td className="max-w-md px-4 py-3">
                       <span className="break-words font-mono text-xs">{artifact.object_key}</span>
                     </td>
+                    <td className="max-w-sm px-4 py-3">
+                      <span className="break-words font-mono text-xs text-slate-600">
+                        {formatAnalysisArtifactSource(artifact)}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">{artifact.size_bytes ?? "-"}</td>
                     <td className="px-4 py-3">
                       <button
@@ -810,7 +819,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={5}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
                     No analysis artifacts
                   </td>
                 </tr>
