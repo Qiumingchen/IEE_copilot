@@ -212,6 +212,37 @@ def test_curated_evidence_import_normalizes_pubmed_id_before_deduplication(clien
     assert len(references) == 1
 
 
+def test_curated_evidence_import_deduplicates_references_by_title_year_and_source(client, db_session):
+    email = "curated-title-dedupe@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,property_type,value_original,unit_original,mutation_string,reference_title,journal,year,source,evidence_text",
+            "property,optimal_pH,7.0,pH,, Evidence Only Paper ,Journal of Enzymes,2024,curated_literature,Optimum pH reported",
+            "mutation,,,,S2P,evidence only paper,Journal of Enzymes,2024,curated_literature,S2P increased half-life",
+        ]
+    )
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert response.status_code == 201
+    assert len(response.json()["reference_ids"]) == 1
+    assert response.json()["references"][0]["title"] == "Evidence Only Paper"
+
+    references = list(
+        db_session.scalars(
+            select(LiteratureReference).where(LiteratureReference.title == "Evidence Only Paper")
+        )
+    )
+    assert len(references) == 1
+
+
 def test_curator_can_preview_curated_evidence_without_writing_records(client, db_session):
     email = "curated-preview@example.com"
     headers = _auth_headers(client, email)

@@ -218,6 +218,9 @@ def _format_preview_errors(errors: list[CuratedEvidencePreviewError]) -> str:
 def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureReference | None:
     doi = _normalize_doi(_value(row, "doi"))
     pubmed_id = _normalize_pubmed_id(_value(row, "pubmed_id"))
+    title = _value(row, "reference_title")
+    year = _int_or_none(_value(row, "year"))
+    source = _value(row, "source") or "curated_literature"
     if doi:
         existing = db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi))
         if existing is not None:
@@ -228,8 +231,18 @@ def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureRefe
         )
         if existing is not None:
             return existing
+    if title:
+        normalized_title = _normalize_reference_title(title)
+        candidates = db.scalars(
+            select(LiteratureReference).where(
+                LiteratureReference.year == year,
+                LiteratureReference.source == source,
+            )
+        )
+        for candidate in candidates:
+            if _normalize_reference_title(candidate.title) == normalized_title:
+                return candidate
 
-    title = _value(row, "reference_title")
     if not any([doi, pubmed_id, title]):
         return None
 
@@ -237,13 +250,13 @@ def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureRefe
         title=title or doi or pubmed_id or "Curated literature reference",
         authors=_value(row, "authors") or None,
         journal=_value(row, "journal") or None,
-        year=_int_or_none(_value(row, "year")),
+        year=year,
         doi=doi or None,
         pubmed_id=pubmed_id or None,
-        source=_value(row, "source") or "curated_literature",
+        source=source,
         metadata_json={
             "provenance": {
-                "provider": _value(row, "source") or "curated_literature",
+                "provider": source,
                 "mode": "curated",
             }
         },
@@ -373,10 +386,13 @@ def _summarize_row(record_type: str, row: dict[str, str]) -> str:
 
 
 def _reference_key(row: dict[str, str]) -> str | None:
+    title = _normalize_reference_title(_value(row, "reference_title"))
+    year = _value(row, "year")
+    source = _value(row, "source") or "curated_literature"
     return (
         _normalize_doi(_value(row, "doi"))
         or _normalize_pubmed_id(_value(row, "pubmed_id"))
-        or _value(row, "reference_title")
+        or (":".join(part for part in [title, year, source] if part) if title else None)
         or None
     )
 
@@ -395,6 +411,10 @@ def _normalize_pubmed_id(value: str) -> str:
         if normalized.startswith(prefix):
             normalized = normalized.removeprefix(prefix)
     return "".join(character for character in normalized if character.isdigit())
+
+
+def _normalize_reference_title(value: str | None) -> str:
+    return " ".join((value or "").strip().strip("'\"").lower().split())
 
 
 def _required(row: dict[str, str], key: str) -> str:
