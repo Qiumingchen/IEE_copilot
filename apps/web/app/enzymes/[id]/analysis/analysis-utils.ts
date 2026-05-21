@@ -300,31 +300,28 @@ export function formatAnalysisArtifactSource(
 export function buildAnalysisArtifactLineageJson(artifact: AnalysisArtifactRecord): string {
   const summary = artifact.result_summary_json ?? {};
   return JSON.stringify(
+    buildAnalysisArtifactLineageRecord(artifact),
+    null,
+    2
+  );
+}
+
+export function buildAnalysisRunManifestJson(
+  enzymeId: string,
+  artifacts: AnalysisArtifactRecord[],
+  generatedAt = new Date().toISOString()
+): string {
+  const artifactCounts = artifacts.reduce<Record<string, number>>((counts, artifact) => {
+    counts[artifact.artifact_type] = (counts[artifact.artifact_type] ?? 0) + 1;
+    return counts;
+  }, {});
+  return JSON.stringify(
     {
-      artifact: {
-        id: artifact.id,
-        enzyme_entry_id: artifact.enzyme_entry_id,
-        job_id: artifact.job_id,
-        job_status: artifact.job_status,
-        artifact_type: artifact.artifact_type,
-        bucket: artifact.bucket,
-        object_key: artifact.object_key,
-        checksum: artifact.checksum,
-        content_type: artifact.content_type,
-        size_bytes: artifact.size_bytes,
-        source: artifact.source,
-        visibility: artifact.visibility,
-        created_at: artifact.created_at
-      },
-      input_source: {
-        label: formatAnalysisArtifactSource(artifact),
-        homolog_source: summary.homolog_source ?? null,
-        msa_source: summary.msa_source ?? null,
-        conservation_source: summary.conservation_source ?? null,
-        recommendation_source: summary.recommendation_source ?? null
-      },
-      runner: summary.runner ?? null,
-      summary
+      enzyme_entry_id: enzymeId,
+      generated_at: generatedAt,
+      artifact_count: artifacts.length,
+      artifact_counts: artifactCounts,
+      artifacts: artifacts.map(buildAnalysisArtifactLineageRecord)
     },
     null,
     2
@@ -769,6 +766,36 @@ function sourceRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function buildAnalysisArtifactLineageRecord(artifact: AnalysisArtifactRecord) {
+  const summary = artifact.result_summary_json ?? {};
+  return {
+    artifact: {
+      id: artifact.id,
+      enzyme_entry_id: artifact.enzyme_entry_id,
+      job_id: artifact.job_id,
+      job_status: artifact.job_status,
+      artifact_type: artifact.artifact_type,
+      bucket: artifact.bucket,
+      object_key: artifact.object_key,
+      checksum: artifact.checksum,
+      content_type: artifact.content_type,
+      size_bytes: artifact.size_bytes,
+      source: artifact.source,
+      visibility: artifact.visibility,
+      created_at: artifact.created_at
+    },
+    input_source: {
+      label: formatAnalysisArtifactSource(artifact),
+      homolog_source: summary.homolog_source ?? null,
+      msa_source: summary.msa_source ?? null,
+      conservation_source: summary.conservation_source ?? null,
+      recommendation_source: summary.recommendation_source ?? null
+    },
+    runner: summary.runner ?? null,
+    summary
+  };
 }
 
 export function getMutationLibrary(content: AnalysisArtifactContentRecord): MutationLibraryView | null {

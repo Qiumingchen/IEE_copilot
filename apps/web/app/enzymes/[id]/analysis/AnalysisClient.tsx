@@ -26,6 +26,7 @@ import {
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
   buildAnalysisArtifactLineageJson,
+  buildAnalysisRunManifestJson,
   formatAnalysisArtifactSource,
   filterConservationSites,
   getArtifactRunnerLabel,
@@ -414,6 +415,16 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     URL.revokeObjectURL(url);
   }
 
+  function downloadAnalysisManifest() {
+    const blob = new Blob([buildAnalysisRunManifestJson(enzymeId, artifacts)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `analysis-manifest-${enzymeId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function buildAnalysisJobParameters(jobType: AnalysisJobType) {
     if (jobType === "homolog_collection") {
       return {
@@ -772,8 +783,16 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       </section>
 
       <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-base font-semibold text-slate-950">Analysis artifacts</h2>
+          <button
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={artifacts.length === 0}
+            onClick={downloadAnalysisManifest}
+            type="button"
+          >
+            Manifest
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">

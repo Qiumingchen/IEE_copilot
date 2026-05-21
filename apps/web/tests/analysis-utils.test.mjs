@@ -13,6 +13,7 @@ import {
   buildConservationDownloadJson,
   formatAnalysisArtifactSource,
   buildAnalysisArtifactLineageJson,
+  buildAnalysisRunManifestJson,
   filterConservationSites,
   getConservationSites,
   getConservationArtifactOptions,
@@ -589,6 +590,59 @@ test("builds artifact lineage json for export", () => {
   assert.equal(payload.input_source.label, "homolog_artifact | 2 seqs | homolog-artifact-1");
   assert.deepEqual(payload.runner, { provider: "mafft", mode: "fallback" });
   assert.equal(payload.summary.sequence_count, 3);
+});
+
+test("builds analysis run manifest json for export", () => {
+  const payload = JSON.parse(buildAnalysisRunManifestJson(
+    "enzyme-1",
+    [
+      {
+        id: "artifact-1",
+        enzyme_entry_id: "enzyme-1",
+        job_id: "job-1",
+        job_status: "finished",
+        artifact_type: "homolog_sequences",
+        bucket: "iee-artifacts",
+        object_key: "analysis-jobs/job-1/homolog-sequences.json",
+        checksum: "hash-1",
+        content_type: "application/json",
+        size_bytes: 120,
+        source: "worker",
+        visibility: "private",
+        created_at: "2026-05-21T10:00:00",
+        result_summary_json: {
+          homolog_count: 2,
+          runner: { provider: "uniprot", mode: "real" }
+        }
+      },
+      {
+        id: "artifact-2",
+        enzyme_entry_id: "enzyme-1",
+        job_id: "job-2",
+        job_status: "finished",
+        artifact_type: "msa",
+        bucket: "iee-artifacts",
+        object_key: "analysis-jobs/job-2/msa.fasta",
+        checksum: "hash-2",
+        content_type: "text/x-fasta",
+        size_bytes: 80,
+        source: "worker",
+        visibility: "private",
+        created_at: "2026-05-21T10:05:00",
+        result_summary_json: {
+          sequence_count: 3,
+          homolog_source: { type: "latest_homolog_artifact", sequence_count: 2 }
+        }
+      }
+    ],
+    "2026-05-21T12:00:00"
+  ));
+
+  assert.equal(payload.enzyme_entry_id, "enzyme-1");
+  assert.equal(payload.generated_at, "2026-05-21T12:00:00");
+  assert.deepEqual(payload.artifact_counts, { homolog_sequences: 1, msa: 1 });
+  assert.equal(payload.artifacts.length, 2);
+  assert.equal(payload.artifacts[1].input_source.label, "latest_homolog_artifact | 2 seqs");
 });
 
 test("builds rosetta ddg run views with status and error messages", () => {
