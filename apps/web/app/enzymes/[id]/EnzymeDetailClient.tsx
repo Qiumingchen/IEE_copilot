@@ -11,10 +11,12 @@ import {
   createStructureRecord,
   createSubstrate,
   getEnzymeRecordBundle,
+  listEnzymeReferences,
   uploadStructureFile
 } from "../../../lib/api";
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
-import type { EnzymeRecordBundle, StructureRecord } from "../../../lib/types";
+import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
+import { formatReferenceForTable, formatVisibilityStatus } from "./enzyme-detail-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -203,6 +205,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [bundle, setBundle] = useState<EnzymeRecordBundle | null>(null);
+  const [referencesById, setReferencesById] = useState<Record<string, LiteratureReferenceRecord>>({});
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingSubstrate, setIsSavingSubstrate] = useState(false);
@@ -230,7 +233,12 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
     setError(null);
     setIsLoading(true);
     try {
-      setBundle(await getEnzymeRecordBundle(enzymeId, nextToken));
+      const [nextBundle, references] = await Promise.all([
+        getEnzymeRecordBundle(enzymeId, nextToken),
+        listEnzymeReferences(enzymeId, nextToken)
+      ]);
+      setBundle(nextBundle);
+      setReferencesById(Object.fromEntries(references.map((reference) => [reference.id, reference])));
     } catch {
       setError("Unable to load enzyme records. Please check the API service and your login.");
     } finally {
@@ -934,29 +942,34 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
               title="Structures"
             />
             <RecordTable
-              columns={["Type", "Value", "Unit", "Substrate", "Assay"]}
+              columns={["Type", "Value", "Unit", "Substrate", "Assay", "Reference", "Evidence", "Status"]}
               rows={bundle.properties.map((item) => [
                 item.property_type,
                 item.value_original,
                 textOrDash(item.unit_original),
                 textOrDash(item.substrate),
-                [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-"
+                [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
+                formatReferenceForTable(item.reference_id, referencesById),
+                textOrDash(item.evidence_text),
+                formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Properties"
             />
             <RecordTable
-              columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay"]}
+              columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay", "Reference", "Status"]}
               rows={bundle.kinetics.map((item) => [
                 textOrDash(item.substrate),
                 textOrDash(item.km),
                 textOrDash(item.kcat),
                 textOrDash(item.kcat_km),
-                [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-"
+                [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
+                formatReferenceForTable(item.reference_id, referencesById),
+                formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Kinetics"
             />
             <RecordTable
-              columns={["Host", "Vector", "Level", "Soluble", "Condition"]}
+              columns={["Host", "Vector", "Level", "Soluble", "Condition", "Reference", "Status"]}
               rows={bundle.expression.map((item) => [
                 textOrDash(item.expression_host),
                 textOrDash(item.vector),
@@ -966,7 +979,9 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                   ? [item.condition.assay_temperature, item.condition.assay_pH, item.condition.method]
                       .filter(Boolean)
                       .join(" / ")
-                  : "-"
+                  : "-",
+                formatReferenceForTable(item.reference_id ?? item.condition?.reference_id, referencesById),
+                formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Expression"
             />
