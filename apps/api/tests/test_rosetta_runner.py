@@ -50,3 +50,27 @@ def test_rosetta_runner_parses_fake_runner_output(tmp_path: Path):
     assert result.payload["ddg_kcal_per_mol"] == -1.25
     assert result.payload["interpretation"] == "stabilizing"
     assert result.payload["runner"]["mode"] == "real"
+    assert result.payload["runner"]["command_source"] == "configured"
+
+
+def test_rosetta_runner_fallback_warning_mentions_failed_command(tmp_path: Path):
+    script = tmp_path / "failing_rosetta.py"
+    script.write_text(
+        "import sys\n"
+        "print('rosetta crashed', file=sys.stderr)\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+
+    result = run_rosetta_ddg_with_runner(
+        mutation_string="L10A",
+        mutations=parse_mutation_string("L10A"),
+        mutation_file="L 10 A",
+        command=f"python {script}",
+        allow_fallback=True,
+    )
+
+    assert result.payload["ddg_kcal_per_mol"] == -0.6
+    assert result.payload["runner"]["mode"] == "fallback"
+    assert "Rosetta ddG runner failed with exit code 3" in result.payload["runner"]["warning"]
+    assert "rosetta crashed" in result.payload["runner"]["warning"]

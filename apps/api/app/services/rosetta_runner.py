@@ -20,6 +20,7 @@ def run_rosetta_ddg_with_runner(
     command: str | None,
     allow_fallback: bool,
 ) -> RosettaRunResult:
+    failure_warning: str | None = None
     if command:
         completed = subprocess.run(
             command,
@@ -42,14 +43,18 @@ def run_rosetta_ddg_with_runner(
                     or ("stabilizing" if ddg < 0 else "destabilizing_or_neutral"),
                     "runner": build_real_provenance(
                         provider="rosetta",
-                        extra={"exit_code": completed.returncode},
+                        extra={
+                            "exit_code": completed.returncode,
+                            "command_source": "configured",
+                        },
                     ),
                 }
             )
+        failure_warning = (
+            f"Rosetta ddG runner failed with exit code {completed.returncode}: {completed.stderr}"
+        ).strip()
         if not allow_fallback:
-            raise RuntimeError(
-                f"Rosetta ddG runner failed with exit code {completed.returncode}: {completed.stderr}"
-            )
+            raise RuntimeError(failure_warning)
 
     if not allow_fallback:
         raise RuntimeError("Rosetta ddG runner is not configured and science fallbacks are disabled")
@@ -64,7 +69,7 @@ def run_rosetta_ddg_with_runner(
             "interpretation": "stabilizing" if ddg < 0 else "destabilizing_or_neutral",
             "runner": build_fallback_provenance(
                 provider="rosetta",
-                warning="Rosetta runner not configured; placeholder ddG used.",
+                warning=failure_warning or "Rosetta runner not configured; placeholder ddG used.",
             ),
         }
     )
