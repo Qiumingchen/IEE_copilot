@@ -13,7 +13,9 @@ __pycache__/
 .coverage
 htmlcov/
 .superpowers/
-data/
+data/*
+!data/demo/
+!data/demo/**
 *.pyc
 *.pyo
 *.log

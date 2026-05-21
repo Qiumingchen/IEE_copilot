@@ -9,5 +9,6 @@ RUN pip install --no-cache-dir ".[dev]"
 COPY apps/api /app/apps/api
 COPY apps/worker /app/apps/worker
 COPY scripts /app/scripts
+COPY data /app/data
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "apps/api"]

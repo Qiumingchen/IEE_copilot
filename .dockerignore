@@ -2,7 +2,9 @@
 .superpowers
 .uv-cache
 .venv
-data
+data/*
+!data/demo
+!data/demo/**
 
 node_modules
 **/node_modules

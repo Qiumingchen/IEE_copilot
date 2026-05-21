@@ -1,0 +1,10 @@
+>MTGASE_DEMO_EXACT Demo exact query-like sequence [Synthetic construct]
+ACDEFGHIKL
+>MTGASE_DEMO_90 Demo accepted 90 percent homolog OS=Streptomyces mobaraensis
+ACDEFGHIVL
+>MTGASE_DEMO_80 Demo accepted 80 percent homolog OS=Streptomyces mobaraensis
+ACDEYGHIVL
+>MTGASE_DEMO_LOW_COVERAGE Demo short fragment OS=Streptomyces fragmentensis
+ACDEF
+>MTGASE_DEMO_LOW_IDENTITY Demo distant protein OS=Bacillus distantensis
+VVVVVVVVVV
