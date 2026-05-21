@@ -74,6 +74,7 @@ def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
     record_counts = {"properties": 0, "kinetics": 0, "mutations": 0}
     records: list[CuratedEvidencePreviewRecord] = []
     errors: list[CuratedEvidencePreviewError] = []
+    warnings: list[str] = []
 
     for index, row in enumerate(rows, start=2):
         record_type = _value(row, "record_type").lower()
@@ -102,6 +103,15 @@ def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
 
         if not any(error.row_number == index for error in errors):
             reference_identity = _reference_identity(row)
+            if reference_identity.match_mode == "title_year_source":
+                warnings.append(
+                    f"row {index}: reference matched by title/year/source; DOI or PubMed ID is preferred"
+                )
+            elif reference_identity.key is None:
+                warnings.append(
+                    f"row {index}: no reference identifier supplied; "
+                    "evidence will be imported without a literature reference"
+                )
             records.append(
                 CuratedEvidencePreviewRecord(
                     row_number=index,
@@ -119,6 +129,7 @@ def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
         record_counts=record_counts,
         records=records,
         errors=errors,
+        warnings=warnings,
     )
 
 

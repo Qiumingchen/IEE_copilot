@@ -320,6 +320,34 @@ def test_curated_evidence_preview_reports_reference_match_modes(client, db_sessi
         ("123456", "pubmed_id"),
         ("title mode paper:2022:curated_literature", "title_year_source"),
     ]
+    assert response.json()["warnings"] == [
+        "row 4: reference matched by title/year/source; DOI or PubMed ID is preferred"
+    ]
+
+
+def test_curated_evidence_preview_warns_when_evidence_row_has_no_reference(client, db_session):
+    email = "curated-preview-no-reference@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import-preview",
+        headers=headers,
+        json={
+            "csv_text": "\n".join(
+                [
+                    "record_type,property_type,value_original,unit_original,evidence_text",
+                    "property,optimal_pH,7.0,pH,Optimum pH reported without citation",
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["warnings"] == [
+        "row 2: no reference identifier supplied; evidence will be imported without a literature reference"
+    ]
 
 
 def test_curated_evidence_preview_returns_row_level_validation_report(client, db_session):

@@ -81,7 +81,10 @@ export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewR
   const kineticCount = preview.record_counts.kinetics ?? 0;
   const mutationCount = preview.record_counts.mutations ?? 0;
   const errorCount = preview.errors.length;
+  const warningCount = preview.warnings.length;
   const errorSummary =
     errorCount > 0 ? ` ${errorCount} validation ${errorCount === 1 ? "error" : "errors"}.` : "";
-  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records.${errorSummary}`;
+  const warningSummary =
+    warningCount > 0 ? ` ${warningCount} ${warningCount === 1 ? "warning" : "warnings"}.` : "";
+  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records.${errorSummary}${warningSummary}`;
 }

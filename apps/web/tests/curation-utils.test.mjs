@@ -91,6 +91,21 @@ test("summarizeCuratedEvidencePreview includes validation error count", () => {
   );
 });
 
+test("summarizeCuratedEvidencePreview includes warning count", () => {
+  assert.equal(
+    summarizeCuratedEvidencePreview({
+      fields: ["record_type"],
+      row_count: 2,
+      record_counts: { properties: 1, kinetics: 0, mutations: 0 },
+      records: [],
+      errors: [],
+      warnings: ["row 2: no reference identifier supplied"],
+      valid: true
+    }),
+    "2 rows parsed: 1 property, 0 kinetic, 0 mutation records. 1 warning."
+  );
+});
+
 test("curatedEvidenceCsvTemplate includes all supported evidence record types", () => {
   assert.equal(curatedEvidenceCsvTemplate.includes("record_type"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
