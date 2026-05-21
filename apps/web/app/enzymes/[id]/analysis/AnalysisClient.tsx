@@ -18,6 +18,7 @@ import type {
 import {
   buildHomologCsv,
   buildHomologFasta,
+  buildMsaJobParameters,
   buildMsaDownloadFasta,
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
@@ -25,6 +26,7 @@ import {
   filterConservationSites,
   getArtifactRunnerLabel,
   getConservationSites,
+  getHomologArtifactOptions,
   getHomologDiagnostics,
   getHomologSequences,
   getMsaRecords,
@@ -39,6 +41,7 @@ import type {
   ArtifactRunnerLabel,
   HomologDiagnosticsView,
   HomologSequenceView,
+  MsaInputMode,
   MsaRecordView,
   MutationLibraryView,
   MutationRecommendationCandidateView,
@@ -109,6 +112,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [homologObjectKey, setHomologObjectKey] = useState<string | null>(null);
   const [homologSearchMode, setHomologSearchMode] = useState("metadata_search");
   const [maxHomologSequences, setMaxHomologSequences] = useState(25);
+  const [msaInputMode, setMsaInputMode] = useState<MsaInputMode>("latest");
+  const [selectedHomologArtifactId, setSelectedHomologArtifactId] = useState("");
+  const [customMsaFasta, setCustomMsaFasta] = useState("");
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
@@ -274,12 +280,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setNotice(null);
     setRunningJobType(jobType);
     try {
-      const parameters = jobType === "homolog_collection"
-        ? {
-            search_mode: homologSearchMode,
-            max_sequences: maxHomologSequences
-          }
-        : undefined;
+      const parameters = buildAnalysisJobParameters(jobType);
       const job = await createAnalysisJob(enzymeId, token, jobType, parameters);
       setNotice(`${job.job_type} job queued: ${job.id}`);
       await loadArtifacts(token);
@@ -378,6 +379,24 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     URL.revokeObjectURL(url);
   }
 
+  function buildAnalysisJobParameters(jobType: AnalysisJobType) {
+    if (jobType === "homolog_collection") {
+      return {
+        search_mode: homologSearchMode,
+        max_sequences: maxHomologSequences
+      };
+    }
+    if (jobType === "msa") {
+      const fallbackArtifactId = homologArtifactOptions[homologArtifactOptions.length - 1]?.id ?? "";
+      return buildMsaJobParameters(
+        msaInputMode,
+        selectedHomologArtifactId || fallbackArtifactId,
+        customMsaFasta
+      );
+    }
+    return undefined;
+  }
+
   function downloadHomologFasta() {
     if (!latestHomologContent) {
       return;
@@ -447,6 +466,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 
   const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
   const homologDiagnostics = latestHomologContent ? getHomologDiagnostics(latestHomologContent) : null;
+  const homologArtifactOptions = getHomologArtifactOptions(artifacts);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -486,6 +506,12 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
           const moduleArtifacts = artifacts.filter((artifact) => artifact.artifact_type === item.artifactType);
           const latestArtifact = moduleArtifacts[moduleArtifacts.length - 1];
           const isRunning = runningJobType === item.jobType;
+          const isMsaBlocked =
+            item.jobType === "msa" &&
+            (
+              (msaInputMode === "artifact" && homologArtifactOptions.length === 0) ||
+              (msaInputMode === "custom_fasta" && customMsaFasta.trim().length === 0)
+            );
           return (
             <article className="rounded-md border border-slate-200 bg-white p-4" key={item.artifactType}>
               <div className="flex items-start justify-between gap-3">
@@ -539,9 +565,57 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                   </label>
                 </div>
               ) : null}
+              {item.jobType === "msa" ? (
+                <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Input source
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => setMsaInputMode(event.target.value as MsaInputMode)}
+                      value={msaInputMode}
+                    >
+                      <option value="latest">Latest homologs</option>
+                      <option value="artifact">Previous homolog run</option>
+                      <option value="custom_fasta">Custom FASTA</option>
+                    </select>
+                  </label>
+                  {msaInputMode === "artifact" ? (
+                    <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                      Homolog run
+                      <select
+                        className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={homologArtifactOptions.length === 0}
+                        onChange={(event) => setSelectedHomologArtifactId(event.target.value)}
+                        value={selectedHomologArtifactId || homologArtifactOptions[homologArtifactOptions.length - 1]?.id || ""}
+                      >
+                        {homologArtifactOptions.length === 0 ? (
+                          <option value="">No homolog runs</option>
+                        ) : (
+                          homologArtifactOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                  ) : null}
+                  {msaInputMode === "custom_fasta" ? (
+                    <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                      FASTA
+                      <textarea
+                        className="min-h-32 rounded-md border border-slate-300 bg-white px-2 py-2 font-mono text-xs font-normal normal-case text-slate-800"
+                        onChange={(event) => setCustomMsaFasta(event.target.value)}
+                        placeholder={">seq1\nMTA...\n>seq2\nMTA..."}
+                        value={customMsaFasta}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 className="mt-4 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-                disabled={!token || Boolean(runningJobType)}
+                disabled={!token || Boolean(runningJobType) || isMsaBlocked}
                 onClick={() => void runAnalysis(item.jobType)}
                 type="button"
               >

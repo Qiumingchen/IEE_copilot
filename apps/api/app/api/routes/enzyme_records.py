@@ -130,6 +130,23 @@ def _get_owned_project(db: Session, project_id: str, user_id: str) -> Project:
     return project
 
 
+def _homologs_from_artifact(db: Session, enzyme_id: str, artifact_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.id == artifact_id,
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "homolog_sequences",
+        )
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    return _homologs_from_job_summary(job.result_summary_json)
+
+
 def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
     row = db.execute(
         select(AnalysisArtifact, AnalysisJob)
@@ -144,7 +161,11 @@ def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
         return []
 
     _artifact, job = row
-    summary = job.result_summary_json or {}
+    return _homologs_from_job_summary(job.result_summary_json)
+
+
+def _homologs_from_job_summary(result_summary_json: dict | None) -> list[dict]:
+    summary = result_summary_json or {}
     raw_homologs = summary.get("homologs", [])
     if not isinstance(raw_homologs, list):
         return []
@@ -165,6 +186,18 @@ def _latest_homologs_for_msa(db: Session, enzyme_id: str) -> list[dict]:
             }
         )
     return homologs
+
+
+def _custom_fasta_homologs_for_msa(custom_fasta: str) -> list[dict]:
+    records = _parse_msa_fasta(custom_fasta)
+    return [
+        {
+            "identifier": record["identifier"],
+            "sequence": str(record["aligned_sequence"]).replace("-", ""),
+        }
+        for record in records
+        if record.get("identifier") and str(record.get("aligned_sequence") or "").replace("-", "")
+    ]
 
 
 def _parse_msa_fasta(msa_fasta: str) -> list[dict]:
@@ -336,7 +369,22 @@ def _analysis_job_parameters(
         parameters["coverage_min"] = int(parameters.get("coverage_min") or 70)
         parameters["max_sequences"] = int(parameters.get("max_sequences") or 25)
     if job_type == "msa":
-        homologs = _latest_homologs_for_msa(db, enzyme_id)
+        custom_fasta = parameters.pop("custom_fasta", None)
+        homolog_artifact_id = parameters.get("homolog_artifact_id")
+        if isinstance(custom_fasta, str) and custom_fasta.strip():
+            homologs = _custom_fasta_homologs_for_msa(custom_fasta)
+            parameters["homolog_source"] = {"type": "custom_fasta", "sequence_count": len(homologs)}
+        elif isinstance(homolog_artifact_id, str) and homolog_artifact_id.strip():
+            homologs = _homologs_from_artifact(db, enzyme_id, homolog_artifact_id)
+            parameters["homolog_source"] = {
+                "type": "homolog_artifact",
+                "artifact_id": homolog_artifact_id,
+                "sequence_count": len(homologs),
+            }
+        else:
+            homologs = _latest_homologs_for_msa(db, enzyme_id)
+            if homologs:
+                parameters["homolog_source"] = {"type": "latest_homolog_artifact", "sequence_count": len(homologs)}
         if homologs:
             parameters["homologs"] = homologs
     if job_type == "conservation_profile":

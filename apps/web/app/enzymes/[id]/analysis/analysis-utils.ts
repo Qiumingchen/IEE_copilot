@@ -1,4 +1,4 @@
-import type { AnalysisArtifactContentRecord, JobResponse } from "../../../../lib/types";
+import type { AnalysisArtifactContentRecord, AnalysisArtifactRecord, JobResponse } from "../../../../lib/types";
 
 export type ConservationSiteView = {
   query_position: number | string;
@@ -37,6 +37,13 @@ export type MsaRecordView = {
   aligned_sequence: string;
   sequence_length: number;
   gap_count: number;
+};
+
+export type MsaInputMode = "latest" | "artifact" | "custom_fasta";
+
+export type HomologArtifactOption = {
+  id: string;
+  label: string;
 };
 
 export type ConservationCategoryFilter =
@@ -138,6 +145,34 @@ export function buildLibraryDesignParameters(
     max_order: maxOrder,
     plate_format: plateFormat
   };
+}
+
+export function buildMsaJobParameters(
+  inputMode: MsaInputMode,
+  homologArtifactId: string,
+  customFasta: string
+): Record<string, string> | undefined {
+  if (inputMode === "artifact" && homologArtifactId.trim()) {
+    return { homolog_artifact_id: homologArtifactId.trim() };
+  }
+  if (inputMode === "custom_fasta" && customFasta.trim()) {
+    return { custom_fasta: customFasta };
+  }
+  return undefined;
+}
+
+export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): HomologArtifactOption[] {
+  return artifacts
+    .filter((artifact) => artifact.artifact_type === "homolog_sequences")
+    .map((artifact) => {
+      const summary = artifact.result_summary_json ?? {};
+      const runner = runnerLabelFromUnknown(summary.runner).text;
+      const homologCount = typeof summary.homolog_count === "number" ? summary.homolog_count : 0;
+      return {
+        id: artifact.id,
+        label: `${artifact.created_at} | ${homologCount} hits | ${runner}`
+      };
+    });
 }
 
 export function buildMutationLibraryWorkbookBytes(library: MutationLibraryView): Uint8Array {

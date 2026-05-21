@@ -596,6 +596,134 @@ def test_create_msa_job_uses_latest_homolog_sequence_artifact(client, db_session
     ]
 
 
+def test_create_msa_job_uses_selected_homolog_sequence_artifact(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKLMNPQRSTVWY",
+            mature_sequence="ACDEFGHIKLMNPQRSTVWY",
+            source="test",
+            checksum="selected-msa-homolog-sequence",
+        )
+    )
+    older_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="homolog_collection",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "homologs": [
+                {
+                    "accession": "OLDER_HOMOLOG",
+                    "organism": "Bacillus subtilis",
+                    "sequence": "ACDEFGHIKLMNPQRSTVWY",
+                }
+            ]
+        },
+    )
+    newer_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="homolog_collection",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "homologs": [
+                {
+                    "accession": "NEWER_HOMOLOG",
+                    "organism": "Streptomyces coelicolor",
+                    "sequence": "ACDEYGHIKLMNPQRSTVWY",
+                }
+            ]
+        },
+    )
+    db_session.add_all([older_job, newer_job])
+    db_session.flush()
+    older_artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=older_job.id,
+        artifact_type="homolog_sequences",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{older_job.id}/homolog-sequences.json",
+        content_type="application/json",
+        size_bytes=512,
+    )
+    db_session.add(older_artifact)
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=newer_job.id,
+            artifact_type="homolog_sequences",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{newer_job.id}/homolog-sequences.json",
+            content_type="application/json",
+            size_bytes=512,
+        )
+    )
+    db_session.commit()
+
+    class MsaTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr("app.api.routes.enzyme_records.run_msa", MsaTask, raising=False)
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "msa",
+            "parameters_json": {"homolog_artifact_id": older_artifact.id},
+        },
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert [item["identifier"] for item in parameters["homologs"]] == ["OLDER_HOMOLOG"]
+    assert parameters["homolog_source"]["artifact_id"] == older_artifact.id
+
+
+def test_create_msa_job_uses_custom_fasta_sequences(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKLMNPQRSTVWY",
+            mature_sequence="ACDEFGHIKLMNPQRSTVWY",
+            source="test",
+            checksum="custom-fasta-msa-sequence",
+        )
+    )
+    db_session.commit()
+
+    class MsaTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr("app.api.routes.enzyme_records.run_msa", MsaTask, raising=False)
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "msa",
+            "parameters_json": {
+                "custom_fasta": ">user_a\nACDEFGHIKL\n>user_b custom note\nACDEYGHIKL\n"
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert parameters["homolog_source"]["type"] == "custom_fasta"
+    assert parameters["homologs"] == [
+        {"identifier": "user_a", "sequence": "ACDEFGHIKL"},
+        {"identifier": "user_b", "sequence": "ACDEYGHIKL"},
+    ]
+
+
 def test_create_conservation_job_uses_latest_msa_artifact(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

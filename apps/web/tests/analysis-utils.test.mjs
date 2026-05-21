@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildHomologCsv,
   buildHomologFasta,
+  buildMsaJobParameters,
   buildMsaDownloadFasta,
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
@@ -12,6 +13,7 @@ import {
   getConservationSites,
   getArtifactRunnerLabel,
   getHomologDiagnostics,
+  getHomologArtifactOptions,
   getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
@@ -214,6 +216,63 @@ test("extracts MSA records and builds FASTA download text", () => {
     }
   ]);
   assert.equal(buildMsaDownloadFasta(content), ">query\nACD-EF\n>A0A1\nA-DGEF\n");
+});
+
+test("builds MSA input parameters from selected homolog source", () => {
+  assert.equal(buildMsaJobParameters("latest", "artifact-1", ">a\nAAAA\n"), undefined);
+  assert.deepEqual(buildMsaJobParameters("artifact", "artifact-1", ""), {
+    homolog_artifact_id: "artifact-1"
+  });
+  assert.deepEqual(buildMsaJobParameters("custom_fasta", "", ">a\nAAAA\n"), {
+    custom_fasta: ">a\nAAAA\n"
+  });
+});
+
+test("builds homolog artifact options for MSA selection", () => {
+  const options = getHomologArtifactOptions([
+    {
+      id: "artifact-1",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-1",
+      job_status: "finished",
+      artifact_type: "homolog_sequences",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-1/homolog-sequences.json",
+      checksum: null,
+      content_type: "application/json",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T10:00:00",
+      result_summary_json: {
+        homolog_count: 2,
+        runner: { provider: "uniprot", mode: "real" }
+      }
+    },
+    {
+      id: "artifact-2",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-2",
+      job_status: "finished",
+      artifact_type: "msa",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-2/msa.fasta",
+      checksum: null,
+      content_type: "text/x-fasta",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T11:00:00",
+      result_summary_json: {}
+    }
+  ]);
+
+  assert.deepEqual(options, [
+    {
+      id: "artifact-1",
+      label: "2026-05-21T10:00:00 | 2 hits | uniprot real"
+    }
+  ]);
 });
 
 test("extracts mutation recommendation candidates from artifact content", () => {
