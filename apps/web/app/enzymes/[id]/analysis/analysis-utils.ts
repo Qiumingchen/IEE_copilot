@@ -63,6 +63,12 @@ export type RosettaDdgRunView = {
   finished_at: string | null;
 };
 
+export type ArtifactRunnerLabel = {
+  text: string;
+  warning: string | null;
+  mode: string;
+};
+
 export type MutationLibraryVariantView = {
   variant_id: string;
   mutation_string: string;
@@ -335,7 +341,7 @@ export function getRosettaDdgResults(content: AnalysisArtifactContentRecord): Ro
       ddg_kcal_per_mol: valueOrDash(content.content_json.ddg_kcal_per_mol),
       interpretation: String(valueOrDash(content.content_json.interpretation)),
       structure_id: String(valueOrDash(content.content_json.structure_id)),
-      runner: String(valueOrDash(content.content_json.runner))
+      runner: runnerLabelFromUnknown(content.content_json.runner).text
     }
   ];
 }
@@ -357,13 +363,38 @@ export function getRosettaDdgRunViews(
         mutation_file: String(valueOrDash(summary.mutation_file)),
         ddg_kcal_per_mol: valueOrDash(summary.ddg_kcal_per_mol),
         interpretation: String(valueOrDash(summary.interpretation)),
-        runner: String(valueOrDash(summary.runner)),
+        runner: summary.runner === undefined ? "-" : runnerLabelFromUnknown(summary.runner).text,
         error_message: String(valueOrDash(job.error_message)),
         can_retry: job.status === "failed",
         created_at: job.created_at,
         finished_at: job.finished_at
       };
     });
+}
+
+export function getArtifactRunnerLabel(content: Pick<AnalysisArtifactContentRecord, "content_json">): ArtifactRunnerLabel {
+  return runnerLabelFromUnknown(content.content_json?.runner);
+}
+
+function runnerLabelFromUnknown(value: unknown): ArtifactRunnerLabel {
+  if (typeof value === "string" && value.length > 0) {
+    return { text: value, warning: null, mode: "legacy" };
+  }
+  if (typeof value !== "object" || value === null) {
+    return { text: "source unknown", warning: null, mode: "unavailable" };
+  }
+
+  const runner = value as Record<string, unknown>;
+  const provider = typeof runner.provider === "string" && runner.provider.length > 0
+    ? runner.provider
+    : "runner";
+  const mode = typeof runner.mode === "string" && runner.mode.length > 0
+    ? runner.mode
+    : "unavailable";
+  const warning = typeof runner.warning === "string" && runner.warning.length > 0
+    ? runner.warning
+    : null;
+  return { text: `${provider} ${mode}`, warning, mode };
 }
 
 export function getMutationLibrary(content: AnalysisArtifactContentRecord): MutationLibraryView | null {

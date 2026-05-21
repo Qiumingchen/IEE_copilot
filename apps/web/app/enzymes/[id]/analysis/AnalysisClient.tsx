@@ -20,6 +20,7 @@ import {
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
   filterConservationSites,
+  getArtifactRunnerLabel,
   getConservationSites,
   getMutationLibrary,
   getMutationRecommendationCandidates,
@@ -854,11 +855,18 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
   const candidates = getMutationRecommendationCandidates(content);
   const rosettaResults = getRosettaDdgResults(content);
   const mutationLibrary = getMutationLibrary(content);
+  const runnerLabel = getArtifactRunnerLabel(content);
   return (
     <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-base font-semibold text-slate-950">Artifact content</h2>
         <p className="mt-1 break-words font-mono text-xs text-slate-500">{content.object_key}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-slate-700">
+            {runnerLabel.text}
+          </span>
+          {runnerLabel.warning ? <span className="text-amber-700">{runnerLabel.warning}</span> : null}
+        </div>
       </div>
       {rosettaResults.length > 0 ? (
         <div className="overflow-x-auto">

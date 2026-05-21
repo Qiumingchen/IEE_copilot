@@ -392,6 +392,7 @@ def _artifact_content_from_summary(
 
     if artifact.artifact_type == "msa":
         content_text = summary.get("msa_fasta")
+        content_json = {}
     elif artifact.artifact_type == "conservation_profile":
         content_json = {
             "sequence_count": summary.get("sequence_count"),
@@ -427,6 +428,14 @@ def _artifact_content_from_summary(
             "plate_layout": summary.get("plate_layout", []),
             "csv_text": summary.get("csv_text", ""),
         }
+
+    if content_json is not None:
+        runner = summary.get("runner")
+        provenance = summary.get("provenance")
+        if isinstance(runner, dict):
+            content_json["runner"] = runner
+        if isinstance(provenance, dict):
+            content_json["provenance"] = provenance
 
     if content_text is None and content_json is None:
         raise HTTPException(

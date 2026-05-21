@@ -7,6 +7,7 @@ import {
   buildConservationDownloadJson,
   filterConservationSites,
   getConservationSites,
+  getArtifactRunnerLabel,
   getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
@@ -144,7 +145,11 @@ test("extracts rosetta ddg results from artifact content", () => {
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
       structure_id: "structure-1",
-      runner: "mock_rosetta_ddg"
+      runner: {
+        provider: "rosetta",
+        mode: "fallback",
+        warning: "Rosetta runner not configured; placeholder ddG used."
+      }
     }
   };
 
@@ -155,9 +160,24 @@ test("extracts rosetta ddg results from artifact content", () => {
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
       structure_id: "structure-1",
-      runner: "mock_rosetta_ddg"
+      runner: "rosetta fallback"
     }
   ]);
+});
+
+test("formats fallback artifact runner labels", () => {
+  const label = getArtifactRunnerLabel({
+    content_json: {
+      runner: {
+        provider: "mafft",
+        mode: "fallback",
+        warning: "MAFFT executable not configured; mock alignment used."
+      }
+    }
+  });
+
+  assert.equal(label.text, "mafft fallback");
+  assert.equal(label.warning, "MAFFT executable not configured; mock alignment used.");
 });
 
 test("builds rosetta ddg run views with status and error messages", () => {
@@ -184,7 +204,10 @@ test("builds rosetta ddg run views with status and error messages", () => {
         mutation_file: "L 10 A",
         ddg_kcal_per_mol: -0.6,
         interpretation: "stabilizing",
-        runner: "mock_rosetta_ddg"
+        runner: {
+          provider: "rosetta",
+          mode: "fallback"
+        }
       },
       error_message: null,
       created_at: "2026-05-19T10:01:00",
@@ -224,7 +247,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       mutation_file: "L 10 A",
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
-      runner: "mock_rosetta_ddg",
+      runner: "rosetta fallback",
       error_message: "-",
       can_retry: false,
       created_at: "2026-05-19T10:01:00",

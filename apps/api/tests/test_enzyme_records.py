@@ -279,6 +279,11 @@ def test_get_analysis_artifact_content_returns_worker_payload(client, db_session
         result_summary_json={
             "artifact_type": "msa",
             "msa_fasta": ">query\nACD\n>homolog_1\nACE",
+            "runner": {
+                "provider": "mafft",
+                "mode": "fallback",
+                "warning": "MAFFT executable not configured; mock alignment used.",
+            },
         },
     )
     db_session.add(job)
@@ -306,7 +311,8 @@ def test_get_analysis_artifact_content_returns_worker_payload(client, db_session
     assert body["artifact_type"] == "msa"
     assert body["content_type"] == "text/x-fasta"
     assert body["content_text"] == ">query\nACD\n>homolog_1\nACE"
-    assert body["content_json"] is None
+    assert body["content_json"]["runner"]["provider"] == "mafft"
+    assert body["content_json"]["runner"]["mode"] == "fallback"
 
 
 def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, db_session):
@@ -324,7 +330,11 @@ def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, 
             "ddg_kcal_per_mol": -0.6,
             "interpretation": "stabilizing",
             "structure_id": "structure-1",
-            "runner": "mock_rosetta_ddg",
+            "runner": {
+                "provider": "rosetta",
+                "mode": "fallback",
+                "warning": "Rosetta runner not configured; placeholder ddG used.",
+            },
         },
     )
     db_session.add(job)
@@ -351,6 +361,8 @@ def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, 
     assert content_json["mutation_string"] == "L10A"
     assert content_json["mutation_file"] == "L 10 A"
     assert content_json["parsed_mutations"] == [{"wildtype": "L", "position": 10, "mutant": "A"}]
+    assert content_json["runner"]["provider"] == "rosetta"
+    assert content_json["runner"]["mode"] == "fallback"
 
 
 def test_get_mutation_library_artifact_content_returns_library_payload(client, db_session):
