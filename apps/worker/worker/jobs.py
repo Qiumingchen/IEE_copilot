@@ -6,12 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AnalysisArtifact, AnalysisJob, JobStatus, ProteinSequence
+from app.db.models import AnalysisArtifact, AnalysisJob, EnzymeEntry, EnzymeFamily, JobStatus, ProteinSequence
 from app.db.session import SessionLocal
 from app.services.conservation import calculate_conservation_profile
 from app.services.homology import HomologSearchParameters, HomologSequence, collect_homologs
 from app.services.library_design import design_mutation_library
-from app.services.mutation_scoring import MutationScore, calculate_general_score
+from app.services.mutation_scoring import MutationScore, calculate_general_score, calculate_module_specific_score
 from app.services.mutations import (
     generate_rosetta_mutation_file,
     normalize_mutation_string,
@@ -272,9 +272,11 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
     )
     if protein_sequence is not None:
         sequence = protein_sequence.mature_sequence or protein_sequence.sequence
+        module = _enzyme_module(db, job.enzyme_entry_id)
         candidates = _score_recommendation_candidates(
             candidates,
             sequence=sequence,
+            module=module,
             conservation_sites=conservation_sites,
             structure_summaries=_list_of_dicts(parameters.get("structure_summaries")),
             mutation_records=_list_of_dicts(parameters.get("mutation_records")),
@@ -317,6 +319,7 @@ def _score_recommendation_candidates(
     candidates: list[dict],
     *,
     sequence: str,
+    module,
     conservation_sites: list[dict],
     structure_summaries: list[dict],
     mutation_records: list[dict],
@@ -332,7 +335,7 @@ def _score_recommendation_candidates(
     scored_candidates = []
     for candidate in candidates:
         scored_suggestions = [
-            _mutation_score_response(calculate_general_score(str(mutation_string), residue_features))
+            _mutation_score_response(_calculate_recommendation_score(str(mutation_string), residue_features, module))
             for mutation_string in candidate.get("suggested_mutations", [])
             if mutation_string
         ]
@@ -347,6 +350,16 @@ def _score_recommendation_candidates(
             }
         )
     return scored_candidates
+
+
+def _calculate_recommendation_score(
+    mutation_string: str,
+    residue_features: list,
+    module,
+) -> MutationScore:
+    if module is None:
+        return calculate_general_score(mutation_string, residue_features)
+    return calculate_module_specific_score(mutation_string, residue_features, module)
 
 
 def _mutation_score_response(score: MutationScore) -> dict:
@@ -372,6 +385,15 @@ def _list_of_dicts(value) -> list[dict]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _enzyme_module(db: Session, enzyme_id: str):
+    row = db.execute(
+        select(EnzymeFamily.module)
+        .join(EnzymeEntry, EnzymeEntry.family_id == EnzymeFamily.id)
+        .where(EnzymeEntry.id == enzyme_id)
+    ).first()
+    return row[0] if row is not None else None
 
 
 def finish_rosetta_ddg_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:

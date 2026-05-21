@@ -1,8 +1,10 @@
 from app.services.mutation_scoring import (
     calculate_general_score,
+    calculate_module_specific_score,
     generate_risk_summary,
     generate_score_components,
 )
+from app.db.models import EnzymeModule
 from app.services.residue_features import ResidueFeatureRecord
 
 
@@ -129,3 +131,77 @@ def test_calculate_general_score_uses_only_matching_rosetta_result_for_candidate
     )
     assert matching_rosetta.value == 0.4
     assert untested_rosetta.value == 0.0
+
+
+def test_calculate_module_specific_score_adds_anthraquinone_binding_explanations():
+    features = [
+        ResidueFeatureRecord(
+            position=8,
+            wildtype_aa="I",
+            wildtype_frequency=0.45,
+            distance_to_ligand=3.2,
+            reported_mutation_count=2,
+            reported_beneficial_mutation_count=1,
+            solubility_risk="medium",
+        )
+    ]
+
+    score = calculate_module_specific_score(
+        "I8A",
+        features,
+        EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE,
+    )
+
+    component_names = [component.name for component in score.components]
+    assert "anthraquinone_binding_region_score" in component_names
+    assert "product_selectivity_score" in component_names
+    assert "UDP_sugar_region_score" in component_names
+    assert score.total_score > calculate_general_score("I8A", features).total_score
+    assert "anthraquinone_complex_distance_used" in score.risk_summary
+
+
+def test_calculate_module_specific_score_marks_missing_anthraquinone_complex_confidence():
+    features = [ResidueFeatureRecord(position=8, wildtype_aa="I", wildtype_frequency=0.45)]
+
+    score = calculate_module_specific_score(
+        "I8A",
+        features,
+        EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE,
+    )
+
+    assert "low_confidence_without_substrate_complex" in score.risk_summary
+
+
+def test_calculate_module_specific_score_adds_mtgase_mature_enzyme_explanations():
+    features = [
+        ResidueFeatureRecord(
+            position=10,
+            wildtype_aa="L",
+            wildtype_frequency=0.72,
+            solvent_accessibility=0.68,
+            reported_mutation_count=2,
+            reported_beneficial_mutation_count=1,
+            rosetta_ddg={
+                "results": [
+                    {
+                        "mutation_string": "L10A",
+                        "ddg_kcal_per_mol": -0.8,
+                        "interpretation": "stabilizing",
+                    }
+                ]
+            },
+            solubility_risk="medium",
+        )
+    ]
+
+    score = calculate_module_specific_score(
+        "L10A",
+        features,
+        EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+    )
+
+    component_names = [component.name for component in score.components]
+    assert "thermostability_score" in component_names
+    assert "activity_retention_score" in component_names
+    assert "surface_charge_score" in component_names
+    assert "mature_enzyme_only" in score.risk_summary

@@ -378,8 +378,15 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
         "structure_proximity",
         "rosetta_stability",
         "solubility",
+        "thermostability_score",
+        "opt_temperature_score",
+        "opt_pH_score",
+        "activity_retention_score",
+        "surface_charge_score",
+        "solubility_score",
     ]
     assert "medium_solubility_risk" in scored_suggestions[0]["risk_summary"]
+    assert "mature_enzyme_only" in scored_suggestions[0]["risk_summary"]
     assert artifact is not None
     assert artifact.object_key == f"analysis-jobs/{job.id}/mutation-recommendations.json"
     assert artifact.content_type == "application/json"
