@@ -66,7 +66,7 @@ tool installs.
 - `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
 - `HOMOLOG_PROVIDER_FETCH_SIZE=25` limits the upstream UniProt candidate pool before local identity and coverage filtering.
 - `SEQUENCE_SIMILARITY_FASTA_PATH="/path/to/homologs.fasta"` configures the `sequence_similarity` homolog runner to scan a local FASTA sequence database.
-- `SEQUENCE_SIMILARITY_COMMAND="python /path/to/similarity_wrapper.py"` configures an external sequence-similarity wrapper. The command receives the query FASTA on stdin and should write tabular hits as `accession<TAB>identity<TAB>coverage`; identity and coverage may be fractions or percentages. Accessions are resolved against `SEQUENCE_SIMILARITY_FASTA_PATH`.
+- `SEQUENCE_SIMILARITY_COMMAND="python scripts/similarity/sequence_similarity_wrapper.py --backend local --database /path/to/homologs.fasta"` configures an external sequence-similarity wrapper. The command receives the query FASTA on stdin and should write tabular hits as `accession<TAB>identity<TAB>coverage`; identity and coverage may be fractions or percentages. Accessions are resolved against `SEQUENCE_SIMILARITY_FASTA_PATH`.
 - `MAFFT_BIN="mafft --auto -"` configures the MAFFT runner.
 - `ROSETTA_DDG_COMMAND="python /path/to/rosetta_ddg_wrapper.py"` configures the Rosetta ddG runner boundary.
 - `ROSETTA_DDG_BIN="/path/to/rosetta_ddg"` can be used when a direct executable is enough.
@@ -93,6 +93,15 @@ Homolog collection currently supports two user-facing modes:
   homolog filters as the metadata path. If no similarity source is configured,
   results are explicitly marked as fallback rather than real BLAST or MMseqs2
   output.
+
+The bundled similarity wrapper supports three backends:
+
+- `--backend local`: development smoke check using ungapped identity/coverage
+  against a FASTA file.
+- `--backend mmseqs`: requires `mmseqs` on `PATH`; `--database` should point to
+  a target FASTA file. The wrapper creates temporary MMseqs databases per run.
+- `--backend blastp`: requires `blastp` on `PATH`; `--database` should be a
+  prepared BLAST database prefix.
 
 ## Development Checks
 
