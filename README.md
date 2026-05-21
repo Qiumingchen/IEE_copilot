@@ -54,8 +54,22 @@ The implemented skeleton supports:
 5. Persist an enzyme summary and enqueue a placeholder analysis job.
 6. Inspect analysis job status and generated artifact records.
 
-Future stages will fill in MSA, conservation analysis, Rosetta ddG, MD, MMPBSA,
-wet-lab feedback ingestion, and active-learning recommendations.
+Future stages will fill in MD, MMPBSA, and active-learning recommendations.
+
+## Science Provider And Runner Configuration
+
+The platform can run in demo mode or real-provider mode. Development defaults
+keep fallbacks enabled so the workflow remains usable without local scientific
+tool installs.
+
+- `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, and literature adapters.
+- `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
+- `MAFFT_BIN="mafft --auto -"` configures the MAFFT runner.
+- `ROSETTA_DDG_COMMAND="python /path/to/rosetta_ddg_wrapper.py"` configures the Rosetta ddG runner boundary.
+- `ROSETTA_DDG_BIN="/path/to/rosetta_ddg"` can be used when a direct executable is enough.
+
+When fallbacks are enabled, artifacts are still marked with `mode=fallback`.
+Fallback outputs should not be treated as real scientific results.
 
 ## Development Checks
 
