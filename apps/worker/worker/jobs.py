@@ -452,6 +452,8 @@ def _homolog_candidates_for_job(
                     command=sequence_similarity_command,
                     size=requested_size,
                 )
+                if not candidates:
+                    raise RuntimeError("sequence similarity command returned no candidates")
                 return candidates, build_real_provenance(
                     provider="sequence_similarity_command",
                     extra={
