@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 from app.services.homology import (
     HomologSearchParameters,
@@ -11,6 +12,7 @@ from app.services.homology import (
     filter_by_coverage,
     filter_by_identity,
     limit_max_sequences,
+    run_configured_sequence_similarity_search,
 )
 from app.external.uniprot import UniProtEntry, UniProtSearchHit
 
@@ -320,3 +322,42 @@ def test_fetch_uniprot_homolog_candidates_fetches_entries_concurrently_in_hit_or
 
     assert fake_client.max_active_fetches > 1
     assert [candidate.accession for candidate in candidates] == ["P0", "P1", "P2", "P3"]
+
+
+def test_run_configured_sequence_similarity_search_maps_command_hits_to_fasta_records(tmp_path: Path):
+    fasta_path = tmp_path / "homologs.fasta"
+    fasta_path.write_text(
+        "\n".join(
+            [
+                ">EXACT exact match [Synthetic construct]",
+                "ACDEFGHIKL",
+                ">NEAR near homolog OS=Streptomyces testensis",
+                "ACDEFGHIVL",
+                ">DISTANT distant protein",
+                "VVVVVVVVVV",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script = tmp_path / "fake_similarity.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdin.read()\n"
+        "print('NEAR\\t90\\t100')\n"
+        "print('DISTANT\\t10\\t100')\n",
+        encoding="utf-8",
+    )
+
+    candidates = run_configured_sequence_similarity_search(
+        query_sequence=QUERY_SEQUENCE,
+        fasta_path=str(fasta_path),
+        command=f"python {script}",
+        size=5,
+    )
+
+    assert [candidate.accession for candidate in candidates] == ["NEAR", "DISTANT"]
+    assert candidates[0].sequence == "ACDEFGHIVL"
+    assert candidates[0].organism == "Streptomyces testensis"
+    assert candidates[0].identity == 0.9
+    assert candidates[0].coverage == 1.0
+    assert candidates[0].source == "sequence_similarity_command"

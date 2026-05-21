@@ -277,6 +277,94 @@ def test_sequence_similarity_homolog_mode_uses_local_fasta_runner(tmp_path):
     assert runner["candidate_count"] == 3
 
 
+def test_sequence_similarity_homolog_mode_prefers_configured_command(tmp_path):
+    fasta_path = tmp_path / "homologs.fasta"
+    fasta_path.write_text(
+        "\n".join(
+            [
+                ">NEAR near homolog OS=Streptomyces testensis",
+                "ACDEFGHIVL",
+                ">DISTANT distant protein",
+                "VVVVVVVVVV",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script = tmp_path / "fake_similarity.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdin.read()\n"
+        "print('NEAR\\t90\\t100')\n",
+        encoding="utf-8",
+    )
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=25,
+        provider_fetch_size=25,
+        search_mode="sequence_similarity",
+        use_real_provider=True,
+        allow_fallback=False,
+        sequence_similarity_fasta_path=str(fasta_path),
+        sequence_similarity_command=f"python {script}",
+    )
+
+    assert [candidate.accession for candidate in candidates] == ["NEAR"]
+    assert candidates[0].source == "sequence_similarity_command"
+    assert runner["provider"] == "sequence_similarity_command"
+    assert runner["mode"] == "real"
+    assert runner["candidate_count"] == 1
+
+
+def test_sequence_similarity_homolog_command_failure_falls_back_to_local_fasta(tmp_path):
+    fasta_path = tmp_path / "homologs.fasta"
+    fasta_path.write_text(
+        "\n".join(
+            [
+                ">NEAR near homolog OS=Streptomyces testensis",
+                "ACDEFGHIVL",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script = tmp_path / "failing_similarity.py"
+    script.write_text(
+        "import sys\n"
+        "print('tool unavailable', file=sys.stderr)\n"
+        "raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=25,
+        provider_fetch_size=25,
+        search_mode="sequence_similarity",
+        use_real_provider=True,
+        allow_fallback=True,
+        sequence_similarity_fasta_path=str(fasta_path),
+        sequence_similarity_command=f"python {script}",
+    )
+
+    assert [candidate.accession for candidate in candidates] == ["NEAR"]
+    assert candidates[0].source == "local_fasta_similarity"
+    assert runner["provider"] == "sequence_similarity_command"
+    assert runner["mode"] == "fallback"
+    assert "tool unavailable" in runner["warning"]
+
+
 def test_sequence_similarity_homolog_mode_reports_unavailable_runner():
     enzyme = EnzymeEntry(
         name="Test transglutaminase",

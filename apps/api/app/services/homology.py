@@ -2,6 +2,9 @@ from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import os
+import shlex
+import subprocess
 from typing import Protocol
 
 from app.services.similarity_matching import calculate_ungapped_similarity
@@ -131,6 +134,42 @@ def fetch_local_fasta_similarity_candidates(
     return sorted(scored, key=_sort_key, reverse=True)[:size]
 
 
+def run_configured_sequence_similarity_search(
+    *,
+    query_sequence: str,
+    fasta_path: str,
+    command: str,
+    size: int,
+) -> list[HomologSequence]:
+    fasta_records = {record.accession: record for record in _parse_homolog_fasta(Path(fasta_path))}
+    completed = subprocess.run(
+        _split_command(command),
+        input=f">query\n{query_sequence}\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"sequence similarity command failed with exit code {completed.returncode}: {completed.stderr}"
+        )
+
+    candidates: list[HomologSequence] = []
+    for hit in _parse_similarity_command_hits(completed.stdout):
+        record = fasta_records.get(hit["accession"])
+        if record is None:
+            continue
+        candidates.append(
+            replace(
+                record,
+                source="sequence_similarity_command",
+                identity=hit["identity"],
+                coverage=hit["coverage"],
+            )
+        )
+    return sorted(candidates, key=_sort_key, reverse=True)[:size]
+
+
 def _fetch_uniprot_entries_in_hit_order(
     hits,
     *,
@@ -177,6 +216,27 @@ def _parse_homolog_fasta(path: Path) -> Iterable[HomologSequence]:
     record = flush_record()
     if record is not None:
         yield record
+
+
+def _parse_similarity_command_hits(output: str) -> Iterable[dict[str, float | str]]:
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        columns = stripped.split("\t")
+        if len(columns) < 3:
+            columns = stripped.split()
+        if len(columns) < 3:
+            continue
+        accession = columns[0].strip()
+        identity = _percentage_to_fraction(float(columns[1]))
+        coverage = _percentage_to_fraction(float(columns[2]))
+        if accession:
+            yield {"accession": accession, "identity": identity, "coverage": coverage}
+
+
+def _split_command(command: str) -> list[str]:
+    return shlex.split(command, posix=os.name != "nt")
 
 
 def _parse_fasta_header(header: str) -> tuple[str | None, str, str | None]:

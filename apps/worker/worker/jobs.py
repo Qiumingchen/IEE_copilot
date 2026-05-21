@@ -16,6 +16,7 @@ from app.services.homology import (
     collect_homologs_with_diagnostics,
     fetch_local_fasta_similarity_candidates,
     fetch_uniprot_homolog_candidates,
+    run_configured_sequence_similarity_search,
 )
 from app.services.library_design import design_mutation_library
 from app.services.mutation_scoring import MutationScore, calculate_general_score, calculate_module_specific_score
@@ -100,6 +101,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         use_real_provider=settings.use_real_science_providers,
         allow_fallback=settings.allow_science_fallbacks,
         sequence_similarity_fasta_path=settings.sequence_similarity_fasta_path,
+        sequence_similarity_command=settings.sequence_similarity_command,
     )
     homologs, diagnostics = collect_homologs_with_diagnostics(
         query_sequence,
@@ -435,8 +437,46 @@ def _homolog_candidates_for_job(
     use_real_provider: bool,
     allow_fallback: bool,
     sequence_similarity_fasta_path: str | None = None,
+    sequence_similarity_command: str | None = None,
 ) -> tuple[list[HomologSequence], dict]:
     if search_mode == "sequence_similarity":
+        if sequence_similarity_command and sequence_similarity_fasta_path:
+            requested_size = _homolog_provider_request_size(
+                max_sequences=max_sequences,
+                provider_fetch_size=provider_fetch_size,
+            )
+            try:
+                candidates = run_configured_sequence_similarity_search(
+                    query_sequence=query_sequence,
+                    fasta_path=sequence_similarity_fasta_path,
+                    command=sequence_similarity_command,
+                    size=requested_size,
+                )
+                return candidates, build_real_provenance(
+                    provider="sequence_similarity_command",
+                    extra={
+                        "candidate_count": len(candidates),
+                        "search_mode": search_mode,
+                        "fasta_path": sequence_similarity_fasta_path,
+                    },
+                )
+            except Exception as exc:
+                if not allow_fallback:
+                    raise RuntimeError(f"Sequence similarity command failed: {exc}") from exc
+                candidates = fetch_local_fasta_similarity_candidates(
+                    query_sequence=query_sequence,
+                    fasta_path=sequence_similarity_fasta_path,
+                    size=requested_size,
+                )
+                return candidates, build_fallback_provenance(
+                    provider="sequence_similarity_command",
+                    warning=f"Sequence similarity command failed; local FASTA scan used: {exc}",
+                    extra={
+                        "candidate_count": len(candidates),
+                        "search_mode": search_mode,
+                        "fasta_path": sequence_similarity_fasta_path,
+                    },
+                )
         if sequence_similarity_fasta_path:
             candidates = fetch_local_fasta_similarity_candidates(
                 query_sequence=query_sequence,
