@@ -12,6 +12,7 @@ import {
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
   formatAnalysisArtifactSource,
+  buildAnalysisArtifactLineageJson,
   filterConservationSites,
   getConservationSites,
   getConservationArtifactOptions,
@@ -554,6 +555,40 @@ test("formats artifact input source lineage from summaries", () => {
     "recommendation_artifact | 4 candidates | recommendation-artifact-1"
   );
   assert.equal(formatAnalysisArtifactSource({ result_summary_json: null }), "-");
+});
+
+test("builds artifact lineage json for export", () => {
+  const payload = JSON.parse(buildAnalysisArtifactLineageJson({
+    id: "artifact-1",
+    enzyme_entry_id: "enzyme-1",
+    job_id: "job-1",
+    job_status: "finished",
+    artifact_type: "msa",
+    bucket: "iee-artifacts",
+    object_key: "analysis-jobs/job-1/msa.fasta",
+    checksum: "abc123",
+    content_type: "text/x-fasta",
+    size_bytes: 120,
+    source: "worker",
+    visibility: "private",
+    created_at: "2026-05-21T10:00:00",
+    result_summary_json: {
+      sequence_count: 3,
+      alignment_length: 120,
+      runner: { provider: "mafft", mode: "fallback" },
+      homolog_source: {
+        type: "homolog_artifact",
+        artifact_id: "homolog-artifact-1",
+        sequence_count: 2
+      }
+    }
+  }));
+
+  assert.equal(payload.artifact.id, "artifact-1");
+  assert.equal(payload.artifact.object_key, "analysis-jobs/job-1/msa.fasta");
+  assert.equal(payload.input_source.label, "homolog_artifact | 2 seqs | homolog-artifact-1");
+  assert.deepEqual(payload.runner, { provider: "mafft", mode: "fallback" });
+  assert.equal(payload.summary.sequence_count, 3);
 });
 
 test("builds rosetta ddg run views with status and error messages", () => {

@@ -297,6 +297,40 @@ export function formatAnalysisArtifactSource(
   return parts.join(" | ");
 }
 
+export function buildAnalysisArtifactLineageJson(artifact: AnalysisArtifactRecord): string {
+  const summary = artifact.result_summary_json ?? {};
+  return JSON.stringify(
+    {
+      artifact: {
+        id: artifact.id,
+        enzyme_entry_id: artifact.enzyme_entry_id,
+        job_id: artifact.job_id,
+        job_status: artifact.job_status,
+        artifact_type: artifact.artifact_type,
+        bucket: artifact.bucket,
+        object_key: artifact.object_key,
+        checksum: artifact.checksum,
+        content_type: artifact.content_type,
+        size_bytes: artifact.size_bytes,
+        source: artifact.source,
+        visibility: artifact.visibility,
+        created_at: artifact.created_at
+      },
+      input_source: {
+        label: formatAnalysisArtifactSource(artifact),
+        homolog_source: summary.homolog_source ?? null,
+        msa_source: summary.msa_source ?? null,
+        conservation_source: summary.conservation_source ?? null,
+        recommendation_source: summary.recommendation_source ?? null
+      },
+      runner: summary.runner ?? null,
+      summary
+    },
+    null,
+    2
+  );
+}
+
 export function buildMutationLibraryWorkbookBytes(library: MutationLibraryView): Uint8Array {
   const variantRows = [
     ["variant_id", "mutation_string", "order", "score", "member_scores", "risk_flags", "reasons"],

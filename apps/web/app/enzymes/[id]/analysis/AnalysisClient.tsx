@@ -25,6 +25,7 @@ import {
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
+  buildAnalysisArtifactLineageJson,
   formatAnalysisArtifactSource,
   filterConservationSites,
   getArtifactRunnerLabel,
@@ -399,6 +400,16 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     const link = document.createElement("a");
     link.href = url;
     link.download = `conservation-profile-${enzymeId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadArtifactLineage(artifact: AnalysisArtifactRecord) {
+    const blob = new Blob([buildAnalysisArtifactLineageJson(artifact)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `analysis-lineage-${artifact.id}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -806,6 +817,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                     </td>
                     <td className="px-4 py-3">{artifact.size_bytes ?? "-"}</td>
                     <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
                       <button
                         className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
                         disabled={!token || loadingArtifactId === artifact.id}
@@ -814,6 +826,14 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                       >
                         {loadingArtifactId === artifact.id ? "Loading..." : "View"}
                       </button>
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800"
+                        onClick={() => downloadArtifactLineage(artifact)}
+                        type="button"
+                      >
+                        Lineage
+                      </button>
+                      </div>
                     </td>
                   </tr>
                 ))
