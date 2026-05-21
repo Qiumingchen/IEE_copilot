@@ -130,3 +130,20 @@ test("formatImportedReference normalizes DOI URLs for display", () => {
     "10.1000/mixedcase · DOI URL paper · curated_literature"
   );
 });
+
+test("formatImportedReference normalizes PubMed IDs for display", () => {
+  assert.equal(
+    formatImportedReference({
+      id: "ref-1",
+      title: "PMID paper",
+      authors: null,
+      journal: null,
+      year: null,
+      doi: null,
+      pubmed_id: "PMID: 123456",
+      source: "curated_literature",
+      provenance: null
+    }),
+    "PMID 123456 · PMID paper · curated_literature"
+  );
+});

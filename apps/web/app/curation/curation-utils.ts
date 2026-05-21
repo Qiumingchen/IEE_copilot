@@ -31,7 +31,8 @@ export function summarizeCuratedEvidenceImport(result: CuratedEvidenceImportResp
 }
 
 export function formatImportedReference(reference: LiteratureReferenceRecord): string {
-  const identifier = normalizeDoiForDisplay(reference.doi) || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
+  const pubmedId = normalizePubmedIdForDisplay(reference.pubmed_id);
+  const identifier = normalizeDoiForDisplay(reference.doi) || (pubmedId ? `PMID ${pubmedId}` : null);
   const label = [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
   return `${label} · ${reference.source}`;
 }
@@ -47,6 +48,14 @@ export function normalizeDoiForDisplay(value: string | null | undefined): string
     }
   }
   return doi.trim();
+}
+
+export function normalizePubmedIdForDisplay(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+  return Array.from(normalized).filter((character) => /\d/.test(character)).join("");
 }
 
 export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewResponse): string {

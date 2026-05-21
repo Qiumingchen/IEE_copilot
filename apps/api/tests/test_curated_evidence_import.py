@@ -181,6 +181,37 @@ def test_curated_evidence_import_normalizes_doi_before_deduplication(client, db_
     assert len(references) == 1
 
 
+def test_curated_evidence_import_normalizes_pubmed_id_before_deduplication(client, db_session):
+    email = "curated-pubmed-normalize@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,property_type,value_original,unit_original,mutation_string,pubmed_id,reference_title,evidence_text",
+            "property,optimal_pH,7.0,pH,,PMID: 123456,PMID Normalized Paper,Optimum pH reported",
+            "mutation,,,,S2P,pubmed 123456,PMID Normalized Paper,S2P increased half-life",
+        ]
+    )
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert response.status_code == 201
+    assert len(response.json()["reference_ids"]) == 1
+    assert response.json()["references"][0]["pubmed_id"] == "123456"
+
+    references = list(
+        db_session.scalars(
+            select(LiteratureReference).where(LiteratureReference.pubmed_id == "123456")
+        )
+    )
+    assert len(references) == 1
+
+
 def test_curator_can_preview_curated_evidence_without_writing_records(client, db_session):
     email = "curated-preview@example.com"
     headers = _auth_headers(client, email)

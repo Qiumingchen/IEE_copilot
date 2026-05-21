@@ -217,7 +217,7 @@ def _format_preview_errors(errors: list[CuratedEvidencePreviewError]) -> str:
 
 def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureReference | None:
     doi = _normalize_doi(_value(row, "doi"))
-    pubmed_id = _value(row, "pubmed_id")
+    pubmed_id = _normalize_pubmed_id(_value(row, "pubmed_id"))
     if doi:
         existing = db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi))
         if existing is not None:
@@ -373,7 +373,12 @@ def _summarize_row(record_type: str, row: dict[str, str]) -> str:
 
 
 def _reference_key(row: dict[str, str]) -> str | None:
-    return _normalize_doi(_value(row, "doi")) or _value(row, "pubmed_id") or _value(row, "reference_title") or None
+    return (
+        _normalize_doi(_value(row, "doi"))
+        or _normalize_pubmed_id(_value(row, "pubmed_id"))
+        or _value(row, "reference_title")
+        or None
+    )
 
 
 def _normalize_doi(value: str) -> str:
@@ -382,6 +387,14 @@ def _normalize_doi(value: str) -> str:
         if doi.startswith(prefix):
             doi = doi.removeprefix(prefix)
     return doi.strip()
+
+
+def _normalize_pubmed_id(value: str) -> str:
+    normalized = value.strip().strip("'\"").lower()
+    for prefix in ("pmid:", "pmid", "pubmed:"):
+        if normalized.startswith(prefix):
+            normalized = normalized.removeprefix(prefix)
+    return "".join(character for character in normalized if character.isdigit())
 
 
 def _required(row: dict[str, str], key: str) -> str:
