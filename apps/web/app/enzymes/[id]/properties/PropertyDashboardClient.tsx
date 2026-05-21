@@ -16,6 +16,7 @@ import type {
 import {
   buildPropertyOptions,
   formatAssayContext,
+  formatPropertyEvidence,
   formatRankingValue,
   summarizeRankingGroup
 } from "./property-dashboard-utils";
@@ -216,6 +217,95 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
           ) : (
             <ReportedRanking ranking={ranking} />
           )}
+        </section>
+      </section>
+
+      <section className="mt-6 grid gap-4 xl:grid-cols-2">
+        <section className="min-w-0 rounded-md border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-4 py-4">
+            <h2 className="text-base font-semibold text-slate-950">Property evidence</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {currentPropertyRecords.length} records for {selectedPropertyType}
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Value</th>
+                  <th className="px-4 py-3">Assay context</th>
+                  <th className="px-4 py-3">Evidence</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {currentPropertyRecords.map((record) => (
+                  <tr key={record.id}>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-800">
+                      {record.value_standardized ?? record.value_original}
+                      {(record.unit_standardized ?? record.unit_original)
+                        ? ` ${record.unit_standardized ?? record.unit_original}`
+                        : ""}
+                    </td>
+                    <td className="min-w-56 px-4 py-3 text-slate-600">
+                      {[record.substrate, record.assay_temperature, record.assay_pH, record.method]
+                        .filter(Boolean)
+                        .join(" · ") || "-"}
+                    </td>
+                    <td className="min-w-72 px-4 py-3 text-slate-600">{formatPropertyEvidence(record)}</td>
+                  </tr>
+                ))}
+                {currentPropertyRecords.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-sm text-slate-500" colSpan={3}>
+                      No local evidence rows are available for this property yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="min-w-0 rounded-md border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-4 py-4">
+            <h2 className="text-base font-semibold text-slate-950">Kinetic evidence</h2>
+            <p className="mt-1 text-sm text-slate-500">{bundle?.kinetics.length ?? 0} kinetic records</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Substrate</th>
+                  <th className="px-4 py-3">Km / kcat / kcat/Km</th>
+                  <th className="px-4 py-3">Reference</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(bundle?.kinetics ?? []).map((record) => (
+                  <tr key={record.id}>
+                    <td className="px-4 py-3 text-slate-800">{record.substrate ?? "-"}</td>
+                    <td className="min-w-56 px-4 py-3 text-slate-600">
+                      {[record.km ? `Km ${record.km}` : null, record.kcat ? `kcat ${record.kcat}` : null, record.kcat_km ? `kcat/Km ${record.kcat_km}` : null]
+                        .filter(Boolean)
+                        .join(" · ") || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{record.reference_id ?? "-"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {record.visibility} / {record.curation_status}
+                    </td>
+                  </tr>
+                ))}
+                {(bundle?.kinetics.length ?? 0) === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-sm text-slate-500" colSpan={4}>
+                      No kinetic evidence rows are available yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       </section>
     </main>

@@ -73,3 +73,15 @@ export function formatAssayContext(item: PropertyRankingItemRecord): string {
 
   return parts.filter(Boolean).join(" · ") || "-";
 }
+
+export function formatPropertyEvidence(
+  record: Pick<PropertyRecord, "reference_id" | "evidence_text" | "visibility" | "curation_status">
+): string {
+  const parts = [
+    record.reference_id,
+    record.evidence_text,
+    `${record.visibility} / ${record.curation_status}`
+  ];
+
+  return parts.filter(Boolean).join(" · ") || "-";
+}

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   canSubmitRejection,
+  summarizeCuratedEvidenceImport,
   summarizeVisibilityRequest
 } from "../app/curation/curation-utils.ts";
 
@@ -40,4 +41,15 @@ test("summarizeVisibilityRequest combines variant, mutation, and measurement", (
 test("canSubmitRejection requires a non-empty review comment", () => {
   assert.equal(canSubmitRejection("   "), false);
   assert.equal(canSubmitRejection("Missing assay condition."), true);
+});
+
+test("summarizeCuratedEvidenceImport reports created evidence counts", () => {
+  assert.equal(
+    summarizeCuratedEvidenceImport({
+      created: { properties: 2, kinetics: 1, mutations: 3 },
+      reference_ids: ["ref-1", "ref-2"],
+      warnings: []
+    }),
+    "Created 2 property, 1 kinetic, 3 mutation records from 2 references."
+  );
 });

@@ -5,11 +5,16 @@ import { useEffect, useState } from "react";
 
 import {
   approveVisibilityRequest,
+  importCuratedEvidence,
   listVisibilityRequests,
   rejectVisibilityRequest
 } from "../../lib/api";
-import type { VisibilityRequestDetailRecord } from "../../lib/types";
-import { canSubmitRejection, summarizeVisibilityRequest } from "./curation-utils";
+import type { CuratedEvidenceImportResponse, VisibilityRequestDetailRecord } from "../../lib/types";
+import {
+  canSubmitRejection,
+  summarizeCuratedEvidenceImport,
+  summarizeVisibilityRequest
+} from "./curation-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -22,6 +27,10 @@ export default function CurationClient() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [importEnzymeId, setImportEnzymeId] = useState("");
+  const [importCsvText, setImportCsvText] = useState("");
+  const [importResult, setImportResult] = useState<CuratedEvidenceImportResponse | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   async function loadRequests(nextToken: string) {
     setError(null);
@@ -88,6 +97,26 @@ export default function CurationClient() {
     }
   }
 
+  async function handleCuratedImport() {
+    if (!token || !importEnzymeId.trim() || !importCsvText.trim()) {
+      setError("Enzyme ID and CSV text are required.");
+      return;
+    }
+    setIsImporting(true);
+    setError(null);
+    setSuccessMessage(null);
+    setImportResult(null);
+    try {
+      const result = await importCuratedEvidence(importEnzymeId.trim(), token, importCsvText);
+      setImportResult(result);
+      setSuccessMessage(summarizeCuratedEvidenceImport(result));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Unable to import curated evidence.");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -122,6 +151,59 @@ export default function CurationClient() {
       ) : null}
 
       {isLoading ? <p className="mt-6 text-sm text-slate-600">Loading visibility requests...</p> : null}
+
+      <section className="mt-8 rounded-md border border-slate-200 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-950">Curated evidence import</h2>
+            <p className="mt-1 max-w-3xl text-sm text-slate-600">
+              Import literature-curated property, kinetic, and mutation rows into one enzyme record.
+            </p>
+          </div>
+          <button
+            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+            disabled={!token || isImporting}
+            onClick={() => void handleCuratedImport()}
+            type="button"
+          >
+            {isImporting ? "Importing..." : "Import CSV"}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
+          <label className="grid gap-2 text-sm font-medium text-slate-700">
+            Enzyme ID
+            <input
+              className="rounded-md border border-slate-300 px-3 py-2 font-mono text-sm text-slate-950 outline-none focus:border-slate-500"
+              onChange={(event) => setImportEnzymeId(event.target.value)}
+              placeholder="UUID from enzyme detail URL"
+              value={importEnzymeId}
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-medium text-slate-700">
+            CSV text
+            <textarea
+              className="min-h-36 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-950 outline-none focus:border-slate-500"
+              onChange={(event) => setImportCsvText(event.target.value)}
+              placeholder="record_type,property_type,value_original,unit_original,doi,reference_title,evidence_text"
+              value={importCsvText}
+            />
+          </label>
+        </div>
+
+        {importResult?.warnings.length ? (
+          <div className="mt-4 grid gap-2">
+            {importResult.warnings.map((warning) => (
+              <p
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                key={warning}
+              >
+                {warning}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       {!isLoading && requests.length === 0 && !error ? (
         <section className="mt-8 border-t border-slate-200 pt-6">

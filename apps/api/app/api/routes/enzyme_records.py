@@ -22,6 +22,7 @@ from app.db.models import (
     StructureEntry,
     SubstrateEntry,
     User,
+    UserRole,
     UserExperiment,
     Visibility,
 )
@@ -29,6 +30,8 @@ from app.db.session import get_db
 from app.schemas.enzyme_record import (
     AnalysisArtifactContentResponse,
     AnalysisArtifactResponse,
+    CuratedEvidenceImportRequest,
+    CuratedEvidenceImportResponse,
     ExperimentConditionCreate,
     ExperimentConditionResponse,
     ExpressionRecordCreate,
@@ -45,6 +48,10 @@ from app.schemas.enzyme_record import (
     StructureResponse,
     SubstrateCreate,
     SubstrateResponse,
+)
+from app.services.curated_evidence_import import (
+    CuratedEvidenceImportError,
+    import_curated_evidence,
 )
 from app.schemas.experiment import (
     ExperimentImportPreviewResponse,
@@ -107,6 +114,11 @@ def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
     if enzyme is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
     return enzyme
+
+
+def _require_curator(user: User) -> None:
+    if user.role not in {UserRole.CURATOR, UserRole.ADMIN}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="curator role required")
 
 
 def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
@@ -990,6 +1002,34 @@ def list_properties(
             .where(PropertyRecord.enzyme_entry_id == enzyme_id)
             .order_by(PropertyRecord.created_at)
         )
+    )
+
+
+@router.post(
+    "/{enzyme_id}/curated-evidence/import",
+    response_model=CuratedEvidenceImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_curated_evidence_records(
+    enzyme_id: str,
+    request: CuratedEvidenceImportRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> CuratedEvidenceImportResponse:
+    _require_curator(user)
+    enzyme = _get_enzyme(db, enzyme_id)
+    try:
+        result = import_curated_evidence(db, enzyme=enzyme, csv_text=request.csv_text)
+    except CuratedEvidenceImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    db.commit()
+    return CuratedEvidenceImportResponse(
+        created=result.created,
+        reference_ids=result.reference_ids,
+        warnings=result.warnings,
     )
 
 

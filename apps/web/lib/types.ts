@@ -286,6 +286,12 @@ export type ExperimentImportResult = {
   experiment_ids: string[];
 };
 
+export type CuratedEvidenceImportResponse = {
+  created: Record<string, number>;
+  reference_ids: string[];
+  warnings: string[];
+};
+
 export type UserExperimentRecord = {
   id: string;
   project_id: string;

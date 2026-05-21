@@ -102,6 +102,16 @@ class PropertyRecordResponse(PropertyRecordCreate):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
+class CuratedEvidenceImportRequest(BaseModel):
+    csv_text: str
+
+
+class CuratedEvidenceImportResponse(BaseModel):
+    created: dict[str, int]
+    reference_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PropertyRankingItemResponse(BaseModel):
     rank: int
     enzyme_entry_id: str

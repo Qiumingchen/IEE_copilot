@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildPropertyOptions,
+  formatPropertyEvidence,
   formatRankingValue,
   summarizeRankingGroup
 } from "../app/enzymes/[id]/properties/property-dashboard-utils.ts";
@@ -31,6 +32,27 @@ test("formatRankingValue prefers standardized values while preserving reported v
       unit_standardized: "degC"
     }),
     "55 degC (reported 328.15 K)"
+  );
+});
+
+test("formatPropertyEvidence exposes literature evidence and reference", () => {
+  assert.equal(
+    formatPropertyEvidence({
+      reference_id: "ref-1",
+      evidence_text: "Reported at pH 7.0 after 30 min assay.",
+      visibility: "public",
+      curation_status: "approved"
+    }),
+    "ref-1 · Reported at pH 7.0 after 30 min assay. · public / approved"
+  );
+  assert.equal(
+    formatPropertyEvidence({
+      reference_id: null,
+      evidence_text: null,
+      visibility: "private",
+      curation_status: "unreviewed"
+    }),
+    "private / unreviewed"
   );
 });
 
