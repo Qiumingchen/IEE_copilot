@@ -1,4 +1,11 @@
 import type { StructureRecord } from "../../../../lib/types";
+import {
+  formatProvenanceLabel,
+  getProvenanceModeTone,
+  provenanceFromRecord,
+  provenanceUrl,
+  provenanceWarning
+} from "../../../../lib/provenance.ts";
 
 export type ChainOptionView = {
   structure_id: string;
@@ -25,6 +32,13 @@ export type StructureStatsView = {
   residue_count: number;
   complex_state: string;
   artifact_object_key: string;
+};
+
+export type StructureProvenanceView = {
+  label: string;
+  mode: "real" | "fallback" | "unknown";
+  source_url: string | null;
+  warning: string | null;
 };
 
 export function getChainOptions(structures: StructureRecord[]): ChainOptionView[] {
@@ -90,6 +104,16 @@ export function buildStructureWarnings(structure: StructureRecord): string[] {
     return [];
   }
   return warnings.map(String).filter(Boolean);
+}
+
+export function getStructureProvenanceView(structure: StructureRecord): StructureProvenanceView {
+  const provenance = provenanceFromRecord(structure as unknown as Record<string, unknown>, "chain_summary");
+  return {
+    label: formatProvenanceLabel(provenance),
+    mode: getProvenanceModeTone(provenance),
+    source_url: provenanceUrl(provenance),
+    warning: provenanceWarning(provenance)
+  };
 }
 
 export function getResidueRows(structure: StructureRecord, selectedChainId: string | null) {

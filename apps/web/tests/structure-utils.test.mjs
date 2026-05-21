@@ -6,6 +6,7 @@ import {
   getChainOptions,
   getDefaultStructureId,
   getLigandViews,
+  getStructureProvenanceView,
   getStructureStats
 } from "../app/enzymes/[id]/structures/structure-utils.ts";
 
@@ -28,6 +29,12 @@ const structure = {
   ligands: [],
   chain_summary: {
     chain_count: 1,
+    provenance: {
+      provider: "alphafold_mock",
+      mode: "fallback",
+      warning: "AlphaFold provider failed",
+      source_url: "mock://alphafold/AF-P99998-F1.pdb"
+    },
     warnings: ["missing residue around A3"],
     chains: [
       {
@@ -158,6 +165,15 @@ test("summarizes structure stats and warnings", () => {
     artifact_object_key: "structures/structure-1/complex.pdb"
   });
   assert.deepEqual(buildStructureWarnings(structure), ["missing residue around A3"]);
+});
+
+test("builds structure provenance display view", () => {
+  assert.deepEqual(getStructureProvenanceView(structure), {
+    label: "alphafold_mock fallback",
+    mode: "fallback",
+    source_url: "mock://alphafold/AF-P99998-F1.pdb",
+    warning: "AlphaFold provider failed"
+  });
 });
 
 test("prefers structures with residue mapping for the default selection", () => {

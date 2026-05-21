@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import LiteratureReference
+from app.services.provenance import build_real_provenance
 
 
 @dataclass(frozen=True)
@@ -49,15 +50,24 @@ def parse_crossref_item(item: dict) -> LiteratureMetadata:
         for author in item.get("author", [])
     ) or None
     date_parts = ((item.get("published-print") or item.get("published-online") or {}).get("date-parts") or [[]])
+    doi = item.get("DOI")
+    source_url = f"https://doi.org/{doi}" if doi else item.get("URL")
     return LiteratureMetadata(
         title=(item.get("title") or ["Unknown literature record"])[0],
         authors=authors,
         journal=(item.get("container-title") or [None])[0],
         year=date_parts[0][0] if date_parts and date_parts[0] else None,
-        doi=item.get("DOI"),
+        doi=doi,
         abstract=item.get("abstract"),
         source="crossref",
-        metadata={"provider": "crossref"},
+        metadata={
+            "provider": "crossref",
+            "provenance": build_real_provenance(
+                provider="crossref",
+                source_url=source_url,
+                version="crossref-works",
+            ),
+        },
     )
 
 

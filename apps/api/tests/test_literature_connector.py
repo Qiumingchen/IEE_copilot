@@ -91,6 +91,28 @@ def test_parse_crossref_item_extracts_literature_metadata():
     assert metadata.year == 2025
     assert metadata.doi == "10.1000/example"
     assert metadata.source == "crossref"
+    assert metadata.metadata["provider"] == "crossref"
+    assert metadata.metadata["provenance"]["provider"] == "crossref"
+    assert metadata.metadata["provenance"]["mode"] == "real"
+    assert metadata.metadata["provenance"]["source_url"] == "https://doi.org/10.1000/example"
+    assert metadata.metadata["provenance"]["retrieved_at"].endswith("Z")
+
+
+def test_create_literature_reference_persists_crossref_provenance(db_session):
+    item = {
+        "title": ["Traceable enzyme engineering"],
+        "DOI": "10.1000/traceable",
+        "abstract": "<jats:p>Traceable record.</jats:p>",
+    }
+    metadata = parse_crossref_item(item)
+
+    reference = create_literature_reference(db_session, metadata)
+    db_session.commit()
+
+    assert reference.metadata_json["provider"] == "crossref"
+    assert reference.metadata_json["abstract"] == "<jats:p>Traceable record.</jats:p>"
+    assert reference.metadata_json["provenance"]["mode"] == "real"
+    assert reference.metadata_json["provenance"]["source_url"] == "https://doi.org/10.1000/traceable"
 
 
 def test_get_literature_client_returns_real_client_when_enabled(monkeypatch):

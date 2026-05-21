@@ -12,6 +12,7 @@ import {
   getDefaultStructureId,
   getLigandViews,
   getResidueRows,
+  getStructureProvenanceView,
   getStructureStats
 } from "./structure-utils";
 
@@ -63,6 +64,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const selectedChain = chainOptions.find((chain) => chain.chain_id === selectedChainId) ?? chainOptions[0] ?? null;
   const ligandViews = selectedStructure ? getLigandViews(selectedStructure) : [];
   const stats = selectedStructure ? getStructureStats(selectedStructure) : null;
+  const provenance = selectedStructure ? getStructureProvenanceView(selectedStructure) : null;
   const warnings = selectedStructure ? buildStructureWarnings(selectedStructure) : [];
   const residueRows = selectedStructure ? getResidueRows(selectedStructure, selectedChain?.chain_id ?? null) : [];
 
@@ -152,6 +154,8 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
               <MetricCard label="State" value={stats.complex_state} />
             </section>
 
+            {provenance ? <ProvenancePanel provenance={provenance} /> : null}
+
             <section className="rounded-md border border-slate-200 bg-white">
               <div className="border-b border-slate-200 px-4 py-3">
                 <h2 className="text-base font-semibold text-slate-950">Structure preview</h2>
@@ -221,6 +225,41 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
         )}
       </section>
     </main>
+  );
+}
+
+function ProvenancePanel({
+  provenance
+}: {
+  provenance: ReturnType<typeof getStructureProvenanceView>;
+}) {
+  const toneClass =
+    provenance.mode === "real"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : provenance.mode === "fallback"
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-slate-200 bg-white text-slate-700";
+
+  return (
+    <section className={`rounded-md border px-4 py-3 ${toneClass}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Source provenance</h2>
+          <p className="mt-1 break-words font-mono text-xs">{provenance.label}</p>
+        </div>
+        {provenance.source_url ? (
+          <a
+            className="text-xs font-medium underline underline-offset-2"
+            href={provenance.source_url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Source
+          </a>
+        ) : null}
+      </div>
+      {provenance.warning ? <p className="mt-2 text-sm">{provenance.warning}</p> : null}
+    </section>
   );
 }
 

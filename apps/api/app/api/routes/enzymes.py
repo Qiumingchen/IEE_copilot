@@ -1,6 +1,8 @@
 import hashlib
+from dataclasses import replace
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,11 +24,21 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_db
-from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
+from app.external.alphafold import (
+    AlphaFoldModelMetadata,
+    MockAlphaFoldClient,
+    get_alphafold_client,
+)
 from app.external.enzyme_data import get_enzyme_data_client
-from app.external.literature import create_literature_reference, get_literature_client
-from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
+from app.external.literature import (
+    LiteratureMetadata,
+    MockLiteratureClient,
+    create_literature_reference,
+    get_literature_client,
+)
+from app.external.rcsb import MockRcsbClient, RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import (
+    MockUniProtClient,
     P81453_FULL_SEQUENCE,
     P81453_MATURE_SEQUENCE,
     UniProtEntry,
@@ -43,6 +55,7 @@ from app.services.cache import (
 )
 from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
+from app.services.provenance import build_fallback_provenance, build_real_provenance
 from app.services.similarity_matching import find_level_two_similarity_match
 from worker.jobs import run_placeholder_analysis
 
@@ -167,8 +180,30 @@ def _should_repair_mtgase_seed_sequence(
     return bool(enzyme.uniprot_id and enzyme.uniprot_id.upper().startswith("MOCK"))
 
 
-def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | None, str | None]:
+def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | None, str | None, dict | None]:
     client = get_uniprot_client()
+    try:
+        entry, fasta, source = _fetch_uniprot_entry_with_client(resolved_query, client)
+        return entry, fasta, source, _uniprot_retrieval_provenance(entry, source)
+    except (httpx.HTTPError, ValueError) as exc:
+        if getattr(client, "source", "uniprot").endswith("_mock"):
+            raise
+        fallback_client = MockUniProtClient()
+        entry, fasta, source = _fetch_uniprot_entry_with_client(resolved_query, fallback_client)
+        return (
+            entry,
+            fasta,
+            source,
+            build_fallback_provenance(
+                provider=source,
+                warning=f"UniProt provider failed; fallback mock data used. {exc}",
+            )
+            if entry is not None
+            else None,
+        )
+
+
+def _fetch_uniprot_entry_with_client(resolved_query, client) -> tuple[UniProtEntry | None, str | None, str | None]:
     if resolved_query.kind == QueryKind.UNIPROT:
         entry = client.fetch_entry(resolved_query.normalized_query)
         return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
@@ -184,6 +219,25 @@ def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | Non
 
     entry = client.fetch_entry(hits[0].accession)
     return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
+
+
+def _uniprot_retrieval_provenance(entry: UniProtEntry | None, source: str | None) -> dict | None:
+    if entry is None:
+        return None
+    provenance = entry.cross_references.get("provenance")
+    if isinstance(provenance, dict):
+        return provenance
+    provider = source or "uniprot"
+    if provider.endswith("_mock"):
+        return build_fallback_provenance(
+            provider=provider,
+            warning="UniProt record came from a configured fallback client.",
+            extra={"accession": entry.accession},
+        )
+    return build_real_provenance(
+        provider=provider,
+        source_url=f"https://rest.uniprot.org/uniprotkb/{entry.accession}.json",
+    )
 
 
 def _create_enzyme_from_uniprot_entry(
@@ -224,21 +278,64 @@ def _create_enzyme_from_uniprot_entry(
 
     alphafold_id = entry.cross_references.get("AlphaFoldDB")
     if alphafold_id:
-        alphafold_client = get_alphafold_client()
-        model = alphafold_client.fetch_model_by_uniprot(entry.accession)
+        model, alphafold_source, alphafold_provenance = _fetch_alphafold_model(entry.accession)
         _create_alphafold_structure(
             db,
             enzyme=enzyme,
             model=model,
-            source=getattr(alphafold_client, "source", "alphafold"),
+            source=alphafold_source,
+            provenance=alphafold_provenance,
         )
     return enzyme
 
 
+def _fetch_alphafold_model(uniprot_id: str) -> tuple[AlphaFoldModelMetadata, str, dict | None]:
+    client = get_alphafold_client()
+    source = getattr(client, "source", "alphafold")
+    try:
+        model = client.fetch_model_by_uniprot(uniprot_id)
+        return model, source, None
+    except (httpx.HTTPError, ValueError) as exc:
+        if source.endswith("_mock"):
+            raise
+        fallback_client = MockAlphaFoldClient()
+        fallback_source = getattr(fallback_client, "source", "alphafold_mock")
+        model = fallback_client.fetch_model_by_uniprot(uniprot_id)
+        return (
+            model,
+            fallback_source,
+            build_fallback_provenance(
+                provider=fallback_source,
+                warning=f"AlphaFold provider failed; fallback mock model used. {exc}",
+                extra={"source_url": model.structure_url},
+            ),
+        )
+
+
 def _save_literature_for_enzyme(db: Session, enzyme: EnzymeEntry) -> None:
     client = get_literature_client()
-    for metadata in client.search_by_enzyme_name(enzyme.name):
+    try:
+        hits = client.search_by_enzyme_name(enzyme.name)
+    except (httpx.HTTPError, ValueError) as exc:
+        if getattr(client, "source", "crossref").endswith("_mock"):
+            raise
+        fallback_client = MockLiteratureClient()
+        hits = [
+            _with_literature_fallback_provenance(metadata, exc)
+            for metadata in fallback_client.search_by_enzyme_name(enzyme.name)
+        ]
+
+    for metadata in hits:
         create_literature_reference(db, metadata)
+
+
+def _with_literature_fallback_provenance(metadata: LiteratureMetadata, exc: Exception) -> LiteratureMetadata:
+    metadata_json = dict(metadata.metadata)
+    metadata_json["provenance"] = build_fallback_provenance(
+        provider=metadata.source,
+        warning=f"Literature provider failed; fallback mock metadata used. {exc}",
+    )
+    return replace(metadata, metadata=metadata_json)
 
 
 def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
@@ -331,20 +428,27 @@ def _create_alphafold_structure(
     enzyme: EnzymeEntry,
     model: AlphaFoldModelMetadata,
     source: str,
+    provenance: dict | None = None,
 ) -> StructureEntry:
     now = datetime.utcnow()
+    chain_summary = {
+        "model_id": model.model_id,
+        "uniprot_id": model.uniprot_id,
+        "structure_url": model.structure_url,
+        "confidence_url": model.confidence_url,
+        "confidence_summary": model.confidence_summary,
+        "provenance": provenance or _provider_provenance(
+            provider=source,
+            source_url=model.structure_url,
+            fallback_warning="AlphaFold model came from a configured fallback client.",
+        ),
+    }
     structure = StructureEntry(
         enzyme_entry_id=enzyme.id,
         structure_type="alphafold",
         complex_state="predicted",
         pdb_id=None,
-        chain_summary={
-            "model_id": model.model_id,
-            "uniprot_id": model.uniprot_id,
-            "structure_url": model.structure_url,
-            "confidence_url": model.confidence_url,
-            "confidence_summary": model.confidence_summary,
-        },
+        chain_summary=chain_summary,
         ligand_summary={"ligands": []},
         source=source,
         created_at=now,
@@ -360,6 +464,7 @@ def _create_enzyme_from_rcsb_metadata(
     family: EnzymeFamily,
     metadata: RcsbStructureMetadata,
     source: str | None,
+    provenance: dict | None = None,
 ) -> EnzymeEntry:
     now = datetime.utcnow()
     enzyme = EnzymeEntry(
@@ -373,13 +478,19 @@ def _create_enzyme_from_rcsb_metadata(
     )
     db.add(enzyme)
     db.flush()
+    chain_summary = dict(metadata.chain_summary)
+    chain_summary["provenance"] = provenance or _provider_provenance(
+        provider=source or "rcsb",
+        source_url=f"https://www.rcsb.org/structure/{metadata.pdb_id}",
+        fallback_warning="RCSB structure metadata came from a configured fallback client.",
+    )
     db.add(
         StructureEntry(
             enzyme_entry_id=enzyme.id,
             structure_type="pdb",
             complex_state="unknown",
             pdb_id=metadata.pdb_id,
-            chain_summary=metadata.chain_summary,
+            chain_summary=chain_summary,
             ligand_summary=metadata.ligand_summary,
             source=source or "rcsb",
             created_at=now,
@@ -389,11 +500,50 @@ def _create_enzyme_from_rcsb_metadata(
     return enzyme
 
 
-def _search_cache_payload(enzyme: EnzymeEntry, job: AnalysisJob) -> dict[str, str]:
-    return {
+def _fetch_rcsb_metadata(pdb_id: str) -> tuple[RcsbStructureMetadata, str, dict | None]:
+    client = get_rcsb_client()
+    source = getattr(client, "source", "rcsb")
+    try:
+        return client.fetch_structure_metadata(pdb_id), source, None
+    except (httpx.HTTPError, ValueError) as exc:
+        if source.endswith("_mock"):
+            raise
+        fallback_client = MockRcsbClient()
+        fallback_source = getattr(fallback_client, "source", "rcsb_mock")
+        metadata = fallback_client.fetch_structure_metadata(pdb_id)
+        return (
+            metadata,
+            fallback_source,
+            build_fallback_provenance(
+                provider=fallback_source,
+                warning=f"RCSB provider failed; fallback mock structure used. {exc}",
+                extra={"source_url": f"https://www.rcsb.org/structure/{metadata.pdb_id}"},
+            ),
+        )
+
+
+def _provider_provenance(*, provider: str, source_url: str | None, fallback_warning: str) -> dict:
+    if provider.endswith("_mock"):
+        return build_fallback_provenance(
+            provider=provider,
+            warning=fallback_warning,
+            extra={"source_url": source_url} if source_url else None,
+        )
+    return build_real_provenance(provider=provider, source_url=source_url)
+
+
+def _search_cache_payload(
+    enzyme: EnzymeEntry,
+    job: AnalysisJob,
+    retrieval_provenance: dict | None = None,
+) -> dict:
+    payload = {
         "enzyme_entry_id": enzyme.id,
         "job_id": job.id,
     }
+    if retrieval_provenance is not None:
+        payload["retrieval_provenance"] = retrieval_provenance
+    return payload
 
 
 def _upsert_search_cache(
@@ -405,6 +555,7 @@ def _upsert_search_cache(
     module: EnzymeModule,
     enzyme: EnzymeEntry,
     job: AnalysisJob,
+    retrieval_provenance: dict | None = None,
 ) -> None:
     now = datetime.utcnow()
     record = find_search_cache(db, normalized_query, query_kind, module)
@@ -416,7 +567,7 @@ def _upsert_search_cache(
                 query_kind=query_kind,
                 module=module,
                 enzyme_entry_id=enzyme.id,
-                payload_json=_search_cache_payload(enzyme, job),
+                payload_json=_search_cache_payload(enzyme, job, retrieval_provenance),
                 source=enzyme.source,
                 last_refreshed_at=now,
                 updated_at=now,
@@ -426,7 +577,7 @@ def _upsert_search_cache(
 
     record.query = query
     record.enzyme_entry_id = enzyme.id
-    record.payload_json = _search_cache_payload(enzyme, job)
+    record.payload_json = _search_cache_payload(enzyme, job, retrieval_provenance)
     record.source = enzyme.source
     record.last_refreshed_at = now
     record.updated_at = now
@@ -442,6 +593,7 @@ def search_enzymes(
     module = _module_for_search(db, request, resolved.module_hint, user)
     family = _ensure_family(db, module)
     cache_status = "miss_refreshed"
+    retrieval_provenance: dict | None = None
 
     enzyme: EnzymeEntry | None = None
     fresh_cache = find_fresh_search_cache(
@@ -455,6 +607,10 @@ def search_enzymes(
         if cached_enzyme is not None:
             enzyme = cached_enzyme
             cache_status = "hit"
+            if isinstance(fresh_cache.payload_json, dict):
+                cached_provenance = fresh_cache.payload_json.get("retrieval_provenance")
+                if isinstance(cached_provenance, dict):
+                    retrieval_provenance = cached_provenance
 
     if resolved.kind == QueryKind.UNIPROT:
         if enzyme is None:
@@ -499,19 +655,20 @@ def search_enzymes(
                 cache_status = "stale_refreshed"
 
     if enzyme is None and resolved.kind == QueryKind.PDB:
-        rcsb_client = get_rcsb_client()
-        metadata = rcsb_client.fetch_structure_metadata(resolved.normalized_query)
+        metadata, rcsb_source, rcsb_provenance = _fetch_rcsb_metadata(resolved.normalized_query)
         enzyme = _create_enzyme_from_rcsb_metadata(
             db,
             family=family,
             metadata=metadata,
-            source=getattr(rcsb_client, "source", "rcsb"),
+            source=rcsb_source,
+            provenance=rcsb_provenance,
         )
         cache_status = "miss_refreshed"
 
     if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
-        entry, fasta, source = _fetch_uniprot_entry(resolved)
+        entry, fasta, source, entry_provenance = _fetch_uniprot_entry(resolved)
         if entry is not None:
+            retrieval_provenance = entry_provenance
             enzyme = _create_enzyme_from_uniprot_entry(
                 db,
                 family=family,
@@ -584,6 +741,7 @@ def search_enzymes(
             "query_kind": resolved.kind.value,
             "module": module.value,
             "refresh_modules": refresh_modules,
+            **({"retrieval_provenance": retrieval_provenance} if retrieval_provenance else {}),
         },
         created_by=user.id,
     )
@@ -597,6 +755,7 @@ def search_enzymes(
         module=module,
         enzyme=enzyme,
         job=job,
+        retrieval_provenance=retrieval_provenance,
     )
     db.commit()
     db.refresh(enzyme)

@@ -13,6 +13,7 @@ import {
   getEnzymeRecordBundle,
   uploadStructureFile
 } from "../../../lib/api";
+import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
 import type { EnzymeRecordBundle, StructureRecord } from "../../../lib/types";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -158,6 +159,12 @@ function summarizeStructureLigands(structure: StructureRecord): string {
     return "-";
   }
   return ligands.join(", ");
+}
+
+function summarizeStructureProvenance(structure: StructureRecord): string {
+  const provenance = provenanceFromRecord(structure as unknown as Record<string, unknown>, "chain_summary");
+  const warning = provenanceWarning(provenance);
+  return warning ? `${formatProvenanceLabel(provenance)} / ${warning}` : formatProvenanceLabel(provenance);
 }
 
 function summarizeNearestResidues(ligand: Record<string, unknown>): string {
@@ -915,12 +922,13 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
               title="Substrates"
             />
             <RecordTable
-              columns={["Type", "State", "Chains", "Ligands", "Artifact"]}
+              columns={["Type", "State", "Chains", "Ligands", "Provenance", "Artifact"]}
               rows={bundle.structures.map((item) => [
                 item.structure_type,
                 item.complex_state,
                 summarizeStructureChains(item),
                 summarizeStructureLigands(item),
+                summarizeStructureProvenance(item),
                 item.artifact?.object_key ?? "-"
               ])}
               title="Structures"

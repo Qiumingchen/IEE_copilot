@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+import httpx
 from sqlalchemy import select
 
 from app.db.models import (
@@ -558,8 +559,68 @@ def test_enzyme_search_fetches_rcsb_metadata_when_pdb_not_local(client, db_sessi
     assert structure is not None
     assert structure.pdb_id == "1ABC"
     assert structure.source == "rcsb_mock"
-    assert structure.chain_summary == {"polymer_entity_count": 1, "chains": ["A"]}
+    assert structure.chain_summary["polymer_entity_count"] == 1
+    assert structure.chain_summary["chains"] == ["A"]
+    assert structure.chain_summary["provenance"]["provider"] == "rcsb_mock"
+    assert structure.chain_summary["provenance"]["mode"] == "fallback"
+    assert structure.chain_summary["provenance"]["source_url"] == "https://www.rcsb.org/structure/1ABC"
     assert structure.ligand_summary == {"ligands": ["GTP"]}
+
+
+def test_enzyme_search_falls_back_to_mock_rcsb_when_real_provider_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FailingRcsbClient:
+        source = "rcsb"
+
+        def fetch_structure_metadata(self, pdb_id: str):
+            raise httpx.ConnectError("rcsb offline")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_rcsb_client",
+        lambda: FailingRcsbClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "rcsb-fallback@example.com",
+            "password": "search-password",
+            "display_name": "RCSB Fallback Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "rcsb-fallback@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "1abc"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    structure = db_session.scalar(
+        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
+    )
+    assert structure.source == "rcsb_mock"
+    assert structure.chain_summary["provenance"]["mode"] == "fallback"
+    assert "rcsb offline" in structure.chain_summary["provenance"]["warning"]
 
 
 def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, monkeypatch):
@@ -788,6 +849,155 @@ def test_enzyme_search_fetches_uniprot_accession_when_not_local(client, db_sessi
     assert body["enzyme"]["name"] == "Fetched UniProt enzyme"
 
 
+def test_enzyme_search_records_uniprot_retrieval_provenance(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Traceable UniProt enzyme",
+                organism="Bacillus provenance",
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={
+                    "provenance": {
+                        "provider": "uniprot",
+                        "mode": "real",
+                        "retrieved_at": "2026-05-21T00:00:00Z",
+                        "source_url": f"https://rest.uniprot.org/uniprotkb/{accession}.json",
+                    }
+                },
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P77777|REAL\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "uniprot-provenance@example.com",
+            "password": "search-password",
+            "display_name": "UniProt Provenance Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "uniprot-provenance@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P77777"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    job = db_session.get(AnalysisJob, body["job_id"])
+    assert job.parameters_json["retrieval_provenance"]["provider"] == "uniprot"
+    assert job.parameters_json["retrieval_provenance"]["mode"] == "real"
+
+    cache_record = db_session.scalar(
+        select(SearchCacheRecord).where(SearchCacheRecord.normalized_query == "P77777")
+    )
+    assert cache_record.payload_json["retrieval_provenance"]["source_url"].endswith("/P77777.json")
+
+
+def test_enzyme_search_falls_back_to_mock_uniprot_when_real_provider_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FailingUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            raise httpx.ConnectError("offline")
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            raise httpx.ConnectError("offline")
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise httpx.ConnectError("offline")
+
+        def fetch_entry(self, accession: str):
+            raise httpx.ConnectError("offline")
+
+        def fetch_fasta(self, accession: str):
+            raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FailingUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "uniprot-fallback@example.com",
+            "password": "search-password",
+            "display_name": "UniProt Fallback Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "uniprot-fallback@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    enzyme = db_session.get(EnzymeEntry, body["enzyme"]["id"])
+    assert enzyme.source == "uniprot_mock"
+    job = db_session.get(AnalysisJob, body["job_id"])
+    assert job.parameters_json["retrieval_provenance"]["mode"] == "fallback"
+    assert "offline" in job.parameters_json["retrieval_provenance"]["warning"]
+
+
 def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
     client,
     db_session,
@@ -870,6 +1080,97 @@ def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
     assert structure.source == "alphafold_mock"
     assert structure.chain_summary["model_id"] == "AF-P99998-F1"
     assert structure.chain_summary["confidence_summary"]["mean_plddt"] == 90.0
+    assert structure.chain_summary["provenance"]["provider"] == "alphafold_mock"
+    assert structure.chain_summary["provenance"]["mode"] == "fallback"
+    assert structure.chain_summary["provenance"]["source_url"] == "mock://alphafold/AF-P99998-F1.pdb"
+
+
+def test_enzyme_search_falls_back_to_mock_alphafold_when_real_provider_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="AlphaFold fallback linked enzyme",
+                organism="Bacillus testingensis",
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={"AlphaFoldDB": "AF-P99997-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P99997|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {"AlphaFoldDB": "AF-P99997-F1"}
+
+    class FailingAlphaFoldClient:
+        source = "alphafold"
+
+        def fetch_model_by_uniprot(self, uniprot_id: str):
+            raise httpx.ConnectError("alphafold offline")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_alphafold_client",
+        lambda: FailingAlphaFoldClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "alphafold-fallback@example.com",
+            "password": "search-password",
+            "display_name": "AlphaFold Fallback Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alphafold-fallback@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P99997"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    structure = db_session.scalar(
+        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
+    )
+    assert structure.source == "alphafold_mock"
+    assert structure.chain_summary["provenance"]["mode"] == "fallback"
+    assert "alphafold offline" in structure.chain_summary["provenance"]["warning"]
 
 
 def test_enzyme_search_saves_literature_metadata_for_external_hit(
@@ -956,6 +1257,63 @@ def test_enzyme_search_saves_literature_metadata_for_external_hit(
     assert reference is not None
     assert reference.source == "literature_mock"
     assert "thermostability" in reference.metadata_json["abstract"].lower()
+
+
+def test_enzyme_search_falls_back_to_mock_literature_when_real_provider_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FailingLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            raise httpx.ConnectError("crossref offline")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_literature_client",
+        lambda: FailingLiteratureClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "literature-fallback@example.com",
+            "password": "search-password",
+            "display_name": "Literature Fallback Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "literature-fallback@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    reference = db_session.scalar(
+        select(LiteratureReference).where(
+            LiteratureReference.doi == "10.0000/mock-mtgase-thermostability"
+        )
+    )
+    assert reference.source == "literature_mock"
+    assert reference.metadata_json["provenance"]["mode"] == "fallback"
+    assert "crossref offline" in reference.metadata_json["provenance"]["warning"]
 
 
 def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, monkeypatch):

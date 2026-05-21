@@ -172,6 +172,10 @@ export async function listJobs(token: string): Promise<JobResponse[]> {
   return fetchWithToken<JobResponse[]>("/jobs", token);
 }
 
+export async function getJob(jobId: string, token: string): Promise<JobResponse> {
+  return fetchWithToken<JobResponse>(`/jobs/${jobId}`, token);
+}
+
 export async function retryJob(jobId: string, token: string): Promise<JobResponse> {
   return fetchWithToken<JobResponse>(`/jobs/${jobId}/retry`, token, {
     method: "POST"
