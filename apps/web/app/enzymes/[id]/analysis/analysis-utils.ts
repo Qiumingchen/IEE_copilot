@@ -278,6 +278,42 @@ export function getHomologSequences(content: AnalysisArtifactContentRecord): Hom
     });
 }
 
+export function buildHomologFasta(content: AnalysisArtifactContentRecord): string {
+  return getRawHomologs(content)
+    .map((homolog) => {
+      const accession = String(valueOrDash(homolog.accession));
+      const name = String(valueOrDash(homolog.name));
+      const organism = typeof homolog.organism === "string" && homolog.organism.length > 0
+        ? ` [${homolog.organism}]`
+        : "";
+      const identity = formatFractionPercent(homolog.identity);
+      const coverage = formatFractionPercent(homolog.coverage);
+      const sequence = typeof homolog.sequence === "string" ? homolog.sequence : "";
+      return `>${accession} ${name}${organism} identity=${identity} coverage=${coverage}\n${sequence}`;
+    })
+    .join("\n");
+}
+
+export function buildHomologCsv(content: AnalysisArtifactContentRecord): string {
+  const rows = [
+    ["accession", "name", "organism", "identity", "coverage", "source", "sequence_length", "sequence"],
+    ...getRawHomologs(content).map((homolog) => {
+      const sequence = typeof homolog.sequence === "string" ? homolog.sequence : "";
+      return [
+        String(valueOrDash(homolog.accession)),
+        String(valueOrDash(homolog.name)),
+        String(homolog.organism ?? ""),
+        String(formatFractionPercent(homolog.identity)),
+        String(formatFractionPercent(homolog.coverage)),
+        String(valueOrDash(homolog.source)),
+        String(sequence.length),
+        sequence
+      ];
+    })
+  ];
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
 export function getHomologDiagnostics(content: AnalysisArtifactContentRecord): HomologDiagnosticsView | null {
   const rawDiagnostics = content.content_json?.diagnostics;
   if (typeof rawDiagnostics !== "object" || rawDiagnostics === null) {
@@ -308,6 +344,16 @@ export function getHomologDiagnostics(content: AnalysisArtifactContentRecord): H
     max_sequences: maxSequences,
     summary: `Fetched ${candidateCount} candidates -> scored ${scoredCount} -> identity pass ${passedIdentityCount} -> coverage pass ${passedCoverageCount} -> returned ${returnedCount}`
   };
+}
+
+function getRawHomologs(content: AnalysisArtifactContentRecord): Array<Record<string, unknown>> {
+  const rawHomologs = content.content_json?.homologs;
+  if (!Array.isArray(rawHomologs)) {
+    return [];
+  }
+  return rawHomologs.filter((homolog): homolog is Record<string, unknown> => (
+    typeof homolog === "object" && homolog !== null
+  ));
 }
 
 export function getMutationRecommendationCandidates(
@@ -536,6 +582,13 @@ function formatFractionPercent(value: unknown): string | number {
     return valueOrDash(value);
   }
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function escapeCsvCell(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+  return value;
 }
 
 function worksheetRowsXml(rows: string[][]): string {

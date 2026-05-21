@@ -16,6 +16,8 @@ import type {
   AnalysisJobType
 } from "../../../../lib/types";
 import {
+  buildHomologCsv,
+  buildHomologFasta,
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
@@ -373,6 +375,32 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     URL.revokeObjectURL(url);
   }
 
+  function downloadHomologFasta() {
+    if (!latestHomologContent) {
+      return;
+    }
+    const blob = new Blob([buildHomologFasta(latestHomologContent)], { type: "text/x-fasta" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `homolog-sequences-${enzymeId}.fasta`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadHomologCsv() {
+    if (!latestHomologContent) {
+      return;
+    }
+    const blob = new Blob([buildHomologCsv(latestHomologContent)], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `homolog-sequences-${enzymeId}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function downloadMutationLibraryCsv() {
     if (!mutationLibrary?.csv_text) {
       return;
@@ -596,7 +624,23 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               {homologDiagnostics ? <HomologDiagnosticsStrip diagnostics={homologDiagnostics} /> : null}
             </div>
             {latestHomologContent ? (
-              <RunnerBadge label={getArtifactRunnerLabel(latestHomologContent)} />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800"
+                  onClick={downloadHomologFasta}
+                  type="button"
+                >
+                  FASTA
+                </button>
+                <button
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-800"
+                  onClick={downloadHomologCsv}
+                  type="button"
+                >
+                  CSV
+                </button>
+                <RunnerBadge label={getArtifactRunnerLabel(latestHomologContent)} />
+              </div>
             ) : null}
           </div>
         </div>

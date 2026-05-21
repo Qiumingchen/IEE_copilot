@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildHomologCsv,
+  buildHomologFasta,
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
@@ -102,6 +104,87 @@ test("formats homolog filter diagnostics from artifact content", () => {
     max_sequences: 25,
     summary: "Fetched 25 candidates -> scored 25 -> identity pass 6 -> coverage pass 2 -> returned 2"
   });
+});
+
+test("builds homolog FASTA export from artifact content", () => {
+  const content = {
+    artifact_id: "artifact-homologs",
+    artifact_type: "homolog_sequences",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-homologs/homolog-sequences.json",
+    content_text: null,
+    content_json: {
+      homologs: [
+        {
+          accession: "A0A1",
+          name: "Microbial transglutaminase",
+          organism: "Streptomyces testensis",
+          identity: 0.8123,
+          coverage: 1,
+          sequence: "ACDEFGHIKL"
+        },
+        {
+          accession: "B0B2",
+          name: "Candidate, quoted",
+          organism: null,
+          identity: 0.7,
+          coverage: 0.9,
+          sequence: "MNOP"
+        }
+      ]
+    }
+  };
+
+  assert.equal(
+    buildHomologFasta(content),
+    [
+      ">A0A1 Microbial transglutaminase [Streptomyces testensis] identity=81.2% coverage=100.0%",
+      "ACDEFGHIKL",
+      ">B0B2 Candidate, quoted identity=70.0% coverage=90.0%",
+      "MNOP"
+    ].join("\n")
+  );
+});
+
+test("builds homolog CSV export from artifact content", () => {
+  const content = {
+    artifact_id: "artifact-homologs",
+    artifact_type: "homolog_sequences",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-homologs/homolog-sequences.json",
+    content_text: null,
+    content_json: {
+      homologs: [
+        {
+          accession: "A0A1",
+          name: "Microbial transglutaminase",
+          organism: "Streptomyces testensis",
+          identity: 0.8123,
+          coverage: 1,
+          source: "uniprot",
+          sequence: "ACDEFGHIKL"
+        },
+        {
+          accession: "B0B2",
+          name: "Candidate, quoted",
+          organism: "",
+          identity: 0.7,
+          coverage: 0.9,
+          source: "uniprot",
+          sequence: "MNOP"
+        }
+      ]
+    }
+  };
+
+  assert.equal(
+    buildHomologCsv(content),
+    [
+      "accession,name,organism,identity,coverage,source,sequence_length,sequence",
+      "A0A1,Microbial transglutaminase,Streptomyces testensis,81.2%,100.0%,uniprot,10,ACDEFGHIKL",
+      'B0B2,"Candidate, quoted",,70.0%,90.0%,uniprot,4,MNOP'
+    ].join("\n")
+  );
 });
 
 test("extracts mutation recommendation candidates from artifact content", () => {
