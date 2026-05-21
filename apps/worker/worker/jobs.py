@@ -32,6 +32,9 @@ from app.services.rosetta_runner import run_rosetta_ddg_with_runner
 from app.tasks.celery_app import celery_app
 
 
+MAX_HOMOLOG_PROVIDER_REQUEST_SIZE = 100
+
+
 def finish_placeholder_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -440,7 +443,10 @@ def _homolog_candidates_for_job(
         )
 
     if use_real_provider:
-        requested_size = max(1, provider_fetch_size)
+        requested_size = _homolog_provider_request_size(
+            max_sequences=max_sequences,
+            provider_fetch_size=provider_fetch_size,
+        )
         try:
             candidates = fetch_uniprot_homolog_candidates(
                 enzyme_name=enzyme.name,
@@ -480,6 +486,12 @@ def _homolog_candidates_for_job(
         warning="Real UniProt homolog collection disabled; mock homolog candidates used.",
         extra={"search_mode": search_mode},
     )
+
+
+def _homolog_provider_request_size(*, max_sequences: int, provider_fetch_size: int) -> int:
+    # UniProt entry fetches are currently sequential, so keep large UI requests bounded.
+    requested_size = max(max_sequences, provider_fetch_size, 1)
+    return min(requested_size, MAX_HOMOLOG_PROVIDER_REQUEST_SIZE)
 
 
 def _enzyme_module(db: Session, enzyme_id: str):
