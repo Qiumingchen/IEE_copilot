@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
+  formatImportedReference,
   summarizeCuratedEvidencePreview,
   summarizeCuratedEvidenceImport,
   summarizeVisibilityRequest
@@ -50,6 +51,7 @@ test("summarizeCuratedEvidenceImport reports created evidence counts", () => {
     summarizeCuratedEvidenceImport({
       created: { properties: 2, kinetics: 1, mutations: 3 },
       reference_ids: ["ref-1", "ref-2"],
+      references: [],
       warnings: []
     }),
     "Created 2 property, 1 kinetic, 3 mutation records from 2 references."
@@ -93,4 +95,21 @@ test("curatedEvidenceCsvTemplate includes all supported evidence record types", 
   assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("kinetic,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("mutation,"), true);
+});
+
+test("formatImportedReference shows DOI title and source", () => {
+  assert.equal(
+    formatImportedReference({
+      id: "ref-1",
+      title: "Curated MTGase paper",
+      authors: null,
+      journal: "Biocatalysis Reports",
+      year: 2024,
+      doi: "10.1000/curated",
+      pubmed_id: null,
+      source: "curated_literature",
+      provenance: { mode: "curated" }
+    }),
+    "10.1000/curated · Curated MTGase paper · curated_literature"
+  );
 });

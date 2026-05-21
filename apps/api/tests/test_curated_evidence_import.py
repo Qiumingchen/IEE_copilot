@@ -80,6 +80,19 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
 
     assert response.status_code == 201
     assert response.json()["created"] == {"properties": 1, "kinetics": 1, "mutations": 1}
+    assert response.json()["references"] == [
+        {
+            "id": response.json()["reference_ids"][0],
+            "title": "Curated MTGase paper",
+            "authors": None,
+            "journal": "Biocatalysis Reports",
+            "year": 2024,
+            "doi": "10.1000/curated-mtgase",
+            "pubmed_id": None,
+            "source": "curated_literature",
+            "provenance": {"provider": "curated_literature", "mode": "curated"},
+        }
+    ]
 
     reference = db_session.scalar(
         select(LiteratureReference).where(LiteratureReference.doi == "10.1000/curated-mtgase")

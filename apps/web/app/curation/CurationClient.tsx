@@ -18,6 +18,7 @@ import type {
 import {
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
+  formatImportedReference,
   summarizeCuratedEvidenceImport,
   summarizeCuratedEvidencePreview,
   summarizeVisibilityRequest
@@ -254,6 +255,23 @@ export default function CurationClient() {
                 {warning}
               </p>
             ))}
+          </div>
+        ) : null}
+
+        {importResult ? (
+          <div className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-3">
+            <h3 className="text-sm font-semibold text-emerald-900">Imported references</h3>
+            {importResult.references.length ? (
+              <ul className="mt-2 grid gap-2 text-sm text-emerald-900">
+                {importResult.references.map((reference) => (
+                  <li className="break-words" key={reference.id}>
+                    {formatImportedReference(reference)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-emerald-900">No literature references were attached.</p>
+            )}
           </div>
         ) : null}
 

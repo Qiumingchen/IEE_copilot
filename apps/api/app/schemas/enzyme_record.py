@@ -130,12 +130,6 @@ class CuratedEvidencePreviewResponse(BaseModel):
     valid: bool = True
 
 
-class CuratedEvidenceImportResponse(BaseModel):
-    created: dict[str, int]
-    reference_ids: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-
 class LiteratureReferenceResponse(BaseModel):
     id: str
     title: str
@@ -146,6 +140,13 @@ class LiteratureReferenceResponse(BaseModel):
     pubmed_id: str | None = None
     source: str
     provenance: dict[str, Any] | None = None
+
+
+class CuratedEvidenceImportResponse(BaseModel):
+    created: dict[str, int]
+    reference_ids: list[str] = Field(default_factory=list)
+    references: list[LiteratureReferenceResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class PropertyRankingItemResponse(BaseModel):

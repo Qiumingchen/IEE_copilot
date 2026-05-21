@@ -301,6 +301,7 @@ export type ExperimentImportResult = {
 export type CuratedEvidenceImportResponse = {
   created: Record<string, number>;
   reference_ids: string[];
+  references: LiteratureReferenceRecord[];
   warnings: string[];
 };
 

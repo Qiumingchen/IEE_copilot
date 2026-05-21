@@ -1122,9 +1122,17 @@ def import_curated_evidence_records(
             detail=str(exc),
         ) from exc
     db.commit()
+    references = list(
+        db.scalars(
+            select(LiteratureReference)
+            .where(LiteratureReference.id.in_(result.reference_ids))
+            .order_by(LiteratureReference.year.desc().nullslast(), LiteratureReference.created_at)
+        )
+    )
     return CuratedEvidenceImportResponse(
         created=result.created,
         reference_ids=result.reference_ids,
+        references=[_literature_reference_response(reference) for reference in references],
         warnings=result.warnings,
     )
 

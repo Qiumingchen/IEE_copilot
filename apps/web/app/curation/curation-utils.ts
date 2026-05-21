@@ -1,6 +1,7 @@
 import type {
   CuratedEvidenceImportResponse,
   CuratedEvidencePreviewResponse,
+  LiteratureReferenceRecord,
   VisibilityRequestDetailRecord
 } from "../../lib/types";
 
@@ -27,6 +28,12 @@ export function summarizeCuratedEvidenceImport(result: CuratedEvidenceImportResp
   const kineticCount = result.created.kinetics ?? 0;
   const mutationCount = result.created.mutations ?? 0;
   return `Created ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records from ${result.reference_ids.length} references.`;
+}
+
+export function formatImportedReference(reference: LiteratureReferenceRecord): string {
+  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
+  const label = [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
+  return `${label} · ${reference.source}`;
 }
 
 export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewResponse): string {
