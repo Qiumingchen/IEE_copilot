@@ -16,6 +16,7 @@ import type {
   AnalysisJobType
 } from "../../../../lib/types";
 import {
+  buildConservationJobParameters,
   buildHomologCsv,
   buildHomologFasta,
   buildMsaJobParameters,
@@ -29,6 +30,7 @@ import {
   getHomologArtifactOptions,
   getHomologDiagnostics,
   getHomologSequences,
+  getMsaArtifactOptions,
   getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
@@ -38,6 +40,7 @@ import {
 import type {
   ConservationCategoryFilter,
   ConservationSiteView,
+  ConservationInputMode,
   ArtifactRunnerLabel,
   HomologDiagnosticsView,
   HomologSequenceView,
@@ -115,6 +118,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [msaInputMode, setMsaInputMode] = useState<MsaInputMode>("latest");
   const [selectedHomologArtifactId, setSelectedHomologArtifactId] = useState("");
   const [customMsaFasta, setCustomMsaFasta] = useState("");
+  const [conservationInputMode, setConservationInputMode] = useState<ConservationInputMode>("latest");
+  const [selectedMsaArtifactId, setSelectedMsaArtifactId] = useState("");
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
@@ -394,6 +399,13 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
         customMsaFasta
       );
     }
+    if (jobType === "conservation_profile") {
+      const fallbackArtifactId = msaArtifactOptions[msaArtifactOptions.length - 1]?.id ?? "";
+      return buildConservationJobParameters(
+        conservationInputMode,
+        selectedMsaArtifactId || fallbackArtifactId
+      );
+    }
     return undefined;
   }
 
@@ -467,6 +479,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
   const homologDiagnostics = latestHomologContent ? getHomologDiagnostics(latestHomologContent) : null;
   const homologArtifactOptions = getHomologArtifactOptions(artifacts);
+  const msaArtifactOptions = getMsaArtifactOptions(artifacts);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -512,6 +525,10 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               (msaInputMode === "artifact" && homologArtifactOptions.length === 0) ||
               (msaInputMode === "custom_fasta" && customMsaFasta.trim().length === 0)
             );
+          const isConservationBlocked =
+            item.jobType === "conservation_profile" &&
+            conservationInputMode === "artifact" &&
+            msaArtifactOptions.length === 0;
           return (
             <article className="rounded-md border border-slate-200 bg-white p-4" key={item.artifactType}>
               <div className="flex items-start justify-between gap-3">
@@ -613,9 +630,45 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                   ) : null}
                 </div>
               ) : null}
+              {item.jobType === "conservation_profile" ? (
+                <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Input source
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => setConservationInputMode(event.target.value as ConservationInputMode)}
+                      value={conservationInputMode}
+                    >
+                      <option value="latest">Latest MSA</option>
+                      <option value="artifact">Previous MSA run</option>
+                    </select>
+                  </label>
+                  {conservationInputMode === "artifact" ? (
+                    <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                      MSA run
+                      <select
+                        className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                        disabled={msaArtifactOptions.length === 0}
+                        onChange={(event) => setSelectedMsaArtifactId(event.target.value)}
+                        value={selectedMsaArtifactId || msaArtifactOptions[msaArtifactOptions.length - 1]?.id || ""}
+                      >
+                        {msaArtifactOptions.length === 0 ? (
+                          <option value="">No MSA runs</option>
+                        ) : (
+                          msaArtifactOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 className="mt-4 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-                disabled={!token || Boolean(runningJobType) || isMsaBlocked}
+                disabled={!token || Boolean(runningJobType) || isMsaBlocked || isConservationBlocked}
                 onClick={() => void runAnalysis(item.jobType)}
                 type="button"
               >

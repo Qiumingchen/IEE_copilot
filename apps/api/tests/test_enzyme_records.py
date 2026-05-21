@@ -784,6 +784,88 @@ def test_create_conservation_job_uses_latest_msa_artifact(client, db_session, mo
     ]
 
 
+def test_create_conservation_job_uses_selected_msa_artifact(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="selected-conservation-msa-sequence",
+        )
+    )
+    older_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="msa",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "msa_fasta": ">query\nACDEFGHIKL\n>OLDER\nACDEFGHIVL\n",
+        },
+    )
+    newer_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="msa",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "msa_fasta": ">query\nACDEFGHIKL\n>NEWER\nACDEYGHIKL\n",
+        },
+    )
+    db_session.add_all([older_job, newer_job])
+    db_session.flush()
+    older_artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=older_job.id,
+        artifact_type="msa",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{older_job.id}/msa.fasta",
+        content_type="text/x-fasta",
+        size_bytes=64,
+    )
+    db_session.add(older_artifact)
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=newer_job.id,
+            artifact_type="msa",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{newer_job.id}/msa.fasta",
+            content_type="text/x-fasta",
+            size_bytes=64,
+        )
+    )
+    db_session.commit()
+
+    class ConservationTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_conservation_profile",
+        ConservationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "conservation_profile",
+            "parameters_json": {"msa_artifact_id": older_artifact.id},
+        },
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert parameters["aligned_records"] == [
+        {"identifier": "query", "aligned_sequence": "ACDEFGHIKL"},
+        {"identifier": "OLDER", "aligned_sequence": "ACDEFGHIVL"},
+    ]
+    assert parameters["msa_source"]["artifact_id"] == older_artifact.id
+
+
 def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     client,
     db_session,

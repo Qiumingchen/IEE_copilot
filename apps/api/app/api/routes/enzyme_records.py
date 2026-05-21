@@ -252,6 +252,27 @@ def _latest_msa_records_for_conservation(db: Session, enzyme_id: str) -> list[di
     return _parse_msa_fasta(msa_fasta)
 
 
+def _msa_records_from_artifact(db: Session, enzyme_id: str, artifact_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.id == artifact_id,
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type.in_(("msa", "multiple_sequence_alignment")),
+        )
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    msa_fasta = summary.get("msa_fasta")
+    if not isinstance(msa_fasta, str) or not msa_fasta.strip():
+        return []
+    return _parse_msa_fasta(msa_fasta)
+
+
 def _latest_conservation_sites_for_recommendation(db: Session, enzyme_id: str) -> list[dict]:
     row = db.execute(
         select(AnalysisArtifact, AnalysisJob)
@@ -388,7 +409,22 @@ def _analysis_job_parameters(
         if homologs:
             parameters["homologs"] = homologs
     if job_type == "conservation_profile":
-        parameters["aligned_records"] = _latest_msa_records_for_conservation(db, enzyme_id) or [
+        msa_artifact_id = parameters.get("msa_artifact_id")
+        if isinstance(msa_artifact_id, str) and msa_artifact_id.strip():
+            aligned_records = _msa_records_from_artifact(db, enzyme_id, msa_artifact_id)
+            parameters["msa_source"] = {
+                "type": "msa_artifact",
+                "artifact_id": msa_artifact_id,
+                "sequence_count": len(aligned_records),
+            }
+        else:
+            aligned_records = _latest_msa_records_for_conservation(db, enzyme_id)
+            if aligned_records:
+                parameters["msa_source"] = {
+                    "type": "latest_msa_artifact",
+                    "sequence_count": len(aligned_records),
+                }
+        parameters["aligned_records"] = aligned_records or [
             {"identifier": "query", "aligned_sequence": sequence},
         ]
     if job_type == "mutation_recommendation":

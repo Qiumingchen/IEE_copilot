@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildConservationJobParameters,
   buildHomologCsv,
   buildHomologFasta,
   buildMsaJobParameters,
@@ -14,6 +15,7 @@ import {
   getArtifactRunnerLabel,
   getHomologDiagnostics,
   getHomologArtifactOptions,
+  getMsaArtifactOptions,
   getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
@@ -271,6 +273,61 @@ test("builds homolog artifact options for MSA selection", () => {
     {
       id: "artifact-1",
       label: "2026-05-21T10:00:00 | 2 hits | uniprot real"
+    }
+  ]);
+});
+
+test("builds conservation input parameters from selected MSA source", () => {
+  assert.equal(buildConservationJobParameters("latest", "artifact-msa"), undefined);
+  assert.deepEqual(buildConservationJobParameters("artifact", "artifact-msa"), {
+    msa_artifact_id: "artifact-msa"
+  });
+});
+
+test("builds MSA artifact options for conservation selection", () => {
+  const options = getMsaArtifactOptions([
+    {
+      id: "artifact-1",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-1",
+      job_status: "finished",
+      artifact_type: "msa",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-1/msa.fasta",
+      checksum: null,
+      content_type: "text/x-fasta",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T10:00:00",
+      result_summary_json: {
+        sequence_count: 3,
+        alignment_length: 120,
+        runner: { provider: "mafft", mode: "fallback" }
+      }
+    },
+    {
+      id: "artifact-2",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-2",
+      job_status: "finished",
+      artifact_type: "homolog_sequences",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-2/homolog-sequences.json",
+      checksum: null,
+      content_type: "application/json",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T11:00:00",
+      result_summary_json: {}
+    }
+  ]);
+
+  assert.deepEqual(options, [
+    {
+      id: "artifact-1",
+      label: "2026-05-21T10:00:00 | 3 seqs | 120 aa | mafft fallback"
     }
   ]);
 });

@@ -41,7 +41,14 @@ export type MsaRecordView = {
 
 export type MsaInputMode = "latest" | "artifact" | "custom_fasta";
 
+export type ConservationInputMode = "latest" | "artifact";
+
 export type HomologArtifactOption = {
+  id: string;
+  label: string;
+};
+
+export type MsaArtifactOption = {
   id: string;
   label: string;
 };
@@ -161,6 +168,16 @@ export function buildMsaJobParameters(
   return undefined;
 }
 
+export function buildConservationJobParameters(
+  inputMode: ConservationInputMode,
+  msaArtifactId: string
+): Record<string, string> | undefined {
+  if (inputMode === "artifact" && msaArtifactId.trim()) {
+    return { msa_artifact_id: msaArtifactId.trim() };
+  }
+  return undefined;
+}
+
 export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): HomologArtifactOption[] {
   return artifacts
     .filter((artifact) => artifact.artifact_type === "homolog_sequences")
@@ -171,6 +188,21 @@ export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): 
       return {
         id: artifact.id,
         label: `${artifact.created_at} | ${homologCount} hits | ${runner}`
+      };
+    });
+}
+
+export function getMsaArtifactOptions(artifacts: AnalysisArtifactRecord[]): MsaArtifactOption[] {
+  return artifacts
+    .filter((artifact) => artifact.artifact_type === "msa" || artifact.artifact_type === "multiple_sequence_alignment")
+    .map((artifact) => {
+      const summary = artifact.result_summary_json ?? {};
+      const runner = runnerLabelFromUnknown(summary.runner).text;
+      const sequenceCount = typeof summary.sequence_count === "number" ? summary.sequence_count : 0;
+      const alignmentLength = typeof summary.alignment_length === "number" ? summary.alignment_length : 0;
+      return {
+        id: artifact.id,
+        label: `${artifact.created_at} | ${sequenceCount} seqs | ${alignmentLength} aa | ${runner}`
       };
     });
 }
