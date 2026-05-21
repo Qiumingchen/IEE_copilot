@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     skip_db_healthcheck: bool = False
     allow_science_fallbacks: bool = True
     use_real_science_providers: bool = False
+    homolog_provider_fetch_size: int = 25
     mafft_bin: str | None = None
     rosetta_ddg_bin: str | None = None
     rosetta_ddg_command: str | None = None

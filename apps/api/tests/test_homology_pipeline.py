@@ -125,43 +125,71 @@ def test_fetch_uniprot_homolog_candidates_converts_search_hits_to_sequences():
     class FakeUniProtClient:
         source = "uniprot"
 
+        def __init__(self):
+            self.searches = []
+
         def search_by_ec(self, ec_number, size=5):
             assert ec_number == "2.3.2.13"
+            self.searches.append(("ec", ec_number, size))
             return [
                 UniProtSearchHit(
-                    accession="P11111",
-                    protein_name="Candidate transglutaminase",
-                    organism="Streptomyces testensis",
+                    accession="P22222",
+                    protein_name="Broad EC candidate",
+                    organism="Homo sapiens",
                     ec_number=ec_number,
                 )
             ]
 
         def search_by_keyword(self, keyword, size=5):
-            raise AssertionError("EC search should be preferred when EC number is available")
+            assert keyword == "Microbial transglutaminase"
+            self.searches.append(("keyword", keyword, size))
+            return [
+                UniProtSearchHit(
+                    accession="P11111",
+                    protein_name="Candidate transglutaminase",
+                    organism="Streptomyces testensis",
+                    ec_number="2.3.2.13",
+                )
+            ]
 
         def fetch_entry(self, accession):
-            assert accession == "P11111"
+            sequences = {
+                "P11111": "ACDEFGHIVL",
+                "P22222": "VVVVVVVVVV",
+            }
             return UniProtEntry(
                 accession=accession,
-                protein_name="Candidate transglutaminase",
-                organism="Streptomyces testensis",
+                protein_name=f"Candidate {accession}",
+                organism="Streptomyces testensis" if accession == "P11111" else "Homo sapiens",
                 ec_number="2.3.2.13",
-                sequence="ACDEFGHIVL",
+                sequence=sequences[accession],
             )
 
+    fake_client = FakeUniProtClient()
     candidates = fetch_uniprot_homolog_candidates(
         enzyme_name="Microbial transglutaminase",
         ec_number="2.3.2.13",
-        uniprot_client=FakeUniProtClient(),
+        uniprot_client=fake_client,
         size=5,
     )
 
+    assert fake_client.searches == [
+        ("keyword", "Microbial transglutaminase", 5),
+        ("ec", "2.3.2.13", 4),
+    ]
     assert candidates == [
         HomologSequence(
             accession="P11111",
-            name="Candidate transglutaminase",
+            name="Candidate P11111",
             organism="Streptomyces testensis",
             sequence="ACDEFGHIVL",
             source="uniprot",
-        )
+        ),
+        HomologSequence(
+            accession="P22222",
+            name="Candidate P22222",
+            organism="Homo sapiens",
+            sequence="VVVVVVVVVV",
+            source="uniprot",
+        ),
     ]

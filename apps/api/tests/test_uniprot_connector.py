@@ -58,6 +58,16 @@ def test_parse_uniprot_entry_payload_extracts_core_fields():
         },
         "organism": {"scientificName": "Streptomyces mobaraensis"},
         "sequence": {"value": "ACDEFG"},
+        "features": [
+            {
+                "type": "Chain",
+                "description": "Protein-glutamine gamma-glutamyltransferase",
+                "location": {
+                    "start": {"value": 2, "modifier": "EXACT"},
+                    "end": {"value": 5, "modifier": "EXACT"},
+                },
+            }
+        ],
         "uniProtKBCrossReferences": [
             {"database": "AlphaFoldDB", "id": "AF-P81453-F1"},
             {"database": "PDB", "id": "1IU4"},
@@ -71,6 +81,7 @@ def test_parse_uniprot_entry_payload_extracts_core_fields():
     assert entry.organism == "Streptomyces mobaraensis"
     assert entry.ec_number == "2.3.2.13"
     assert entry.sequence == "ACDEFG"
+    assert entry.mature_sequence == "CDEF"
     assert entry.cross_references["AlphaFoldDB"] == "AF-P81453-F1"
     assert entry.cross_references["PDB"] == "1IU4"
 

@@ -63,15 +63,16 @@ def fetch_uniprot_homolog_candidates(
     uniprot_client: UniProtHomologClient,
     size: int,
 ) -> list[HomologSequence]:
-    hits = (
-        uniprot_client.search_by_ec(ec_number, size=size)
-        if ec_number
-        else uniprot_client.search_by_keyword(enzyme_name, size=size)
+    hits = _search_uniprot_homolog_hits(
+        enzyme_name=enzyme_name,
+        ec_number=ec_number,
+        uniprot_client=uniprot_client,
+        size=size,
     )
     candidates: list[HomologSequence] = []
     for hit in hits:
         entry = uniprot_client.fetch_entry(hit.accession)
-        sequence = getattr(entry, "sequence", None)
+        sequence = getattr(entry, "mature_sequence", None) or getattr(entry, "sequence", None)
         if not sequence:
             continue
         candidates.append(
@@ -84,6 +85,35 @@ def fetch_uniprot_homolog_candidates(
             )
         )
     return candidates
+
+
+def _search_uniprot_homolog_hits(
+    *,
+    enzyme_name: str,
+    ec_number: str | None,
+    uniprot_client: UniProtHomologClient,
+    size: int,
+):
+    hits_by_accession = {}
+    keyword = enzyme_name.strip()
+    if keyword:
+        for hit in uniprot_client.search_by_keyword(keyword, size=size):
+            hits_by_accession.setdefault(hit.accession, hit)
+            if len(hits_by_accession) >= size:
+                break
+
+    remaining = size - len(hits_by_accession)
+    if ec_number and remaining > 0:
+        for hit in uniprot_client.search_by_ec(ec_number, size=remaining):
+            hits_by_accession.setdefault(hit.accession, hit)
+            if len(hits_by_accession) >= size:
+                break
+
+    if not hits_by_accession and ec_number:
+        for hit in uniprot_client.search_by_ec(ec_number, size=size):
+            hits_by_accession.setdefault(hit.accession, hit)
+
+    return list(hits_by_accession.values())[:size]
 
 
 def filter_by_identity(

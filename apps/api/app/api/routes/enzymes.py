@@ -26,7 +26,13 @@ from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
 from app.external.enzyme_data import get_enzyme_data_client
 from app.external.literature import create_literature_reference, get_literature_client
 from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
-from app.external.uniprot import UniProtEntry, get_uniprot_client, parse_fasta_sequence
+from app.external.uniprot import (
+    P81453_FULL_SEQUENCE,
+    P81453_MATURE_SEQUENCE,
+    UniProtEntry,
+    get_uniprot_client,
+    parse_fasta_sequence,
+)
 from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
 from app.services.cache import (
     find_fresh_search_cache,
@@ -42,11 +48,6 @@ from worker.jobs import run_placeholder_analysis
 
 
 router = APIRouter(prefix="/enzymes", tags=["enzymes"])
-
-SEED_MTGASE_SEQUENCE = (
-    "AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNGTVVQSPY"
-    "GAGDTVTYNGQTVTTVNAGYTVTVDKNGKTYVTLTDDKNGKTYVSVTGGDAKQAGVYAVTQG"
-)
 
 FAMILY_NAMES = {
     EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE: "Mature microbial transglutaminases",
@@ -90,7 +91,13 @@ def _ensure_family(db: Session, module: EnzymeModule) -> EnzymeFamily:
 def _seed_sequence_for_module(module: EnzymeModule) -> str:
     if module == EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE:
         return "MSTGTSVTPAPATTPAQPGDDVLLVGTGGTYAGALAARLGADAVVVADLPGDPARAARALAEAG"
-    return SEED_MTGASE_SEQUENCE
+    return P81453_FULL_SEQUENCE
+
+
+def _seed_mature_sequence_for_module(module: EnzymeModule) -> str | None:
+    if module == EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE:
+        return P81453_MATURE_SEQUENCE
+    return None
 
 
 def _find_seed_entry(
@@ -120,19 +127,28 @@ def _ensure_protein_sequence(
         select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id)
     )
     if existing_sequence is not None:
+        sequence = _seed_sequence_for_module(module)
+        mature_sequence = _seed_mature_sequence_for_module(module)
+        if (
+            existing_sequence.source == "seed"
+            and module == EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
+            and existing_sequence.mature_sequence != mature_sequence
+        ):
+            existing_sequence.sequence = sequence
+            existing_sequence.mature_sequence = mature_sequence
+            existing_sequence.checksum = hashlib.sha256((mature_sequence or sequence).encode("utf-8")).hexdigest()
         return
 
     sequence = _seed_sequence_for_module(module)
+    mature_sequence = _seed_mature_sequence_for_module(module)
     db.add(
         ProteinSequence(
             enzyme_entry_id=enzyme.id,
             sequence=sequence,
-            mature_sequence=sequence
-            if module == EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
-            else None,
+            mature_sequence=mature_sequence,
             is_engineering_target=True,
             source="seed",
-            checksum=hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+            checksum=hashlib.sha256((mature_sequence or sequence).encode("utf-8")).hexdigest(),
         )
     )
 
@@ -180,14 +196,15 @@ def _create_enzyme_from_uniprot_entry(
     db.flush()
 
     if sequence:
+        mature_sequence = entry.mature_sequence or sequence
         db.add(
             ProteinSequence(
                 enzyme_entry_id=enzyme.id,
                 sequence=sequence,
-                mature_sequence=sequence,
+                mature_sequence=mature_sequence,
                 is_engineering_target=True,
                 source=source or "uniprot",
-                checksum=hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+                checksum=hashlib.sha256(mature_sequence.encode("utf-8")).hexdigest(),
             )
         )
 

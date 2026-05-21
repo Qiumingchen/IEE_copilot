@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.external.uniprot import UniProtEntry, UniProtSearchHit
 from app.db.base import Base
 from app.db.models import (
     AnalysisArtifact,
@@ -12,6 +13,7 @@ from app.db.models import (
     ProteinSequence,
 )
 from worker.jobs import (
+    _homolog_candidates_for_job,
     finish_conservation_profile_job,
     finish_homology_collection_job,
     finish_library_design_job,
@@ -21,6 +23,45 @@ from worker.jobs import (
     finish_rosetta_ddg_job,
     mark_job_failed,
 )
+
+
+class _FakeUniProtClient:
+    def __init__(self):
+        self.searches = []
+
+    def search_by_keyword(self, _keyword: str, size: int = 25):
+        self.searches.append(("keyword", size))
+        return [
+            UniProtSearchHit(
+                accession="REAL_HOMOLOG_1",
+                protein_name="Real homolog 1",
+                organism="Test organism",
+                ec_number="2.3.2.13",
+                score=1.0,
+            )
+        ]
+
+    def search_by_ec(self, _ec_number: str, *, size: int = 25):
+        self.searches.append(("ec", size))
+        return [
+            UniProtSearchHit(
+                accession="REAL_HOMOLOG_1",
+                protein_name="Real homolog 1",
+                organism="Test organism",
+                ec_number="2.3.2.13",
+                score=1.0,
+            )
+        ]
+
+    def fetch_entry(self, _accession: str):
+        return UniProtEntry(
+            accession="REAL_HOMOLOG_1",
+            protein_name="Real homolog 1",
+            organism="Test organism",
+            ec_number="2.3.2.13",
+            sequence="ACDEFGHIVL",
+            cross_references={},
+        )
 
 
 def test_finish_placeholder_job_marks_job_finished_and_creates_artifact():
@@ -111,6 +152,32 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
     assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
     assert artifact.checksum is not None
+
+
+def test_homolog_candidates_for_job_caps_real_provider_fetch_size(monkeypatch):
+    fake_client = _FakeUniProtClient()
+    monkeypatch.setattr("worker.jobs.get_uniprot_client", lambda: fake_client)
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=500,
+        provider_fetch_size=25,
+        use_real_provider=True,
+        allow_fallback=True,
+    )
+
+    assert fake_client.searches == [("keyword", 25), ("ec", 24)]
+    assert candidates[0].accession == "REAL_HOMOLOG_1"
+    assert runner["provider"] == "uniprot"
+    assert runner["mode"] == "real"
+    assert runner["candidate_count"] == 1
+    assert runner["requested_size"] == 25
 
 
 def test_finish_msa_job_creates_msa_artifact_from_target_sequence():

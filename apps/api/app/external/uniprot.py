@@ -6,10 +6,22 @@ from app.core.config import get_settings
 from app.services.provenance import build_real_provenance
 
 
-MOCK_MTGASE_SEQUENCE = (
-    "AEAKLLNDTLLAIGGQDPVKAQVLSVSGGDAKQAGVYAVTQGNGDKVTVEQSNNGTVVQSPY"
-    "GAGDTVTYNGQTVTTVNAGYTVTVDKNGKTYVTLTDDKNGKTYVSVTGGDAKQAGVYAVTQG"
+P81453_FULL_SEQUENCE = (
+    "MRIRRRALVFATMSAVLCTAGFMPSAGEAAADNGAGEETKSYAETYRLTADDVANINALNESAPAASSAGPSFRAP"
+    "DSDDRVTPPAEPLDRMPDPYRPSYGRAETVVNNYIRKWQQVYSHRDGRKQQMTEEQREWLSYGCVGVTWVNSGQYP"
+    "TNRLAFASFDEDRFKNELKNGRPRSGETRAEFEGRVAKESFDEEKGFQRAREVASVMNRALENAHDESAYLDNLKK"
+    "ELANGNDALRNEDARSPFYSALRNTPSFKERNGGNHDPSRMKAVIYSKHFWSGQDRSSSADKRKYGDPDAFRPAP"
+    "GTGLVDMSRDRNIPRSPTSPGEGFVNFDYGWFGAQTEADADKTVWTHGNHYHAPNGSLGAMHVYESKFRNWSEGY"
+    "SDFDRGAYVITFIPKSWNTAPDKVKQGWP"
 )
+P81453_MATURE_SEQUENCE = (
+    "DSDDRVTPPAEPLDRMPDPYRPSYGRAETVVNNYIRKWQQVYSHRDGRKQQMTEEQREWLSYGCVGVTWVNSGQYP"
+    "TNRLAFASFDEDRFKNELKNGRPRSGETRAEFEGRVAKESFDEEKGFQRAREVASVMNRALENAHDESAYLDNLKK"
+    "ELANGNDALRNEDARSPFYSALRNTPSFKERNGGNHDPSRMKAVIYSKHFWSGQDRSSSADKRKYGDPDAFRPAP"
+    "GTGLVDMSRDRNIPRSPTSPGEGFVNFDYGWFGAQTEADADKTVWTHGNHYHAPNGSLGAMHVYESKFRNWSEGY"
+    "SDFDRGAYVITFIPKSWNTAPDKVKQGWP"
+)
+MOCK_MTGASE_SEQUENCE = P81453_MATURE_SEQUENCE
 MOCK_AQGT_SEQUENCE = "MSTGTSVTPAPATTPAQPGDDVLLVGTGGTYAGALAARLGADAVVVADLPGDPARAARALAEAG"
 
 
@@ -29,6 +41,7 @@ class UniProtEntry:
     organism: str | None = None
     ec_number: str | None = None
     sequence: str | None = None
+    mature_sequence: str | None = None
     cross_references: dict[str, str] = field(default_factory=dict)
 
 
@@ -84,19 +97,22 @@ class MockUniProtClient:
         ][:size]
 
     def fetch_entry(self, accession: str) -> UniProtEntry:
-        sequence = MOCK_AQGT_SEQUENCE if "AQGT" in accession.upper() else MOCK_MTGASE_SEQUENCE
+        is_aqgt = "AQGT" in accession.upper()
+        sequence = MOCK_AQGT_SEQUENCE if is_aqgt else P81453_FULL_SEQUENCE
+        mature_sequence = None if is_aqgt else P81453_MATURE_SEQUENCE
         protein_name = (
             "Mock anthraquinone glycosyltransferase"
-            if "AQGT" in accession.upper()
+            if is_aqgt
             else "Mock microbial transglutaminase"
         )
-        ec_number = None if "AQGT" in accession.upper() else "2.3.2.13"
+        ec_number = None if is_aqgt else "2.3.2.13"
         return UniProtEntry(
             accession=accession,
             protein_name=protein_name,
             organism="Streptomyces mobaraensis",
             ec_number=ec_number,
             sequence=sequence,
+            mature_sequence=mature_sequence,
             cross_references=self.fetch_cross_references(accession),
         )
 
@@ -132,14 +148,33 @@ def parse_uniprot_entry_payload(payload: dict) -> UniProtEntry:
         if item.get("database") and item.get("id")
     }
     description = payload.get("proteinDescription") or {}
+    sequence = (payload.get("sequence") or {}).get("value")
     return UniProtEntry(
         accession=str(payload.get("primaryAccession") or ""),
         protein_name=_protein_name(description),
         organism=(payload.get("organism") or {}).get("scientificName"),
         ec_number=_first_ec_number(description),
-        sequence=(payload.get("sequence") or {}).get("value"),
+        sequence=sequence,
+        mature_sequence=_mature_sequence_from_features(sequence, payload.get("features") or []),
         cross_references=cross_references,
     )
+
+
+def _mature_sequence_from_features(sequence: str | None, features: list[dict]) -> str | None:
+    if not sequence:
+        return None
+    for feature in features:
+        if feature.get("type") != "Chain":
+            continue
+        location = feature.get("location") or {}
+        start = (location.get("start") or {}).get("value")
+        end = (location.get("end") or {}).get("value")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if start < 1 or end < start or end > len(sequence):
+            continue
+        return sequence[start - 1 : end]
+    return None
 
 
 def parse_uniprot_search_hits(payload: dict) -> list[UniProtSearchHit]:

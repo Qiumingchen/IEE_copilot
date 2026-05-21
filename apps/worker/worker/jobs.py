@@ -91,6 +91,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         enzyme,
         query_sequence=query_sequence,
         max_sequences=parameters.max_sequences,
+        provider_fetch_size=settings.homolog_provider_fetch_size,
         use_real_provider=settings.use_real_science_providers,
         allow_fallback=settings.allow_science_fallbacks,
     )
@@ -420,22 +421,31 @@ def _homolog_candidates_for_job(
     *,
     query_sequence: str,
     max_sequences: int,
+    provider_fetch_size: int,
     use_real_provider: bool,
     allow_fallback: bool,
 ) -> tuple[list[HomologSequence], dict]:
     if use_real_provider:
+        requested_size = max(1, min(max_sequences, provider_fetch_size))
         try:
             candidates = fetch_uniprot_homolog_candidates(
                 enzyme_name=enzyme.name,
                 ec_number=enzyme.ec_number,
                 uniprot_client=get_uniprot_client(),
-                size=max_sequences,
+                size=requested_size,
             )
             if candidates:
                 return candidates, build_real_provenance(
                     provider="uniprot",
-                    extra={"candidate_count": len(candidates)},
+                    extra={"candidate_count": len(candidates), "requested_size": requested_size},
                 )
+            if not allow_fallback:
+                raise RuntimeError("UniProt homolog collection returned no candidates")
+            return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
+                provider="uniprot",
+                warning="UniProt homolog collection returned no candidates; mock homolog candidates used.",
+                extra={"requested_size": requested_size},
+            )
         except Exception as exc:
             if not allow_fallback:
                 raise RuntimeError(f"UniProt homolog collection failed: {exc}") from exc
