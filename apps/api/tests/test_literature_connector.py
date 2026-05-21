@@ -1,10 +1,14 @@
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.db.models import LiteratureReference
 from app.external.literature import (
     LiteratureMetadata,
     MockLiteratureClient,
+    RealLiteratureClient,
     create_literature_reference,
+    get_literature_client,
+    parse_crossref_item,
 )
 
 
@@ -67,3 +71,31 @@ def test_create_literature_reference_saves_metadata_and_deduplicates_by_doi(db_s
     assert len(references) == 1
     assert references[0].metadata_json["abstract"] == "Reusable mock abstract"
     assert references[0].metadata_json["query"] == "reusable"
+
+
+def test_parse_crossref_item_extracts_literature_metadata():
+    item = {
+        "title": ["Enzyme engineering by mutation"],
+        "author": [{"given": "Ada", "family": "Lovelace"}, {"given": "Q", "family": "Tester"}],
+        "container-title": ["Biocatalysis Reports"],
+        "published-print": {"date-parts": [[2025, 1, 1]]},
+        "DOI": "10.1000/example",
+        "abstract": "<jats:p>Reports variants.</jats:p>",
+    }
+
+    metadata = parse_crossref_item(item)
+
+    assert metadata.title == "Enzyme engineering by mutation"
+    assert metadata.authors == "Ada Lovelace; Q Tester"
+    assert metadata.journal == "Biocatalysis Reports"
+    assert metadata.year == 2025
+    assert metadata.doi == "10.1000/example"
+    assert metadata.source == "crossref"
+
+
+def test_get_literature_client_returns_real_client_when_enabled(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+
+    assert isinstance(get_literature_client(), RealLiteratureClient)
+    get_settings.cache_clear()
