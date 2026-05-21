@@ -16,6 +16,7 @@ from app.db.models import (
     LigandEntry,
     JobStatus,
     MutationRecord,
+    LiteratureReference,
     PropertyRecord,
     ProteinSequence,
     Project,
@@ -39,6 +40,7 @@ from app.schemas.enzyme_record import (
     ExpressionRecordResponse,
     KineticRecordCreate,
     KineticRecordResponse,
+    LiteratureReferenceResponse,
     LigandResponse,
     MutationRecordResponse,
     PropertyRecordCreate,
@@ -121,6 +123,48 @@ def _get_enzyme(db: Session, enzyme_id: str) -> EnzymeEntry:
 def _require_curator(user: User) -> None:
     if user.role not in {UserRole.CURATOR, UserRole.ADMIN}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="curator role required")
+
+
+def _enzyme_reference_ids(db: Session, enzyme_id: str) -> set[str]:
+    reference_ids: set[str] = set()
+    for model in (PropertyRecord, KineticRecord, MutationRecord, ExpressionRecord):
+        reference_ids.update(
+            reference_id
+            for reference_id in db.scalars(
+                select(model.reference_id).where(
+                    model.enzyme_entry_id == enzyme_id,
+                    model.reference_id.is_not(None),
+                )
+            )
+            if reference_id
+        )
+    reference_ids.update(
+        reference_id
+        for reference_id in db.scalars(
+            select(ExperimentCondition.reference_id).where(
+                ExperimentCondition.enzyme_entry_id == enzyme_id,
+                ExperimentCondition.reference_id.is_not(None),
+            )
+        )
+        if reference_id
+    )
+    return reference_ids
+
+
+def _literature_reference_response(reference: LiteratureReference) -> LiteratureReferenceResponse:
+    metadata = reference.metadata_json or {}
+    provenance = metadata.get("provenance")
+    return LiteratureReferenceResponse(
+        id=reference.id,
+        title=reference.title,
+        authors=reference.authors,
+        journal=reference.journal,
+        year=reference.year,
+        doi=reference.doi,
+        pubmed_id=reference.pubmed_id,
+        source=reference.source,
+        provenance=provenance if isinstance(provenance, dict) else None,
+    )
 
 
 def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
@@ -1005,6 +1049,26 @@ def list_properties(
             .order_by(PropertyRecord.created_at)
         )
     )
+
+
+@router.get("/{enzyme_id}/references", response_model=list[LiteratureReferenceResponse])
+def list_references(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[LiteratureReferenceResponse]:
+    _get_enzyme(db, enzyme_id)
+    reference_ids = _enzyme_reference_ids(db, enzyme_id)
+    if not reference_ids:
+        return []
+    references = list(
+        db.scalars(
+            select(LiteratureReference)
+            .where(LiteratureReference.id.in_(reference_ids))
+            .order_by(LiteratureReference.year.desc().nullslast(), LiteratureReference.created_at)
+        )
+    )
+    return [_literature_reference_response(reference) for reference in references]
 
 
 @router.post(

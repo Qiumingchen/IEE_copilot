@@ -56,6 +56,33 @@ test("formatPropertyEvidence exposes literature evidence and reference", () => {
   );
 });
 
+test("formatPropertyEvidence prefers readable DOI and title when reference metadata is available", () => {
+  assert.equal(
+    formatPropertyEvidence(
+      {
+        reference_id: "ref-1",
+        evidence_text: "Reported at pH 7.0 after 30 min assay.",
+        visibility: "public",
+        curation_status: "approved"
+      },
+      {
+        "ref-1": {
+          id: "ref-1",
+          title: "Thermostability of MTGase",
+          authors: null,
+          journal: "Biocatalysis Reports",
+          year: 2024,
+          doi: "10.1000/mtgase",
+          pubmed_id: null,
+          source: "curated_literature",
+          provenance: { mode: "curated" }
+        }
+      }
+    ),
+    "10.1000/mtgase · Thermostability of MTGase · Reported at pH 7.0 after 30 min assay. · public / approved"
+  );
+});
+
 test("summarizeRankingGroup exposes assay context and item count", () => {
   assert.equal(
     summarizeRankingGroup({

@@ -136,6 +136,18 @@ class CuratedEvidenceImportResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class LiteratureReferenceResponse(BaseModel):
+    id: str
+    title: str
+    authors: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    pubmed_id: str | None = None
+    source: str
+    provenance: dict[str, Any] | None = None
+
+
 class PropertyRankingItemResponse(BaseModel):
     rank: int
     enzyme_entry_id: str

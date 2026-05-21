@@ -105,6 +105,38 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
     assert mutation.assay_condition_summary["evidence"] == "S2P increased half-life"
 
 
+def test_list_enzyme_references_returns_deduplicated_curated_literature(client, db_session):
+    email = "curated-references@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,property_type,value_original,unit_original,substrate,mutation_string,doi,reference_title,journal,year,evidence_text,source",
+            "property,optimal_temperature,58,degC,casein,,10.1000/reference-list,Reference List Paper,Biocatalysis Reports,2024,Optimum temperature reported,curated_literature",
+            "mutation,,,,casein,S2P,10.1000/reference-list,Reference List Paper,Biocatalysis Reports,2024,S2P increased half-life,curated_literature",
+        ]
+    )
+    import_response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+    assert import_response.status_code == 201
+
+    response = client.get(f"/enzymes/{seeded_enzyme.id}/references", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["doi"] == "10.1000/reference-list"
+    assert body[0]["title"] == "Reference List Paper"
+    assert body[0]["journal"] == "Biocatalysis Reports"
+    assert body[0]["year"] == 2024
+    assert body[0]["source"] == "curated_literature"
+    assert body[0]["provenance"]["mode"] == "curated"
+
+
 def test_curator_can_preview_curated_evidence_without_writing_records(client, db_session):
     email = "curated-preview@example.com"
     headers = _auth_headers(client, email)

@@ -226,6 +226,18 @@ export type KineticRecord = {
   curation_status: string;
 };
 
+export type LiteratureReferenceRecord = {
+  id: string;
+  title: string;
+  authors: string | null;
+  journal: string | null;
+  year: number | null;
+  doi: string | null;
+  pubmed_id: string | null;
+  source: string;
+  provenance: Record<string, unknown> | null;
+};
+
 export type ExperimentCondition = {
   id: string;
   enzyme_entry_id: string | null;

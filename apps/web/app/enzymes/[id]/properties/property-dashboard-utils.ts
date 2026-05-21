@@ -1,4 +1,5 @@
 import type {
+  LiteratureReferenceRecord,
   PropertyRankingGroupRecord,
   PropertyRankingItemRecord,
   PropertyRecord
@@ -75,13 +76,20 @@ export function formatAssayContext(item: PropertyRankingItemRecord): string {
 }
 
 export function formatPropertyEvidence(
-  record: Pick<PropertyRecord, "reference_id" | "evidence_text" | "visibility" | "curation_status">
+  record: Pick<PropertyRecord, "reference_id" | "evidence_text" | "visibility" | "curation_status">,
+  referencesById: Record<string, LiteratureReferenceRecord> = {}
 ): string {
+  const reference = record.reference_id ? referencesById[record.reference_id] : null;
   const parts = [
-    record.reference_id,
+    reference ? formatReferenceLabel(reference) : record.reference_id,
     record.evidence_text,
     `${record.visibility} / ${record.curation_status}`
   ];
 
   return parts.filter(Boolean).join(" · ") || "-";
+}
+
+export function formatReferenceLabel(reference: LiteratureReferenceRecord): string {
+  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
+  return [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
 }

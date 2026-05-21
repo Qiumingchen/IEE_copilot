@@ -6,10 +6,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   getEnzymeRecordBundle,
-  getPropertyRanking
+  getPropertyRanking,
+  listEnzymeReferences
 } from "../../../../lib/api";
 import type {
   EnzymeRecordBundle,
+  LiteratureReferenceRecord,
   PropertyRankingMode,
   PropertyRankingResponse
 } from "../../../../lib/types";
@@ -17,6 +19,7 @@ import {
   buildPropertyOptions,
   formatAssayContext,
   formatPropertyEvidence,
+  formatReferenceLabel,
   formatRankingValue,
   summarizeRankingGroup
 } from "./property-dashboard-utils";
@@ -39,6 +42,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [bundle, setBundle] = useState<EnzymeRecordBundle | null>(null);
+  const [referencesById, setReferencesById] = useState<Record<string, LiteratureReferenceRecord>>({});
   const [selectedPropertyType, setSelectedPropertyType] = useState("optimal_temperature");
   const [rankingMode, setRankingMode] = useState<PropertyRankingMode>("reported_value");
   const [ranking, setRanking] = useState<PropertyRankingResponse | null>(null);
@@ -72,8 +76,12 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     setError(null);
     setIsLoadingBundle(true);
     try {
-      const nextBundle = await getEnzymeRecordBundle(enzymeId, nextToken);
+      const [nextBundle, references] = await Promise.all([
+        getEnzymeRecordBundle(enzymeId, nextToken),
+        listEnzymeReferences(enzymeId, nextToken)
+      ]);
       setBundle(nextBundle);
+      setReferencesById(Object.fromEntries(references.map((reference) => [reference.id, reference])));
       if (nextBundle.properties.length > 0) {
         setSelectedPropertyType(nextBundle.properties[0].property_type);
       }
@@ -251,7 +259,9 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         .filter(Boolean)
                         .join(" · ") || "-"}
                     </td>
-                    <td className="min-w-72 px-4 py-3 text-slate-600">{formatPropertyEvidence(record)}</td>
+                    <td className="min-w-72 px-4 py-3 text-slate-600">
+                      {formatPropertyEvidence(record, referencesById)}
+                    </td>
                   </tr>
                 ))}
                 {currentPropertyRecords.length === 0 ? (
@@ -290,7 +300,11 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         .filter(Boolean)
                         .join(" · ") || "-"}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{record.reference_id ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {record.reference_id && referencesById[record.reference_id]
+                        ? `${formatReferenceLabel(referencesById[record.reference_id])} · ${referencesById[record.reference_id].source}`
+                        : record.reference_id ?? "-"}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {record.visibility} / {record.curation_status}
                     </td>

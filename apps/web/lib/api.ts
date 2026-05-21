@@ -12,6 +12,7 @@ import type {
   ExperimentImportResult,
   JobResponse,
   KineticRecord,
+  LiteratureReferenceRecord,
   MutationQueryFilters,
   MutationRecord,
   PropertyRankingMode,
@@ -231,6 +232,13 @@ export async function getPropertyRanking(
     `/enzymes/${enzymeId}/property-rankings?${params.toString()}`,
     token
   );
+}
+
+export async function listEnzymeReferences(
+  enzymeId: string,
+  token: string
+): Promise<LiteratureReferenceRecord[]> {
+  return fetchWithToken<LiteratureReferenceRecord[]>(`/enzymes/${enzymeId}/references`, token);
 }
 
 export async function listMutationRecords(
