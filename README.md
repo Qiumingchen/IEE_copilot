@@ -65,6 +65,7 @@ tool installs.
 - `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, and literature adapters.
 - `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
 - `HOMOLOG_PROVIDER_FETCH_SIZE=25` limits the upstream UniProt candidate pool before local identity and coverage filtering.
+- `SEQUENCE_SIMILARITY_FASTA_PATH="/path/to/homologs.fasta"` configures the `sequence_similarity` homolog runner to scan a local FASTA sequence database.
 - `MAFFT_BIN="mafft --auto -"` configures the MAFFT runner.
 - `ROSETTA_DDG_COMMAND="python /path/to/rosetta_ddg_wrapper.py"` configures the Rosetta ddG runner boundary.
 - `ROSETTA_DDG_BIN="/path/to/rosetta_ddg"` can be used when a direct executable is enough.
@@ -83,10 +84,11 @@ Homolog collection currently supports two user-facing modes:
   name first, then EC number, fetches up to `HOMOLOG_PROVIDER_FETCH_SIZE`
   upstream candidates, and filters them locally by identity, coverage, and the
   requested maximum homolog count.
-- `sequence_similarity`: a production placeholder for BLAST/MMseqs2-style
-  sequence search. Until a local or remote sequence-search runner is
-  configured, results are explicitly marked as fallback rather than real BLAST
-  or MMseqs2 output.
+- `sequence_similarity`: scans `SEQUENCE_SIMILARITY_FASTA_PATH` when configured,
+  ranks FASTA records by local sequence identity and coverage, then applies the
+  same identity, coverage, deduplication, and maximum homolog filters as the
+  metadata path. If no FASTA database is configured, results are explicitly
+  marked as fallback rather than real BLAST or MMseqs2 output.
 
 ## Development Checks
 

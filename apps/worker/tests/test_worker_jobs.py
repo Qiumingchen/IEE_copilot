@@ -237,6 +237,46 @@ def test_homolog_candidate_pool_is_independent_from_final_max_sequences(monkeypa
     assert fake_client.searches == [("keyword", 25), ("ec", 24)]
 
 
+def test_sequence_similarity_homolog_mode_uses_local_fasta_runner(tmp_path):
+    fasta_path = tmp_path / "homologs.fasta"
+    fasta_path.write_text(
+        "\n".join(
+            [
+                ">EXACT exact match [Synthetic construct]",
+                "ACDEFGHIKL",
+                ">NEAR near homolog OS=Streptomyces testensis",
+                "ACDEFGHIVL",
+                ">DISTANT distant protein",
+                "VVVVVVVVVV",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=25,
+        provider_fetch_size=25,
+        search_mode="sequence_similarity",
+        use_real_provider=True,
+        allow_fallback=False,
+        sequence_similarity_fasta_path=str(fasta_path),
+    )
+
+    assert [candidate.accession for candidate in candidates[:2]] == ["EXACT", "NEAR"]
+    assert candidates[1].organism == "Streptomyces testensis"
+    assert runner["provider"] == "local_fasta_similarity"
+    assert runner["mode"] == "real"
+    assert runner["search_mode"] == "sequence_similarity"
+    assert runner["candidate_count"] == 3
+
+
 def test_sequence_similarity_homolog_mode_reports_unavailable_runner():
     enzyme = EnzymeEntry(
         name="Test transglutaminase",
@@ -252,6 +292,7 @@ def test_sequence_similarity_homolog_mode_reports_unavailable_runner():
         search_mode="sequence_similarity",
         use_real_provider=True,
         allow_fallback=True,
+        sequence_similarity_fasta_path=None,
     )
 
     assert candidates[0].accession == "MOCK_EXACT"

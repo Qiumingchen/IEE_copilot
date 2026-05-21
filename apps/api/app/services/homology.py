@@ -1,6 +1,7 @@
 from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Protocol
 
 from app.services.similarity_matching import calculate_ungapped_similarity
@@ -119,6 +120,17 @@ def fetch_uniprot_homolog_candidates(
     return candidates
 
 
+def fetch_local_fasta_similarity_candidates(
+    *,
+    query_sequence: str,
+    fasta_path: str,
+    size: int,
+) -> list[HomologSequence]:
+    candidates = list(_parse_homolog_fasta(Path(fasta_path)))
+    scored = [_score_homolog(query_sequence, candidate) for candidate in candidates]
+    return sorted(scored, key=_sort_key, reverse=True)[:size]
+
+
 def _fetch_uniprot_entries_in_hit_order(
     hits,
     *,
@@ -129,6 +141,58 @@ def _fetch_uniprot_entries_in_hit_order(
     max_workers = min(MAX_UNIPROT_ENTRY_FETCH_WORKERS, len(hits))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(lambda hit: uniprot_client.fetch_entry(hit.accession), hits))
+
+
+def _parse_homolog_fasta(path: Path) -> Iterable[HomologSequence]:
+    accession: str | None = None
+    name = ""
+    organism: str | None = None
+    sequence_lines: list[str] = []
+
+    def flush_record() -> HomologSequence | None:
+        if not accession or not sequence_lines:
+            return None
+        return HomologSequence(
+            accession=accession,
+            name=name or accession,
+            organism=organism,
+            sequence="".join(sequence_lines),
+            source="local_fasta_similarity",
+        )
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(">"):
+            record = flush_record()
+            if record is not None:
+                yield record
+            accession, name, organism = _parse_fasta_header(stripped[1:].strip())
+            sequence_lines = []
+            continue
+        if accession:
+            sequence_lines.append(stripped)
+
+    record = flush_record()
+    if record is not None:
+        yield record
+
+
+def _parse_fasta_header(header: str) -> tuple[str | None, str, str | None]:
+    if not header:
+        return None, "", None
+    parts = header.split(maxsplit=1)
+    accession = parts[0]
+    description = parts[1] if len(parts) > 1 else accession
+    organism = None
+    if " OS=" in f" {description}":
+        description, organism_part = description.split(" OS=", maxsplit=1)
+        organism = organism_part.split(" OX=", maxsplit=1)[0].strip() or None
+    elif description.endswith("]") and "[" in description:
+        description, bracket_organism = description.rsplit("[", maxsplit=1)
+        organism = bracket_organism[:-1].strip() or None
+    return accession, description.strip() or accession, organism
 
 
 def _search_uniprot_homolog_hits(

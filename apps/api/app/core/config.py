@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     allow_science_fallbacks: bool = True
     use_real_science_providers: bool = False
     homolog_provider_fetch_size: int = 25
+    sequence_similarity_fasta_path: str | None = None
     mafft_bin: str | None = None
     rosetta_ddg_bin: str | None = None
     rosetta_ddg_command: str | None = None
