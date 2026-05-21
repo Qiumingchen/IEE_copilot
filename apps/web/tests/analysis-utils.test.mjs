@@ -8,6 +8,7 @@ import {
   filterConservationSites,
   getConservationSites,
   getArtifactRunnerLabel,
+  getHomologDiagnostics,
   getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
@@ -63,6 +64,44 @@ test("builds conservation download json with artifact metadata and sites", () =>
   assert.equal(payload.object_key, "analysis-jobs/job-1/conservation-profile.json");
   assert.equal(payload.sites.length, 2);
   assert.equal(payload.sites[1].conservation_category, "moderately_conserved");
+});
+
+test("formats homolog filter diagnostics from artifact content", () => {
+  const diagnostics = getHomologDiagnostics({
+    artifact_id: "artifact-homologs",
+    artifact_type: "homolog_sequences",
+    content_type: "application/json",
+    object_key: "analysis-jobs/job-homologs/homolog-sequences.json",
+    content_text: null,
+    content_json: {
+      diagnostics: {
+        candidate_count: 25,
+        scored_count: 25,
+        passed_identity_count: 6,
+        filtered_identity_count: 19,
+        passed_coverage_count: 2,
+        filtered_coverage_count: 4,
+        deduplicated_count: 2,
+        duplicate_count: 0,
+        returned_count: 2,
+        max_sequences: 25
+      }
+    }
+  });
+
+  assert.deepEqual(diagnostics, {
+    candidate_count: 25,
+    scored_count: 25,
+    passed_identity_count: 6,
+    filtered_identity_count: 19,
+    passed_coverage_count: 2,
+    filtered_coverage_count: 4,
+    deduplicated_count: 2,
+    duplicate_count: 0,
+    returned_count: 2,
+    max_sequences: 25,
+    summary: "Fetched 25 candidates -> scored 25 -> identity pass 6 -> coverage pass 2 -> returned 2"
+  });
 });
 
 test("extracts mutation recommendation candidates from artifact content", () => {

@@ -2,6 +2,7 @@ from app.services.homology import (
     HomologSearchParameters,
     HomologSequence,
     collect_homologs,
+    collect_homologs_with_diagnostics,
     deduplicate_sequences,
     fetch_uniprot_homolog_candidates,
     filter_by_coverage,
@@ -51,6 +52,32 @@ def test_collect_homologs_filters_candidates_with_default_thresholds():
     assert [homolog.accession for homolog in homologs] == ["HIT_KEEP"]
     assert homologs[0].identity == 0.9
     assert homologs[0].coverage == 1.0
+
+
+def test_collect_homologs_with_diagnostics_counts_filter_stages():
+    candidates = [
+        HomologSequence("TOO_CLOSE", "Too close", None, "ACDEFGHIKL", "test"),
+        HomologSequence("KEEP", "Keep", None, "ACDEFGHIVL", "test"),
+        HomologSequence("LOW_ID", "Low identity", None, "VVVVVVVVVV", "test"),
+        HomologSequence("LOW_COV", "Low coverage", None, "ACDEV", "test"),
+        HomologSequence("KEEP_DUP", "Duplicate keep", None, "ACDEFGHIVL", "test"),
+    ]
+
+    homologs, diagnostics = collect_homologs_with_diagnostics(QUERY_SEQUENCE, candidates)
+
+    assert [homolog.accession for homolog in homologs] == ["KEEP_DUP"]
+    assert diagnostics == {
+        "candidate_count": 5,
+        "scored_count": 5,
+        "passed_identity_count": 3,
+        "filtered_identity_count": 2,
+        "passed_coverage_count": 2,
+        "filtered_coverage_count": 1,
+        "deduplicated_count": 1,
+        "duplicate_count": 1,
+        "returned_count": 1,
+        "max_sequences": 25,
+    }
 
 
 def test_filter_by_identity_uses_inclusive_min_and_max_percentages():

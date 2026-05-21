@@ -13,7 +13,7 @@ from app.services.conservation import calculate_conservation_profile
 from app.services.homology import (
     HomologSearchParameters,
     HomologSequence,
-    collect_homologs,
+    collect_homologs_with_diagnostics,
     fetch_uniprot_homolog_candidates,
 )
 from app.services.library_design import design_mutation_library
@@ -96,7 +96,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         use_real_provider=settings.use_real_science_providers,
         allow_fallback=settings.allow_science_fallbacks,
     )
-    homologs = collect_homologs(
+    homologs, diagnostics = collect_homologs_with_diagnostics(
         query_sequence,
         candidates,
         parameters=parameters,
@@ -123,6 +123,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
             for homolog in homologs
         ],
         "runner": runner,
+        "diagnostics": diagnostics,
     }
     payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
 
@@ -148,6 +149,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         "artifact_type": "homolog_sequences",
         "homologs": payload["homologs"],
         "runner": runner,
+        "diagnostics": diagnostics,
     }
     db.commit()
     db.refresh(job)
@@ -438,7 +440,7 @@ def _homolog_candidates_for_job(
         )
 
     if use_real_provider:
-        requested_size = max(1, min(max_sequences, provider_fetch_size))
+        requested_size = max(1, provider_fetch_size)
         try:
             candidates = fetch_uniprot_homolog_candidates(
                 enzyme_name=enzyme.name,

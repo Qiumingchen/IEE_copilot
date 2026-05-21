@@ -55,6 +55,124 @@ def test_seed_mtgase_sequence_repair_updates_old_mock_mature_sequence(db_session
     assert sequence.checksum != "old-mock-checksum"
 
 
+def test_mock_mtgase_sequence_repair_updates_old_uniprot_mock_entry(db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Mock microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        uniprot_id="MOCKMTG1",
+        source="uniprot_mock",
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLNDTLLAIGGQ",
+            mature_sequence="AEAKLLNDTLLAIGGQ",
+            source="uniprot_mock",
+            checksum="old-uniprot-mock-checksum",
+        )
+    )
+    db_session.commit()
+
+    _ensure_protein_sequence(db_session, enzyme, EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE)
+
+    sequence = db_session.scalar(select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id))
+    assert sequence.sequence == P81453_FULL_SEQUENCE
+    assert sequence.mature_sequence == P81453_MATURE_SEQUENCE
+    assert sequence.checksum != "old-uniprot-mock-checksum"
+
+
+def test_cached_mock_mtgase_search_repairs_old_uniprot_mock_sequence(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "cached-mock-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Cached Mock Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "cached-mock-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Mock microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        uniprot_id="MOCKMTG1",
+        source="uniprot_mock",
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLNDTLLAIGGQ",
+            mature_sequence="AEAKLLNDTLLAIGGQ",
+            source="uniprot_mock",
+            checksum="old-cached-mock-checksum",
+        )
+    )
+    db_session.add(
+        SearchCacheRecord(
+            query="transglutaminase",
+            normalized_query="transglutaminase",
+            query_kind="keyword",
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            enzyme_entry_id=enzyme.id,
+            payload_json={},
+            source="uniprot_mock",
+            last_refreshed_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cache_status"] == "hit"
+    sequence = db_session.scalar(select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id))
+    assert sequence.sequence == P81453_FULL_SEQUENCE
+    assert sequence.mature_sequence == P81453_MATURE_SEQUENCE
+    assert sequence.source == "seed"
+
+
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
     enqueued_job_ids = []
 

@@ -139,6 +139,18 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
     assert job.result_summary_json["message"] == "homolog collection completed"
     assert job.result_summary_json["homolog_count"] == 2
     assert job.result_summary_json["artifact_type"] == "homolog_sequences"
+    assert job.result_summary_json["diagnostics"] == {
+        "candidate_count": 5,
+        "scored_count": 5,
+        "passed_identity_count": 2,
+        "filtered_identity_count": 3,
+        "passed_coverage_count": 2,
+        "filtered_coverage_count": 0,
+        "deduplicated_count": 2,
+        "duplicate_count": 0,
+        "returned_count": 2,
+        "max_sequences": 25,
+    }
     assert job.result_summary_json["runner"]["provider"] == "uniprot"
     assert job.result_summary_json["runner"]["mode"] == "fallback"
     assert [homolog["accession"] for homolog in job.result_summary_json["homologs"]] == [
@@ -179,6 +191,28 @@ def test_homolog_candidates_for_job_caps_real_provider_fetch_size(monkeypatch):
     assert runner["mode"] == "real"
     assert runner["candidate_count"] == 1
     assert runner["requested_size"] == 25
+
+
+def test_homolog_candidate_pool_is_independent_from_final_max_sequences(monkeypatch):
+    fake_client = _FakeUniProtClient()
+    monkeypatch.setattr("worker.jobs.get_uniprot_client", lambda: fake_client)
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=10,
+        provider_fetch_size=25,
+        search_mode="metadata_search",
+        use_real_provider=True,
+        allow_fallback=True,
+    )
+
+    assert fake_client.searches == [("keyword", 25), ("ec", 24)]
 
 
 def test_sequence_similarity_homolog_mode_reports_unavailable_runner():

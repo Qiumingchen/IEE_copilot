@@ -40,21 +40,46 @@ def collect_homologs(
     candidates: Iterable[HomologSequence],
     parameters: HomologSearchParameters | None = None,
 ) -> list[HomologSequence]:
-    params = parameters or HomologSearchParameters()
-    scored = [_score_homolog(query_sequence, candidate) for candidate in candidates]
-    return limit_max_sequences(
-        deduplicate_sequences(
-            filter_by_coverage(
-                filter_by_identity(
-                    scored,
-                    identity_min=params.identity_min,
-                    identity_max=params.identity_max,
-                ),
-                coverage_min=params.coverage_min,
-            )
-        ),
-        max_sequences=params.max_sequences,
+    homologs, _diagnostics = collect_homologs_with_diagnostics(
+        query_sequence,
+        candidates,
+        parameters=parameters,
     )
+    return homologs
+
+
+def collect_homologs_with_diagnostics(
+    query_sequence: str,
+    candidates: Iterable[HomologSequence],
+    parameters: HomologSearchParameters | None = None,
+) -> tuple[list[HomologSequence], dict[str, int]]:
+    params = parameters or HomologSearchParameters()
+    candidate_list = list(candidates)
+    scored = [_score_homolog(query_sequence, candidate) for candidate in candidate_list]
+    identity_filtered = filter_by_identity(
+        scored,
+        identity_min=params.identity_min,
+        identity_max=params.identity_max,
+    )
+    coverage_filtered = filter_by_coverage(
+        identity_filtered,
+        coverage_min=params.coverage_min,
+    )
+    deduplicated = deduplicate_sequences(coverage_filtered)
+    homologs = limit_max_sequences(deduplicated, max_sequences=params.max_sequences)
+    diagnostics = {
+        "candidate_count": len(candidate_list),
+        "scored_count": len(scored),
+        "passed_identity_count": len(identity_filtered),
+        "filtered_identity_count": len(scored) - len(identity_filtered),
+        "passed_coverage_count": len(coverage_filtered),
+        "filtered_coverage_count": len(identity_filtered) - len(coverage_filtered),
+        "deduplicated_count": len(deduplicated),
+        "duplicate_count": len(coverage_filtered) - len(deduplicated),
+        "returned_count": len(homologs),
+        "max_sequences": params.max_sequences,
+    }
+    return homologs, diagnostics
 
 
 def fetch_uniprot_homolog_candidates(

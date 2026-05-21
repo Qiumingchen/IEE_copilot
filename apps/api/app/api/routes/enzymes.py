@@ -130,12 +130,14 @@ def _ensure_protein_sequence(
         sequence = _seed_sequence_for_module(module)
         mature_sequence = _seed_mature_sequence_for_module(module)
         if (
-            existing_sequence.source == "seed"
+            _should_repair_mtgase_seed_sequence(enzyme, existing_sequence, module)
             and module == EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
             and existing_sequence.mature_sequence != mature_sequence
         ):
             existing_sequence.sequence = sequence
             existing_sequence.mature_sequence = mature_sequence
+            existing_sequence.is_engineering_target = True
+            existing_sequence.source = "seed"
             existing_sequence.checksum = hashlib.sha256((mature_sequence or sequence).encode("utf-8")).hexdigest()
         return
 
@@ -151,6 +153,18 @@ def _ensure_protein_sequence(
             checksum=hashlib.sha256((mature_sequence or sequence).encode("utf-8")).hexdigest(),
         )
     )
+
+
+def _should_repair_mtgase_seed_sequence(
+    enzyme: EnzymeEntry,
+    protein_sequence: ProteinSequence,
+    module: EnzymeModule,
+) -> bool:
+    if module != EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE:
+        return False
+    if protein_sequence.source == "seed":
+        return True
+    return bool(enzyme.uniprot_id and enzyme.uniprot_id.upper().startswith("MOCK"))
 
 
 def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | None, str | None]:

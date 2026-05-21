@@ -409,6 +409,7 @@ def _artifact_content_from_summary(
         content_json = {
             "homolog_count": summary.get("homolog_count"),
             "homologs": summary.get("homologs", []),
+            "diagnostics": summary.get("diagnostics"),
         }
     elif artifact.artifact_type == "mutation_recommendations":
         content_json = {

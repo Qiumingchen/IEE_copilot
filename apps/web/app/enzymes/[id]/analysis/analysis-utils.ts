@@ -18,6 +18,20 @@ export type HomologSequenceView = {
   sequence_length: number | string;
 };
 
+export type HomologDiagnosticsView = {
+  candidate_count: number;
+  scored_count: number;
+  passed_identity_count: number;
+  filtered_identity_count: number;
+  passed_coverage_count: number;
+  filtered_coverage_count: number;
+  deduplicated_count: number;
+  duplicate_count: number;
+  returned_count: number;
+  max_sequences: number;
+  summary: string;
+};
+
 export type ConservationCategoryFilter =
   | "all"
   | "highly_conserved"
@@ -264,6 +278,38 @@ export function getHomologSequences(content: AnalysisArtifactContentRecord): Hom
     });
 }
 
+export function getHomologDiagnostics(content: AnalysisArtifactContentRecord): HomologDiagnosticsView | null {
+  const rawDiagnostics = content.content_json?.diagnostics;
+  if (typeof rawDiagnostics !== "object" || rawDiagnostics === null) {
+    return null;
+  }
+  const diagnostics = rawDiagnostics as Record<string, unknown>;
+  const candidateCount = numericCount(diagnostics.candidate_count);
+  const scoredCount = numericCount(diagnostics.scored_count);
+  const passedIdentityCount = numericCount(diagnostics.passed_identity_count);
+  const filteredIdentityCount = numericCount(diagnostics.filtered_identity_count);
+  const passedCoverageCount = numericCount(diagnostics.passed_coverage_count);
+  const filteredCoverageCount = numericCount(diagnostics.filtered_coverage_count);
+  const deduplicatedCount = numericCount(diagnostics.deduplicated_count);
+  const duplicateCount = numericCount(diagnostics.duplicate_count);
+  const returnedCount = numericCount(diagnostics.returned_count);
+  const maxSequences = numericCount(diagnostics.max_sequences);
+
+  return {
+    candidate_count: candidateCount,
+    scored_count: scoredCount,
+    passed_identity_count: passedIdentityCount,
+    filtered_identity_count: filteredIdentityCount,
+    passed_coverage_count: passedCoverageCount,
+    filtered_coverage_count: filteredCoverageCount,
+    deduplicated_count: deduplicatedCount,
+    duplicate_count: duplicateCount,
+    returned_count: returnedCount,
+    max_sequences: maxSequences,
+    summary: `Fetched ${candidateCount} candidates -> scored ${scoredCount} -> identity pass ${passedIdentityCount} -> coverage pass ${passedCoverageCount} -> returned ${returnedCount}`
+  };
+}
+
 export function getMutationRecommendationCandidates(
   content: AnalysisArtifactContentRecord
 ): MutationRecommendationCandidateView[] {
@@ -476,6 +522,13 @@ function valueOrDash(value: unknown): string | number {
     return value;
   }
   return "-";
+}
+
+function numericCount(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return 0;
 }
 
 function formatFractionPercent(value: unknown): string | number {

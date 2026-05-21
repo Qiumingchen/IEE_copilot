@@ -22,6 +22,7 @@ import {
   filterConservationSites,
   getArtifactRunnerLabel,
   getConservationSites,
+  getHomologDiagnostics,
   getHomologSequences,
   getMutationLibrary,
   getMutationRecommendationCandidates,
@@ -32,6 +33,7 @@ import type {
   ConservationCategoryFilter,
   ConservationSiteView,
   ArtifactRunnerLabel,
+  HomologDiagnosticsView,
   HomologSequenceView,
   MutationLibraryView,
   MutationRecommendationCandidateView,
@@ -413,6 +415,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   }, [enzymeId, router]);
 
   const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
+  const homologDiagnostics = latestHomologContent ? getHomologDiagnostics(latestHomologContent) : null;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -590,6 +593,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <p className="mt-1 break-words font-mono text-xs text-slate-500">{homologObjectKey}</p>
               ) : null}
               <p className="mt-1 text-xs text-slate-500">{homologSequences.length} filtered homologs</p>
+              {homologDiagnostics ? <HomologDiagnosticsStrip diagnostics={homologDiagnostics} /> : null}
             </div>
             {latestHomologContent ? (
               <RunnerBadge label={getArtifactRunnerLabel(latestHomologContent)} />
@@ -1190,6 +1194,39 @@ function RunnerBadge({ label }: { label: ArtifactRunnerLabel }) {
         {label.text}
       </span>
       {label.warning ? <span className="text-amber-700">{label.warning}</span> : null}
+    </div>
+  );
+}
+
+function HomologDiagnosticsStrip({ diagnostics }: { diagnostics: HomologDiagnosticsView }) {
+  const stages = [
+    { label: "Fetched", value: diagnostics.candidate_count },
+    { label: "Scored", value: diagnostics.scored_count },
+    { label: "Identity pass", value: diagnostics.passed_identity_count },
+    { label: "Coverage pass", value: diagnostics.passed_coverage_count },
+    { label: "Returned", value: diagnostics.returned_count }
+  ];
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+      {stages.map((stage) => (
+        <span
+          className="rounded border border-slate-200 bg-slate-50 px-2 py-1"
+          key={stage.label}
+          title={diagnostics.summary}
+        >
+          {stage.label}: <span className="font-mono text-slate-950">{stage.value}</span>
+        </span>
+      ))}
+      <span className="rounded border border-slate-200 bg-white px-2 py-1">
+        Identity filtered: <span className="font-mono text-slate-950">{diagnostics.filtered_identity_count}</span>
+      </span>
+      <span className="rounded border border-slate-200 bg-white px-2 py-1">
+        Coverage filtered: <span className="font-mono text-slate-950">{diagnostics.filtered_coverage_count}</span>
+      </span>
+      <span className="rounded border border-slate-200 bg-white px-2 py-1">
+        Duplicates: <span className="font-mono text-slate-950">{diagnostics.duplicate_count}</span>
+      </span>
     </div>
   );
 }
