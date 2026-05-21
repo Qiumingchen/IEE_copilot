@@ -8,6 +8,7 @@ from app.services.homology import (
     collect_homologs,
     collect_homologs_with_diagnostics,
     deduplicate_sequences,
+    fetch_local_fasta_similarity_candidates,
     fetch_uniprot_homolog_candidates,
     filter_by_coverage,
     filter_by_identity,
@@ -361,3 +362,26 @@ def test_run_configured_sequence_similarity_search_maps_command_hits_to_fasta_re
     assert candidates[0].identity == 0.9
     assert candidates[0].coverage == 1.0
     assert candidates[0].source == "sequence_similarity_command"
+
+
+def test_fetch_local_fasta_similarity_candidates_prefers_full_coverage_hits(tmp_path: Path):
+    fasta_path = tmp_path / "homologs.fasta"
+    fasta_path.write_text(
+        "\n".join(
+            [
+                ">SHORT exact short fragment",
+                "ACDEF",
+                ">FULL full length homolog",
+                "ACDEFGHIVL",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = fetch_local_fasta_similarity_candidates(
+        query_sequence=QUERY_SEQUENCE,
+        fasta_path=str(fasta_path),
+        size=2,
+    )
+
+    assert [candidate.accession for candidate in candidates] == ["FULL", "SHORT"]

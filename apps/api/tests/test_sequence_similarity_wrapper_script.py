@@ -69,3 +69,38 @@ def test_sequence_similarity_wrapper_reports_missing_mmseqs(tmp_path: Path, monk
 
     assert completed.returncode == 2
     assert "mmseqs executable not found" in completed.stderr
+
+
+def test_sequence_similarity_wrapper_local_backend_prefers_full_coverage_hits(tmp_path: Path):
+    database = tmp_path / "homologs.fasta"
+    database.write_text(
+        "\n".join(
+            [
+                ">SHORT exact short fragment",
+                "ACDEF",
+                ">FULL full length homolog",
+                "ACDEFGHIVL",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--backend",
+            "local",
+            "--database",
+            str(database),
+            "--limit",
+            "2",
+        ],
+        input=QUERY_FASTA,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.splitlines()[0].startswith("FULL\t")

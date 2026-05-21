@@ -131,7 +131,7 @@ def fetch_local_fasta_similarity_candidates(
 ) -> list[HomologSequence]:
     candidates = list(_parse_homolog_fasta(Path(fasta_path)))
     scored = [_score_homolog(query_sequence, candidate) for candidate in candidates]
-    return sorted(scored, key=_sort_key, reverse=True)[:size]
+    return sorted(scored, key=_similarity_prefilter_sort_key, reverse=True)[:size]
 
 
 def run_configured_sequence_similarity_search(
@@ -167,7 +167,7 @@ def run_configured_sequence_similarity_search(
                 coverage=hit["coverage"],
             )
         )
-    return sorted(candidates, key=_sort_key, reverse=True)[:size]
+    return sorted(candidates, key=_similarity_prefilter_sort_key, reverse=True)[:size]
 
 
 def _fetch_uniprot_entries_in_hit_order(
@@ -354,5 +354,13 @@ def _sort_key(candidate: HomologSequence) -> tuple[float, float, str]:
     return (
         candidate.identity or 0.0,
         candidate.coverage or 0.0,
+        candidate.accession,
+    )
+
+
+def _similarity_prefilter_sort_key(candidate: HomologSequence) -> tuple[float, float, str]:
+    return (
+        candidate.coverage or 0.0,
+        candidate.identity or 0.0,
         candidate.accession,
     )

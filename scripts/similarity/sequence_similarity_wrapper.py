@@ -71,7 +71,7 @@ def run_local_backend(query_fasta: str, database_path: Path, limit: int) -> list
     ]
     return sorted(
         hits,
-        key=lambda hit: (hit.identity_percent, hit.coverage_percent, hit.accession),
+        key=lambda hit: (hit.coverage_percent, hit.identity_percent, hit.accession),
         reverse=True,
     )[:limit]
 
