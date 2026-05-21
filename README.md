@@ -77,6 +77,17 @@ UniProt mature chain when a `Chain` feature is available. The bundled seed
 entry uses P81453 full length as the stored sequence and its mature chain as
 the engineering target.
 
+Homolog collection currently supports two user-facing modes:
+
+- `metadata_search`: the current working mode. It searches UniProt by enzyme
+  name first, then EC number, fetches up to `HOMOLOG_PROVIDER_FETCH_SIZE`
+  upstream candidates, and filters them locally by identity, coverage, and the
+  requested maximum homolog count.
+- `sequence_similarity`: a production placeholder for BLAST/MMseqs2-style
+  sequence search. Until a local or remote sequence-search runner is
+  configured, results are explicitly marked as fallback rather than real BLAST
+  or MMseqs2 output.
+
 ## Development Checks
 
 Run Python tests:

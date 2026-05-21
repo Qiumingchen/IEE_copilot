@@ -40,6 +40,11 @@ import type {
 } from "./analysis-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
+const homologCountOptions = [10, 25, 50, 100];
+const homologSearchModeOptions = [
+  { value: "metadata_search", label: "Fast UniProt metadata" },
+  { value: "sequence_similarity", label: "Sequence similarity" }
+];
 
 type AnalysisClientProps = {
   enzymeId: string;
@@ -95,6 +100,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     useState<AnalysisArtifactContentRecord | null>(null);
   const [homologSequences, setHomologSequences] = useState<HomologSequenceView[]>([]);
   const [homologObjectKey, setHomologObjectKey] = useState<string | null>(null);
+  const [homologSearchMode, setHomologSearchMode] = useState("metadata_search");
+  const [maxHomologSequences, setMaxHomologSequences] = useState(25);
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
@@ -260,7 +267,13 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setNotice(null);
     setRunningJobType(jobType);
     try {
-      const job = await createAnalysisJob(enzymeId, token, jobType);
+      const parameters = jobType === "homolog_collection"
+        ? {
+            search_mode: homologSearchMode,
+            max_sequences: maxHomologSequences
+          }
+        : undefined;
+      const job = await createAnalysisJob(enzymeId, token, jobType, parameters);
       setNotice(`${job.job_type} job queued: ${job.id}`);
       await loadArtifacts(token);
     } catch {
@@ -460,6 +473,38 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                   </dd>
                 </div>
               </dl>
+              {item.jobType === "homolog_collection" ? (
+                <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Search mode
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => setHomologSearchMode(event.target.value)}
+                      value={homologSearchMode}
+                    >
+                      {homologSearchModeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Max homologs
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => setMaxHomologSequences(Number(event.target.value))}
+                      value={maxHomologSequences}
+                    >
+                      {homologCountOptions.map((count) => (
+                        <option key={count} value={count}>
+                          {count}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
               <button
                 className="mt-4 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
                 disabled={!token || Boolean(runningJobType)}

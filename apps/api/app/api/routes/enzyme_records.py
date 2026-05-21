@@ -329,6 +329,12 @@ def _analysis_job_parameters(
     parameters = {"requested_from": "enzyme_analysis_page"}
     if requested_parameters:
         parameters.update(requested_parameters)
+    if job_type == "homolog_collection":
+        parameters["search_mode"] = str(parameters.get("search_mode") or "metadata_search")
+        parameters["identity_min"] = int(parameters.get("identity_min") or 40)
+        parameters["identity_max"] = int(parameters.get("identity_max") or 95)
+        parameters["coverage_min"] = int(parameters.get("coverage_min") or 70)
+        parameters["max_sequences"] = int(parameters.get("max_sequences") or 25)
     if job_type == "msa":
         homologs = _latest_homologs_for_msa(db, enzyme_id)
         if homologs:

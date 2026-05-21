@@ -10,7 +10,8 @@ class HomologSearchParameters:
     identity_min: float = 40
     identity_max: float = 95
     coverage_min: float = 70
-    max_sequences: int = 500
+    max_sequences: int = 25
+    search_mode: str = "metadata_search"
 
 
 @dataclass(frozen=True)

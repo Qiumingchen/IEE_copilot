@@ -472,6 +472,54 @@ def test_create_analysis_job_queues_selected_worker_task(client, db_session, mon
     assert job.created_by is not None
 
 
+def test_create_homolog_job_accepts_search_mode_and_sequence_count(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKLMNPQRSTVWY",
+            mature_sequence="ACDEFGHIKLMNPQRSTVWY",
+            source="test",
+            checksum="homolog-options-sequence",
+        )
+    )
+    db_session.commit()
+    enqueued_job_ids = []
+
+    class HomologyTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_homology_collection",
+        HomologyTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "homolog_collection",
+            "parameters_json": {
+                "search_mode": "sequence_similarity",
+                "max_sequences": 25,
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["parameters_json"]["search_mode"] == "sequence_similarity"
+    assert body["parameters_json"]["max_sequences"] == 25
+    assert body["parameters_json"]["identity_min"] == 40
+    assert body["parameters_json"]["identity_max"] == 95
+    assert body["parameters_json"]["coverage_min"] == 70
+    assert enqueued_job_ids == [body["id"]]
+
+
 def test_create_msa_job_uses_latest_homolog_sequence_artifact(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

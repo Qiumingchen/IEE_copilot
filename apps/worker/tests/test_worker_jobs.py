@@ -168,6 +168,7 @@ def test_homolog_candidates_for_job_caps_real_provider_fetch_size(monkeypatch):
         query_sequence="ACDEFGHIKL",
         max_sequences=500,
         provider_fetch_size=25,
+        search_mode="metadata_search",
         use_real_provider=True,
         allow_fallback=True,
     )
@@ -178,6 +179,30 @@ def test_homolog_candidates_for_job_caps_real_provider_fetch_size(monkeypatch):
     assert runner["mode"] == "real"
     assert runner["candidate_count"] == 1
     assert runner["requested_size"] == 25
+
+
+def test_sequence_similarity_homolog_mode_reports_unavailable_runner():
+    enzyme = EnzymeEntry(
+        name="Test transglutaminase",
+        ec_number="2.3.2.13",
+        source="test",
+    )
+
+    candidates, runner = _homolog_candidates_for_job(
+        enzyme,
+        query_sequence="ACDEFGHIKL",
+        max_sequences=25,
+        provider_fetch_size=25,
+        search_mode="sequence_similarity",
+        use_real_provider=True,
+        allow_fallback=True,
+    )
+
+    assert candidates[0].accession == "MOCK_EXACT"
+    assert runner["provider"] == "sequence_similarity"
+    assert runner["mode"] == "fallback"
+    assert runner["search_mode"] == "sequence_similarity"
+    assert "BLAST/MMseqs2" in runner["warning"]
 
 
 def test_finish_msa_job_creates_msa_artifact_from_target_sequence():

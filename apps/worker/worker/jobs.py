@@ -92,6 +92,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         query_sequence=query_sequence,
         max_sequences=parameters.max_sequences,
         provider_fetch_size=settings.homolog_provider_fetch_size,
+        search_mode=parameters.search_mode,
         use_real_provider=settings.use_real_science_providers,
         allow_fallback=settings.allow_science_fallbacks,
     )
@@ -107,6 +108,7 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
             "identity_max": parameters.identity_max,
             "coverage_min": parameters.coverage_min,
             "max_sequences": parameters.max_sequences,
+            "search_mode": parameters.search_mode,
         },
         "homologs": [
             {
@@ -422,9 +424,19 @@ def _homolog_candidates_for_job(
     query_sequence: str,
     max_sequences: int,
     provider_fetch_size: int,
+    search_mode: str,
     use_real_provider: bool,
     allow_fallback: bool,
 ) -> tuple[list[HomologSequence], dict]:
+    if search_mode == "sequence_similarity":
+        if not allow_fallback:
+            raise RuntimeError("BLAST/MMseqs2 sequence similarity search is not configured")
+        return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
+            provider="sequence_similarity",
+            warning="BLAST/MMseqs2 sequence similarity search is not configured; mock homolog candidates used.",
+            extra={"search_mode": search_mode},
+        )
+
     if use_real_provider:
         requested_size = max(1, min(max_sequences, provider_fetch_size))
         try:
@@ -437,14 +449,18 @@ def _homolog_candidates_for_job(
             if candidates:
                 return candidates, build_real_provenance(
                     provider="uniprot",
-                    extra={"candidate_count": len(candidates), "requested_size": requested_size},
+                    extra={
+                        "candidate_count": len(candidates),
+                        "requested_size": requested_size,
+                        "search_mode": search_mode,
+                    },
                 )
             if not allow_fallback:
                 raise RuntimeError("UniProt homolog collection returned no candidates")
             return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
                 provider="uniprot",
                 warning="UniProt homolog collection returned no candidates; mock homolog candidates used.",
-                extra={"requested_size": requested_size},
+                extra={"requested_size": requested_size, "search_mode": search_mode},
             )
         except Exception as exc:
             if not allow_fallback:
@@ -460,6 +476,7 @@ def _homolog_candidates_for_job(
     return _mock_homolog_candidates(query_sequence), build_fallback_provenance(
         provider="uniprot",
         warning="Real UniProt homolog collection disabled; mock homolog candidates used.",
+        extra={"search_mode": search_mode},
     )
 
 
@@ -692,7 +709,8 @@ def _homolog_parameters_from_job(job: AnalysisJob) -> HomologSearchParameters:
         identity_min=raw.get("identity_min", 40),
         identity_max=raw.get("identity_max", 95),
         coverage_min=raw.get("coverage_min", 70),
-        max_sequences=raw.get("max_sequences", 500),
+        max_sequences=raw.get("max_sequences", 25),
+        search_mode=raw.get("search_mode", "metadata_search"),
     )
 
 
