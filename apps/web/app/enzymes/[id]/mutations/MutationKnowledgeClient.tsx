@@ -13,10 +13,10 @@ import type {
 } from "../../../../lib/types";
 import {
   buildMutationPositionSummary,
-  formatMutationEvidence,
   formatMutationPositions,
   formatPropertyDelta
 } from "./mutation-knowledge-utils";
+import { ReferenceCitation } from "../ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -302,7 +302,16 @@ function MutationTable({
               </td>
               <td className="min-w-64 px-4 py-3 text-slate-700">{formatPropertyDelta(record.property_delta)}</td>
               <td className="min-w-64 px-4 py-3 text-slate-600">
-                {formatMutationEvidence(record, referencesById)}
+                <div className="grid gap-1">
+                  <ReferenceCitation
+                    fallback={record.reference_id ?? null}
+                    reference={record.reference ?? referencesById[record.reference_id ?? ""]}
+                  />
+                  {record.assay_condition_summary &&
+                  typeof record.assay_condition_summary.evidence === "string" ? (
+                    <span>{record.assay_condition_summary.evidence}</span>
+                  ) : null}
+                </div>
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                 {record.visibility} · {record.curation_status}

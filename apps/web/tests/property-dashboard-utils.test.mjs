@@ -78,7 +78,7 @@ test("formatPropertyEvidence prefers readable DOI and title when reference metad
       visibility: "public",
       curation_status: "approved"
     }),
-    "10.1000/mtgase · Thermostability of MTGase · Reported at pH 7.0 after 30 min assay. · public / approved"
+    "10.1000/mtgase · Thermostability of MTGase · Biocatalysis Reports · 2024 · curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
   );
   assert.equal(
     formatPropertyEvidence(
@@ -94,7 +94,7 @@ test("formatPropertyEvidence prefers readable DOI and title when reference metad
         }
       }
     ),
-    "10.1000/mtgase · Thermostability of MTGase · Reported at pH 7.0 after 30 min assay. · public / approved"
+    "10.1000/mtgase · Thermostability of MTGase · Biocatalysis Reports · 2024 · curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
   );
 });
 
@@ -116,7 +116,7 @@ test("formatKineticEvidence prefers embedded reference metadata", () => {
       visibility: "public",
       curation_status: "approved"
     }),
-    "PMID 123456 · MTGase kinetics · curated_literature · public / approved"
+    "PMID 123456 · MTGase kinetics · Biocatalysis Reports · 2024 · curated_literature · public / approved"
   );
 });
 

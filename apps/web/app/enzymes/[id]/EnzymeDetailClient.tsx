@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,6 +18,7 @@ import {
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
 import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
 import { formatReferenceForTable, formatVisibilityStatus } from "./enzyme-detail-utils";
+import { ReferenceCitation } from "./ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -949,7 +951,10 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                 textOrDash(item.unit_original),
                 textOrDash(item.substrate),
                 [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
-                formatReferenceForTable(item.reference_id, referencesById),
+                <ReferenceCitation
+                  fallback={formatReferenceForTable(item.reference_id, referencesById)}
+                  reference={item.reference ?? referencesById[item.reference_id ?? ""]}
+                />,
                 textOrDash(item.evidence_text),
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
@@ -963,7 +968,10 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                 textOrDash(item.kcat),
                 textOrDash(item.kcat_km),
                 [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
-                formatReferenceForTable(item.reference_id, referencesById),
+                <ReferenceCitation
+                  fallback={formatReferenceForTable(item.reference_id, referencesById)}
+                  reference={item.reference ?? referencesById[item.reference_id ?? ""]}
+                />,
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Kinetics"
@@ -998,7 +1006,7 @@ function RecordTable({
   title
 }: {
   columns: string[];
-  rows: string[][];
+  rows: ReactNode[][];
   title: string;
 }) {
   return (

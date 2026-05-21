@@ -1,4 +1,5 @@
 import type { LiteratureReferenceRecord } from "../../../lib/types";
+import { formatReferenceCitation } from "./reference-utils.ts";
 
 export function formatReferenceForTable(
   referenceId: string | null | undefined,
@@ -8,12 +9,7 @@ export function formatReferenceForTable(
     return "-";
   }
   const reference = referencesById[referenceId];
-  if (!reference) {
-    return referenceId;
-  }
-  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
-  const label = [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
-  return `${label} · ${reference.source}`;
+  return reference ? formatReferenceCitation(reference) : referenceId;
 }
 
 export function formatVisibilityStatus(

@@ -5,6 +5,7 @@ import type {
   PropertyRankingItemRecord,
   PropertyRecord
 } from "../../../../lib/types";
+import { formatReferenceCitation } from "../reference-utils.ts";
 
 export const defaultPropertyTypes = [
   "optimal_temperature",
@@ -99,7 +100,7 @@ export function formatKineticEvidence(
 ): string {
   const reference = record.reference ?? (record.reference_id ? referencesById[record.reference_id] : null);
   const parts = [
-    reference ? `${formatReferenceLabel(reference)} · ${reference.source}` : record.reference_id,
+    reference ? formatReferenceLabel(reference) : record.reference_id,
     `${record.visibility} / ${record.curation_status}`
   ];
 
@@ -107,6 +108,5 @@ export function formatKineticEvidence(
 }
 
 export function formatReferenceLabel(reference: LiteratureReferenceRecord): string {
-  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
-  return [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
+  return formatReferenceCitation(reference);
 }

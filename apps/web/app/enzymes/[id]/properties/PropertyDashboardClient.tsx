@@ -18,11 +18,10 @@ import type {
 import {
   buildPropertyOptions,
   formatAssayContext,
-  formatKineticEvidence,
-  formatPropertyEvidence,
   formatRankingValue,
   summarizeRankingGroup
 } from "./property-dashboard-utils";
+import { ReferenceCitation } from "../ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
 
@@ -260,7 +259,16 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         .join(" · ") || "-"}
                     </td>
                     <td className="min-w-72 px-4 py-3 text-slate-600">
-                      {formatPropertyEvidence(record, referencesById)}
+                      <div className="grid gap-1">
+                        <ReferenceCitation
+                          fallback={record.reference_id ?? "-"}
+                          reference={record.reference ?? referencesById[record.reference_id ?? ""]}
+                        />
+                        {record.evidence_text ? <span>{record.evidence_text}</span> : null}
+                        <span className="text-xs text-slate-500">
+                          {record.visibility} / {record.curation_status}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -301,7 +309,15 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         .join(" · ") || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatKineticEvidence(record, referencesById)}
+                      <div className="grid gap-1">
+                        <ReferenceCitation
+                          fallback={record.reference_id ?? "-"}
+                          reference={record.reference ?? referencesById[record.reference_id ?? ""]}
+                        />
+                        <span className="text-xs text-slate-500">
+                          {record.visibility} / {record.curation_status}
+                        </span>
+                      </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {record.visibility} / {record.curation_status}

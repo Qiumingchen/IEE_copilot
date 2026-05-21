@@ -1,4 +1,5 @@
 import type { LiteratureReferenceRecord, MutationRecord } from "../../../../lib/types";
+import { formatReferenceCitation } from "../reference-utils.ts";
 
 export type MutationPositionSummary = {
   position: number;
@@ -55,8 +56,7 @@ export function formatMutationEvidence(
 }
 
 export function formatMutationReferenceLabel(reference: LiteratureReferenceRecord): string {
-  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
-  return [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
+  return formatReferenceCitation(reference);
 }
 
 export function formatMutationPositions(record: Pick<MutationRecord, "mutation_positions">): string {
