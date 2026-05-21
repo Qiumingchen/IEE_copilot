@@ -32,6 +32,30 @@ export function buildPropertyOptions(
   return [...defaults, ...extras];
 }
 
+export type PropertyEvidenceFilters = {
+  curationStatus?: string;
+  propertyType?: string;
+  referenceSource?: string;
+};
+
+export function filterPropertyEvidenceRecords<T extends {
+  curation_status?: string | null;
+  property_type?: string | null;
+  reference?: Pick<LiteratureReferenceRecord, "source"> | null;
+}>(
+  records: T[],
+  filters: PropertyEvidenceFilters
+): T[] {
+  return records.filter((record) => {
+    const source = record.reference?.source ?? "";
+    return (
+      (!filters.propertyType || record.property_type === filters.propertyType) &&
+      (!filters.referenceSource || source === filters.referenceSource) &&
+      (!filters.curationStatus || record.curation_status === filters.curationStatus)
+    );
+  });
+}
+
 export function formatRankingValue(
   item: Pick<
     PropertyRankingItemRecord,

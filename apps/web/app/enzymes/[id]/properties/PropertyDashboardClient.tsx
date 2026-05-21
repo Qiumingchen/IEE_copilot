@@ -17,6 +17,7 @@ import type {
 } from "../../../../lib/types";
 import {
   buildPropertyOptions,
+  filterPropertyEvidenceRecords,
   formatAssayContext,
   formatRankingValue,
   summarizeRankingGroup
@@ -43,6 +44,8 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
   const [bundle, setBundle] = useState<EnzymeRecordBundle | null>(null);
   const [referencesById, setReferencesById] = useState<Record<string, LiteratureReferenceRecord>>({});
   const [selectedPropertyType, setSelectedPropertyType] = useState("optimal_temperature");
+  const [evidenceCurationStatus, setEvidenceCurationStatus] = useState("");
+  const [evidenceReferenceSource, setEvidenceReferenceSource] = useState("");
   const [rankingMode, setRankingMode] = useState<PropertyRankingMode>("reported_value");
   const [ranking, setRanking] = useState<PropertyRankingResponse | null>(null);
   const [isLoadingBundle, setIsLoadingBundle] = useState(true);
@@ -53,6 +56,14 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     () => buildPropertyOptions(bundle?.properties ?? []),
     [bundle?.properties]
   );
+  const referenceSourceOptions = useMemo(() => {
+    const sources = new Set(
+      (bundle?.properties ?? [])
+        .map((record) => record.reference?.source ?? referencesById[record.reference_id ?? ""]?.source)
+        .filter(Boolean)
+    );
+    return Array.from(sources).sort((left, right) => left.localeCompare(right));
+  }, [bundle?.properties, referencesById]);
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
@@ -108,8 +119,28 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     }
   }
 
-  const currentPropertyRecords =
-    bundle?.properties.filter((record) => record.property_type === selectedPropertyType) ?? [];
+  const propertyRecordsWithFallbackReferences = useMemo(
+    () =>
+      (bundle?.properties ?? []).map((record) => ({
+        ...record,
+        reference: record.reference ?? referencesById[record.reference_id ?? ""] ?? null
+      })),
+    [bundle?.properties, referencesById]
+  );
+  const currentPropertyRecords = useMemo(
+    () =>
+      filterPropertyEvidenceRecords(propertyRecordsWithFallbackReferences, {
+        propertyType: selectedPropertyType,
+        referenceSource: evidenceReferenceSource,
+        curationStatus: evidenceCurationStatus
+      }),
+    [
+      evidenceCurationStatus,
+      evidenceReferenceSource,
+      propertyRecordsWithFallbackReferences,
+      selectedPropertyType
+    ]
+  );
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
@@ -234,6 +265,37 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
             <p className="mt-1 text-sm text-slate-500">
               {currentPropertyRecords.length} records for {selectedPropertyType}
             </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                Reference source
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  onChange={(event) => setEvidenceReferenceSource(event.target.value)}
+                  value={evidenceReferenceSource}
+                >
+                  <option value="">All sources</option>
+                  {referenceSourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                Curation status
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  onChange={(event) => setEvidenceCurationStatus(event.target.value)}
+                  value={evidenceCurationStatus}
+                >
+                  <option value="">All statuses</option>
+                  <option value="approved">approved</option>
+                  <option value="unreviewed">unreviewed</option>
+                  <option value="pending">pending</option>
+                  <option value="rejected">rejected</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildPropertyOptions,
+  filterPropertyEvidenceRecords,
   formatKineticEvidence,
   formatPropertyEvidence,
   formatRankingValue,
@@ -33,6 +34,38 @@ test("formatRankingValue prefers standardized values while preserving reported v
       unit_standardized: "degC"
     }),
     "55 degC (reported 328.15 K)"
+  );
+});
+
+test("filterPropertyEvidenceRecords narrows by source and curation status", () => {
+  const records = [
+    {
+      property_type: "optimal_temperature",
+      curation_status: "approved",
+      reference: { source: "curated_literature" },
+      reference_id: "ref-1"
+    },
+    {
+      property_type: "optimal_temperature",
+      curation_status: "unreviewed",
+      reference: { source: "user_upload" },
+      reference_id: "ref-2"
+    },
+    {
+      property_type: "optimal_pH",
+      curation_status: "approved",
+      reference: { source: "curated_literature" },
+      reference_id: "ref-3"
+    }
+  ];
+
+  assert.deepEqual(
+    filterPropertyEvidenceRecords(records, {
+      propertyType: "optimal_temperature",
+      referenceSource: "curated_literature",
+      curationStatus: "approved"
+    }).map((record) => record.reference_id),
+    ["ref-1"]
   );
 });
 

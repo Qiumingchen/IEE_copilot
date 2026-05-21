@@ -31,6 +31,32 @@ export function buildMutationPositionSummary(
     .sort((left, right) => left.position - right.position);
 }
 
+export type MutationEvidenceFilters = {
+  curationStatus?: string;
+  referenceSource?: string;
+};
+
+export function filterMutationEvidenceRecords<T extends {
+  assay_condition_summary?: Record<string, unknown> | null;
+  curation_status?: string | null;
+  reference?: Pick<LiteratureReferenceRecord, "source"> | null;
+}>(
+  records: T[],
+  filters: MutationEvidenceFilters
+): T[] {
+  return records.filter((record) => {
+    const assaySource =
+      record.assay_condition_summary && typeof record.assay_condition_summary.source === "string"
+        ? record.assay_condition_summary.source
+        : "";
+    const source = record.reference?.source ?? assaySource;
+    return (
+      (!filters.referenceSource || source === filters.referenceSource) &&
+      (!filters.curationStatus || record.curation_status === filters.curationStatus)
+    );
+  });
+}
+
 export function formatPropertyDelta(delta: Record<string, unknown> | null | undefined): string {
   if (!delta || Object.keys(delta).length === 0) {
     return "-";

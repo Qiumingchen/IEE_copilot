@@ -13,6 +13,7 @@ import type {
 } from "../../../../lib/types";
 import {
   buildMutationPositionSummary,
+  filterMutationEvidenceRecords,
   formatMutationPositions,
   formatPropertyDelta
 } from "./mutation-knowledge-utils";
@@ -50,10 +51,43 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
   const [mutations, setMutations] = useState<MutationRecord[]>([]);
   const [referencesById, setReferencesById] = useState<Record<string, LiteratureReferenceRecord>>({});
   const [filters, setFilters] = useState<MutationQueryFilters>(emptyFilters);
+  const [evidenceCurationStatus, setEvidenceCurationStatus] = useState("");
+  const [evidenceReferenceSource, setEvidenceReferenceSource] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const positionSummary = useMemo(() => buildMutationPositionSummary(mutations), [mutations]);
+  const mutationsWithFallbackReferences = useMemo(
+    () =>
+      mutations.map((record) => ({
+        ...record,
+        reference: record.reference ?? referencesById[record.reference_id ?? ""] ?? null
+      })),
+    [mutations, referencesById]
+  );
+  const filteredMutations = useMemo(
+    () =>
+      filterMutationEvidenceRecords(mutationsWithFallbackReferences, {
+        referenceSource: evidenceReferenceSource,
+        curationStatus: evidenceCurationStatus
+      }),
+    [evidenceCurationStatus, evidenceReferenceSource, mutationsWithFallbackReferences]
+  );
+  const referenceSourceOptions = useMemo(() => {
+    const sources = new Set(
+      mutationsWithFallbackReferences
+        .map((record) => {
+          if (record.reference?.source) {
+            return record.reference.source;
+          }
+          return typeof record.assay_condition_summary?.source === "string"
+            ? record.assay_condition_summary.source
+            : "";
+        })
+        .filter(Boolean)
+    );
+    return Array.from(sources).sort((left, right) => left.localeCompare(right));
+  }, [mutationsWithFallbackReferences]);
+  const positionSummary = useMemo(() => buildMutationPositionSummary(filteredMutations), [filteredMutations]);
   const maxPositionCount = Math.max(1, ...positionSummary.map((item) => item.count));
 
   useEffect(() => {
@@ -96,6 +130,8 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
   function handleReset() {
     const nextFilters = emptyFilters();
     setFilters(nextFilters);
+    setEvidenceCurationStatus("");
+    setEvidenceReferenceSource("");
     if (token) {
       void loadPage(token, nextFilters);
     }
@@ -199,6 +235,37 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
               Beneficial only
             </label>
 
+            <label className="grid gap-2 text-sm font-medium text-slate-700">
+              Reference source
+              <select
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                onChange={(event) => setEvidenceReferenceSource(event.target.value)}
+                value={evidenceReferenceSource}
+              >
+                <option value="">All sources</option>
+                {referenceSourceOptions.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-slate-700">
+              Curation status
+              <select
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                onChange={(event) => setEvidenceCurationStatus(event.target.value)}
+                value={evidenceCurationStatus}
+              >
+                <option value="">All statuses</option>
+                <option value="approved">approved</option>
+                <option value="unreviewed">unreviewed</option>
+                <option value="pending">pending</option>
+                <option value="rejected">rejected</option>
+              </select>
+            </label>
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400"
@@ -223,7 +290,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
             <div className="border-b border-slate-200 px-4 py-4">
               <h2 className="text-base font-semibold text-slate-950">Mutation-site density</h2>
               <p className="mt-1 text-sm text-slate-500">
-                {positionSummary.length} mutated positions from {mutations.length} records
+                {positionSummary.length} mutated positions from {filteredMutations.length} records
               </p>
             </div>
             {positionSummary.length ? (
@@ -254,13 +321,13 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
             <div className="border-b border-slate-200 px-4 py-4">
               <h2 className="text-base font-semibold text-slate-950">Reported mutants</h2>
               <p className="mt-1 text-sm text-slate-500">
-                {isLoading ? "Loading mutations..." : `${mutations.length} records`}
+                {isLoading ? "Loading mutations..." : `${filteredMutations.length} records`}
               </p>
             </div>
             {isLoading ? (
               <div className="px-4 py-10 text-sm text-slate-500">Loading mutation knowledge...</div>
-            ) : mutations.length ? (
-              <MutationTable records={mutations} referencesById={referencesById} />
+            ) : filteredMutations.length ? (
+              <MutationTable records={filteredMutations} referencesById={referencesById} />
             ) : (
               <EmptyMutationState />
             )}

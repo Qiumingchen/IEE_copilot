@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildMutationPositionSummary,
+  filterMutationEvidenceRecords,
   formatMutationEvidence,
   formatPropertyDelta
 } from "../app/enzymes/[id]/mutations/mutation-knowledge-utils.ts";
@@ -46,6 +47,31 @@ test("formatPropertyDelta renders key value pairs", () => {
 test("formatMutationEvidence combines source and evidence text", () => {
   assert.equal(formatMutationEvidence(records[0]), "enzyme_data_mock · Mock mutant data record");
   assert.equal(formatMutationEvidence({ assay_condition_summary: null }), "-");
+});
+
+test("filterMutationEvidenceRecords narrows by reference source and curation status", () => {
+  const sourceRecords = [
+    {
+      mutation_string: "S2P",
+      curation_status: "approved",
+      reference: { source: "curated_literature" },
+      assay_condition_summary: { source: "curated_literature" }
+    },
+    {
+      mutation_string: "D3Y",
+      curation_status: "unreviewed",
+      reference: null,
+      assay_condition_summary: { source: "user_upload" }
+    }
+  ];
+
+  assert.deepEqual(
+    filterMutationEvidenceRecords(sourceRecords, {
+      referenceSource: "curated_literature",
+      curationStatus: "approved"
+    }).map((record) => record.mutation_string),
+    ["S2P"]
+  );
 });
 
 test("formatMutationEvidence prefers readable reference metadata when available", () => {
