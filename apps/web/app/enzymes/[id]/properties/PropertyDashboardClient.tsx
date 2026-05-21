@@ -17,6 +17,7 @@ import type {
 } from "../../../../lib/types";
 import {
   buildPropertyOptions,
+  buildPropertyEvidenceCsv,
   filterPropertyEvidenceRecords,
   formatAssayContext,
   formatRankingValue,
@@ -117,6 +118,13 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     } finally {
       setIsLoadingRanking(false);
     }
+  }
+
+  function handleDownloadPropertyEvidenceCsv() {
+    downloadCsv(
+      `property-evidence-${enzymeId}-${selectedPropertyType}.csv`,
+      buildPropertyEvidenceCsv(currentPropertyRecords)
+    );
   }
 
   const propertyRecordsWithFallbackReferences = useMemo(
@@ -261,10 +269,22 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
       <section className="mt-6 grid gap-4 xl:grid-cols-2">
         <section className="min-w-0 rounded-md border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-4 py-4">
-            <h2 className="text-base font-semibold text-slate-950">Property evidence</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {currentPropertyRecords.length} records for {selectedPropertyType}
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Property evidence</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {currentPropertyRecords.length} records for {selectedPropertyType}
+                </p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
+                disabled={currentPropertyRecords.length === 0}
+                onClick={handleDownloadPropertyEvidenceCsv}
+                type="button"
+              >
+                Download CSV
+              </button>
+            </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-medium text-slate-700">
                 Reference source
@@ -400,6 +420,16 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
       </section>
     </main>
   );
+}
+
+function downloadCsv(fileName: string, csvText: string) {
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function ReportedRanking({ ranking }: { ranking: PropertyRankingResponse | null }) {

@@ -57,6 +57,51 @@ export function filterMutationEvidenceRecords<T extends {
   });
 }
 
+export function buildMutationEvidenceCsv(
+  records: Array<
+    Pick<
+      MutationRecord,
+      | "mutation_string"
+      | "effect_summary"
+      | "property_delta"
+      | "substrate"
+      | "reference"
+      | "reference_id"
+      | "assay_condition_summary"
+      | "visibility"
+      | "curation_status"
+    >
+  >
+): string {
+  const header = [
+    "mutation_string",
+    "effect_summary",
+    "property_delta",
+    "substrate",
+    "reference",
+    "evidence_text",
+    "visibility",
+    "curation_status"
+  ];
+  const rows = records.map((record) => {
+    const evidence =
+      record.assay_condition_summary && typeof record.assay_condition_summary.evidence === "string"
+        ? record.assay_condition_summary.evidence
+        : "";
+    return [
+      record.mutation_string,
+      record.effect_summary,
+      record.property_delta ? JSON.stringify(record.property_delta) : "",
+      record.substrate,
+      record.reference ? formatReferenceCitation(record.reference) : record.reference_id,
+      evidence,
+      record.visibility,
+      record.curation_status
+    ].map(formatCsvCell).join(",");
+  });
+  return [header.join(","), ...rows].join("\n");
+}
+
 export function formatPropertyDelta(delta: Record<string, unknown> | null | undefined): string {
   if (!delta || Object.keys(delta).length === 0) {
     return "-";
@@ -92,4 +137,9 @@ export function formatMutationPositions(record: Pick<MutationRecord, "mutation_p
   return record.mutation_positions
     .map((mutation) => `${mutation.wildtype}${mutation.position}${mutation.mutant}`)
     .join(" / ");
+}
+
+function formatCsvCell(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }

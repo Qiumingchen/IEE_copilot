@@ -56,6 +56,62 @@ export function filterPropertyEvidenceRecords<T extends {
   });
 }
 
+export function buildPropertyEvidenceCsv(
+  records: Array<
+    Pick<
+      PropertyRecord,
+      | "property_type"
+      | "value_original"
+      | "unit_original"
+      | "value_standardized"
+      | "unit_standardized"
+      | "substrate"
+      | "assay_temperature"
+      | "assay_pH"
+      | "method"
+      | "reference"
+      | "reference_id"
+      | "evidence_text"
+      | "visibility"
+      | "curation_status"
+    >
+  >
+): string {
+  const header = [
+    "property_type",
+    "value_original",
+    "unit_original",
+    "value_standardized",
+    "unit_standardized",
+    "substrate",
+    "assay_temperature",
+    "assay_pH",
+    "method",
+    "reference",
+    "evidence_text",
+    "visibility",
+    "curation_status"
+  ];
+  const rows = records.map((record) =>
+    [
+      record.property_type,
+      record.value_original,
+      record.unit_original,
+      record.value_standardized,
+      record.unit_standardized,
+      record.substrate,
+      record.assay_temperature,
+      record.assay_pH,
+      record.method,
+      record.reference ? formatReferenceCitation(record.reference) : record.reference_id,
+      record.evidence_text,
+      record.visibility,
+      record.curation_status
+    ].map(formatCsvCell).join(",")
+  );
+  return [header.join(","), ...rows].join("\n");
+}
+
 export function formatRankingValue(
   item: Pick<
     PropertyRankingItemRecord,
@@ -133,4 +189,9 @@ export function formatKineticEvidence(
 
 export function formatReferenceLabel(reference: LiteratureReferenceRecord): string {
   return formatReferenceCitation(reference);
+}
+
+function formatCsvCell(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }

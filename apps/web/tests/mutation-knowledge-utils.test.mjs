@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildMutationPositionSummary,
+  buildMutationEvidenceCsv,
   filterMutationEvidenceRecords,
   formatMutationEvidence,
   formatPropertyDelta
@@ -71,6 +72,43 @@ test("filterMutationEvidenceRecords narrows by reference source and curation sta
       curationStatus: "approved"
     }).map((record) => record.mutation_string),
     ["S2P"]
+  );
+});
+
+test("buildMutationEvidenceCsv exports mutation evidence fields", () => {
+  const csv = buildMutationEvidenceCsv([
+    {
+      mutation_string: "S2P",
+      effect_summary: "Improved thermostability",
+      property_delta: { optimal_temperature_delta_degC: 5 },
+      substrate: "casein",
+      reference_id: "ref-1",
+      reference: {
+        id: "ref-1",
+        title: "Thermostable MTGase variant",
+        authors: null,
+        journal: "Biocatalysis Reports",
+        year: 2024,
+        doi: null,
+        pubmed_id: "123456",
+        source: "curated_literature",
+        provenance: null
+      },
+      assay_condition_summary: {
+        source: "curated_literature",
+        evidence: "S2P increased half-life"
+      },
+      visibility: "public",
+      curation_status: "approved"
+    }
+  ]);
+
+  assert.equal(
+    csv,
+    [
+      "mutation_string,effect_summary,property_delta,substrate,reference,evidence_text,visibility,curation_status",
+      'S2P,Improved thermostability,"{""optimal_temperature_delta_degC"":5}",casein,PMID 123456 · Thermostable MTGase variant · Biocatalysis Reports · 2024 · curated_literature,S2P increased half-life,public,approved'
+    ].join("\n")
   );
 });
 

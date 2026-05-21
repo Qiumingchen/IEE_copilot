@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildPropertyOptions,
+  buildPropertyEvidenceCsv,
   filterPropertyEvidenceRecords,
   formatKineticEvidence,
   formatPropertyEvidence,
@@ -66,6 +67,45 @@ test("filterPropertyEvidenceRecords narrows by source and curation status", () =
       curationStatus: "approved"
     }).map((record) => record.reference_id),
     ["ref-1"]
+  );
+});
+
+test("buildPropertyEvidenceCsv exports citation and assay fields", () => {
+  const csv = buildPropertyEvidenceCsv([
+    {
+      property_type: "optimal_temperature",
+      value_original: "58",
+      unit_original: "degC",
+      value_standardized: "58",
+      unit_standardized: "degC",
+      substrate: "casein",
+      assay_temperature: "37",
+      assay_pH: "7.0",
+      method: "activity assay",
+      reference_id: "ref-1",
+      reference: {
+        id: "ref-1",
+        title: "MTGase, thermal evidence",
+        authors: null,
+        journal: "Biocatalysis Reports",
+        year: 2024,
+        doi: "10.1000/mtgase",
+        pubmed_id: null,
+        source: "curated_literature",
+        provenance: null
+      },
+      evidence_text: "Table 1",
+      visibility: "public",
+      curation_status: "approved"
+    }
+  ]);
+
+  assert.equal(
+    csv,
+    [
+      "property_type,value_original,unit_original,value_standardized,unit_standardized,substrate,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
+      'optimal_temperature,58,degC,58,degC,casein,37,7.0,activity assay,"10.1000/mtgase · MTGase, thermal evidence · Biocatalysis Reports · 2024 · curated_literature",Table 1,public,approved'
+    ].join("\n")
   );
 });
 
