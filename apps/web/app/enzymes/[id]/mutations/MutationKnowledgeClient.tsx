@@ -4,8 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { getEnzyme, listMutationRecords } from "../../../../lib/api";
-import type { EnzymeSummary, MutationQueryFilters, MutationRecord } from "../../../../lib/types";
+import { getEnzyme, listEnzymeReferences, listMutationRecords } from "../../../../lib/api";
+import type {
+  EnzymeSummary,
+  LiteratureReferenceRecord,
+  MutationQueryFilters,
+  MutationRecord
+} from "../../../../lib/types";
 import {
   buildMutationPositionSummary,
   formatMutationEvidence,
@@ -43,6 +48,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
   const [token, setToken] = useState<string | null>(null);
   const [enzyme, setEnzyme] = useState<EnzymeSummary | null>(null);
   const [mutations, setMutations] = useState<MutationRecord[]>([]);
+  const [referencesById, setReferencesById] = useState<Record<string, LiteratureReferenceRecord>>({});
   const [filters, setFilters] = useState<MutationQueryFilters>(emptyFilters);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,12 +70,14 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
     setError(null);
     setIsLoading(true);
     try {
-      const [nextEnzyme, nextMutations] = await Promise.all([
+      const [nextEnzyme, nextMutations, references] = await Promise.all([
         getEnzyme(enzymeId, nextToken),
-        listMutationRecords(enzymeId, nextToken, nextFilters)
+        listMutationRecords(enzymeId, nextToken, nextFilters),
+        listEnzymeReferences(enzymeId, nextToken)
       ]);
       setEnzyme(nextEnzyme);
       setMutations(nextMutations);
+      setReferencesById(Object.fromEntries(references.map((reference) => [reference.id, reference])));
     } catch {
       setError("Unable to load mutation knowledge. Please check the API service and your login.");
     } finally {
@@ -252,7 +260,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
             {isLoading ? (
               <div className="px-4 py-10 text-sm text-slate-500">Loading mutation knowledge...</div>
             ) : mutations.length ? (
-              <MutationTable records={mutations} />
+              <MutationTable records={mutations} referencesById={referencesById} />
             ) : (
               <EmptyMutationState />
             )}
@@ -263,7 +271,13 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
   );
 }
 
-function MutationTable({ records }: { records: MutationRecord[] }) {
+function MutationTable({
+  records,
+  referencesById
+}: {
+  records: MutationRecord[];
+  referencesById: Record<string, LiteratureReferenceRecord>;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -287,7 +301,9 @@ function MutationTable({ records }: { records: MutationRecord[] }) {
                 {formatMutationPositions(record)}
               </td>
               <td className="min-w-64 px-4 py-3 text-slate-700">{formatPropertyDelta(record.property_delta)}</td>
-              <td className="min-w-64 px-4 py-3 text-slate-600">{formatMutationEvidence(record)}</td>
+              <td className="min-w-64 px-4 py-3 text-slate-600">
+                {formatMutationEvidence(record, referencesById)}
+              </td>
               <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                 {record.visibility} · {record.curation_status}
               </td>

@@ -1,4 +1,4 @@
-import type { MutationRecord } from "../../../../lib/types";
+import type { LiteratureReferenceRecord, MutationRecord } from "../../../../lib/types";
 
 export type MutationPositionSummary = {
   position: number;
@@ -40,15 +40,23 @@ export function formatPropertyDelta(delta: Record<string, unknown> | null | unde
 }
 
 export function formatMutationEvidence(
-  record: Pick<MutationRecord, "assay_condition_summary">
+  record: Pick<MutationRecord, "assay_condition_summary" | "reference_id">,
+  referencesById: Record<string, LiteratureReferenceRecord> = {}
 ): string {
   const summary = record.assay_condition_summary;
-  if (!summary) {
+  const reference = record.reference_id ? referencesById[record.reference_id] : null;
+  if (!summary && !reference) {
     return "-";
   }
-  const source = typeof summary.source === "string" ? summary.source : "";
-  const evidence = typeof summary.evidence === "string" ? summary.evidence : "";
-  return [source, evidence].filter(Boolean).join(" · ") || "-";
+  const source = summary && typeof summary.source === "string" ? summary.source : "";
+  const evidence = summary && typeof summary.evidence === "string" ? summary.evidence : "";
+  const referenceLabel = reference ? formatMutationReferenceLabel(reference) : "";
+  return [referenceLabel || source, evidence].filter(Boolean).join(" · ") || "-";
+}
+
+export function formatMutationReferenceLabel(reference: LiteratureReferenceRecord): string {
+  const identifier = reference.doi || (reference.pubmed_id ? `PMID ${reference.pubmed_id}` : null);
+  return [identifier, reference.title].filter(Boolean).join(" · ") || reference.id;
 }
 
 export function formatMutationPositions(record: Pick<MutationRecord, "mutation_positions">): string {
