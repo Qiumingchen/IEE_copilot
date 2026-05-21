@@ -292,6 +292,22 @@ export type CuratedEvidenceImportResponse = {
   warnings: string[];
 };
 
+export type CuratedEvidencePreviewRecord = {
+  row_number: number;
+  record_type: string;
+  summary: string;
+  reference_key: string | null;
+  evidence_text: string | null;
+};
+
+export type CuratedEvidencePreviewResponse = {
+  fields: string[];
+  row_count: number;
+  record_counts: Record<string, number>;
+  records: CuratedEvidencePreviewRecord[];
+  warnings: string[];
+};
+
 export type UserExperimentRecord = {
   id: string;
   project_id: string;

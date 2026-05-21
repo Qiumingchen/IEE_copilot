@@ -7,12 +7,19 @@ import {
   approveVisibilityRequest,
   importCuratedEvidence,
   listVisibilityRequests,
+  previewCuratedEvidence,
   rejectVisibilityRequest
 } from "../../lib/api";
-import type { CuratedEvidenceImportResponse, VisibilityRequestDetailRecord } from "../../lib/types";
+import type {
+  CuratedEvidenceImportResponse,
+  CuratedEvidencePreviewResponse,
+  VisibilityRequestDetailRecord
+} from "../../lib/types";
 import {
   canSubmitRejection,
+  curatedEvidenceCsvTemplate,
   summarizeCuratedEvidenceImport,
+  summarizeCuratedEvidencePreview,
   summarizeVisibilityRequest
 } from "./curation-utils";
 
@@ -30,7 +37,9 @@ export default function CurationClient() {
   const [importEnzymeId, setImportEnzymeId] = useState("");
   const [importCsvText, setImportCsvText] = useState("");
   const [importResult, setImportResult] = useState<CuratedEvidenceImportResponse | null>(null);
+  const [importPreview, setImportPreview] = useState<CuratedEvidencePreviewResponse | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isPreviewingImport, setIsPreviewingImport] = useState(false);
 
   async function loadRequests(nextToken: string) {
     setError(null);
@@ -97,6 +106,27 @@ export default function CurationClient() {
     }
   }
 
+  async function handleCuratedPreview() {
+    if (!token || !importEnzymeId.trim() || !importCsvText.trim()) {
+      setError("Enzyme ID and CSV text are required.");
+      return;
+    }
+    setIsPreviewingImport(true);
+    setError(null);
+    setSuccessMessage(null);
+    setImportResult(null);
+    setImportPreview(null);
+    try {
+      const preview = await previewCuratedEvidence(importEnzymeId.trim(), token, importCsvText);
+      setImportPreview(preview);
+      setSuccessMessage(summarizeCuratedEvidencePreview(preview));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Unable to preview curated evidence.");
+    } finally {
+      setIsPreviewingImport(false);
+    }
+  }
+
   async function handleCuratedImport() {
     if (!token || !importEnzymeId.trim() || !importCsvText.trim()) {
       setError("Enzyme ID and CSV text are required.");
@@ -109,6 +139,7 @@ export default function CurationClient() {
     try {
       const result = await importCuratedEvidence(importEnzymeId.trim(), token, importCsvText);
       setImportResult(result);
+      setImportPreview(null);
       setSuccessMessage(summarizeCuratedEvidenceImport(result));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Unable to import curated evidence.");
@@ -161,8 +192,30 @@ export default function CurationClient() {
             </p>
           </div>
           <button
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={isPreviewingImport || isImporting}
+            onClick={() => {
+              setImportCsvText(curatedEvidenceCsvTemplate);
+              setImportPreview(null);
+              setImportResult(null);
+              setError(null);
+              setSuccessMessage(null);
+            }}
+            type="button"
+          >
+            Use template
+          </button>
+          <button
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={!token || isPreviewingImport || isImporting}
+            onClick={() => void handleCuratedPreview()}
+            type="button"
+          >
+            {isPreviewingImport ? "Previewing..." : "Preview CSV"}
+          </button>
+          <button
             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={!token || isImporting}
+            disabled={!token || isImporting || !importPreview}
             onClick={() => void handleCuratedImport()}
             type="button"
           >
@@ -201,6 +254,44 @@ export default function CurationClient() {
                 {warning}
               </p>
             ))}
+          </div>
+        ) : null}
+
+        {importPreview ? (
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-950">Preview</h3>
+                <p className="mt-1 text-sm text-slate-600">{summarizeCuratedEvidencePreview(importPreview)}</p>
+              </div>
+              <p className="max-w-xl break-words font-mono text-xs text-slate-500">
+                {importPreview.fields.join(" / ")}
+              </p>
+            </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Row</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Summary</th>
+                    <th className="px-3 py-2">Reference</th>
+                    <th className="px-3 py-2">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {importPreview.records.slice(0, 20).map((record) => (
+                    <tr key={`${record.row_number}-${record.summary}`}>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">{record.row_number}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-800">{record.record_type}</td>
+                      <td className="min-w-48 px-3 py-2 text-slate-800">{record.summary}</td>
+                      <td className="min-w-44 px-3 py-2 text-slate-600">{record.reference_key ?? "-"}</td>
+                      <td className="min-w-64 px-3 py-2 text-slate-600">{record.evidence_text ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
       </section>

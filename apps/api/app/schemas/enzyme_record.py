@@ -106,6 +106,22 @@ class CuratedEvidenceImportRequest(BaseModel):
     csv_text: str
 
 
+class CuratedEvidencePreviewRecord(BaseModel):
+    row_number: int
+    record_type: str
+    summary: str
+    reference_key: str | None = None
+    evidence_text: str | None = None
+
+
+class CuratedEvidencePreviewResponse(BaseModel):
+    fields: list[str]
+    row_count: int
+    record_counts: dict[str, int]
+    records: list[CuratedEvidencePreviewRecord] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CuratedEvidenceImportResponse(BaseModel):
     created: dict[str, int]
     reference_ids: list[str] = Field(default_factory=list)

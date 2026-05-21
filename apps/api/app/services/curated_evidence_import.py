@@ -32,6 +32,63 @@ class CuratedEvidenceImportResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CuratedEvidencePreviewRecord:
+    row_number: int
+    record_type: str
+    summary: str
+    reference_key: str | None = None
+    evidence_text: str | None = None
+
+
+@dataclass
+class CuratedEvidencePreviewResult:
+    fields: list[str]
+    row_count: int
+    record_counts: dict[str, int]
+    records: list[CuratedEvidencePreviewRecord]
+    warnings: list[str] = field(default_factory=list)
+
+
+def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
+    rows, fields = _parse_rows_with_fields(csv_text)
+    record_counts = {"properties": 0, "kinetics": 0, "mutations": 0}
+    records: list[CuratedEvidencePreviewRecord] = []
+
+    for index, row in enumerate(rows, start=2):
+        record_type = _validated_record_type(row, index)
+        if record_type == "property":
+            _required_for_row(row, "property_type", index)
+            _required_for_row(row, "value_original", index)
+            record_counts["properties"] += 1
+        elif record_type == "kinetic":
+            record_counts["kinetics"] += 1
+        else:
+            mutation_string = _required_for_row(row, "mutation_string", index)
+            try:
+                parse_mutation_string(mutation_string)
+            except ValueError as exc:
+                raise CuratedEvidenceImportError(f"row {index}: {exc}") from exc
+            record_counts["mutations"] += 1
+
+        records.append(
+            CuratedEvidencePreviewRecord(
+                row_number=index,
+                record_type=record_type,
+                summary=_summarize_row(record_type, row),
+                reference_key=_reference_key(row),
+                evidence_text=_value(row, "evidence_text") or None,
+            )
+        )
+
+    return CuratedEvidencePreviewResult(
+        fields=fields,
+        row_count=len(rows),
+        record_counts=record_counts,
+        records=records,
+    )
+
+
 def import_curated_evidence(
     db: Session,
     *,
@@ -43,9 +100,7 @@ def import_curated_evidence(
     reference_ids: set[str] = set()
 
     for index, row in enumerate(rows, start=2):
-        record_type = _value(row, "record_type").lower()
-        if record_type not in {"property", "kinetic", "mutation"}:
-            raise CuratedEvidenceImportError(f"row {index}: unsupported record_type")
+        record_type = _validated_record_type(row, index)
 
         reference = _get_or_create_reference(db, row)
         if reference is not None:
@@ -66,6 +121,11 @@ def import_curated_evidence(
 
 
 def _parse_rows(csv_text: str) -> list[dict[str, str]]:
+    rows, _fields = _parse_rows_with_fields(csv_text)
+    return rows
+
+
+def _parse_rows_with_fields(csv_text: str) -> tuple[list[dict[str, str]], list[str]]:
     if not csv_text.strip():
         raise CuratedEvidenceImportError("csv_text is required")
     reader = csv.DictReader(StringIO(csv_text))
@@ -74,7 +134,14 @@ def _parse_rows(csv_text: str) -> list[dict[str, str]]:
     rows = [dict(row) for row in reader]
     if not rows:
         raise CuratedEvidenceImportError("at least one evidence row is required")
-    return rows
+    return rows, list(reader.fieldnames)
+
+
+def _validated_record_type(row: dict[str, str], row_number: int) -> str:
+    record_type = _value(row, "record_type").lower()
+    if record_type not in {"property", "kinetic", "mutation"}:
+        raise CuratedEvidenceImportError(f"row {row_number}: unsupported record_type")
+    return record_type
 
 
 def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureReference | None:
@@ -215,10 +282,40 @@ def _property_delta(row: dict[str, str]) -> dict[str, Any] | None:
     return {key: value} if key and value else None
 
 
+def _summarize_row(record_type: str, row: dict[str, str]) -> str:
+    if record_type == "property":
+        parts = [
+            _value(row, "property_type"),
+            _value(row, "value_original"),
+            _value(row, "unit_original"),
+        ]
+        return " ".join(part for part in parts if part)
+    if record_type == "kinetic":
+        parts = [
+            _value(row, "substrate") or "kinetic",
+            _value(row, "km") and f"Km {_value(row, 'km')}",
+            _value(row, "kcat") and f"kcat {_value(row, 'kcat')}",
+            _value(row, "kcat_km") and f"kcat/Km {_value(row, 'kcat_km')}",
+        ]
+        return " ".join(part for part in parts if part)
+    return _value(row, "mutation_string")
+
+
+def _reference_key(row: dict[str, str]) -> str | None:
+    return _value(row, "doi") or _value(row, "pubmed_id") or _value(row, "reference_title") or None
+
+
 def _required(row: dict[str, str], key: str) -> str:
     value = _value(row, key)
     if not value:
         raise CuratedEvidenceImportError(f"{key} is required")
+    return value
+
+
+def _required_for_row(row: dict[str, str], key: str, row_number: int) -> str:
+    value = _value(row, key)
+    if not value:
+        raise CuratedEvidenceImportError(f"row {row_number}: {key} is required")
     return value
 
 

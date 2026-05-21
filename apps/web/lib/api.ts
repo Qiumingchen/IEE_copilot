@@ -3,6 +3,7 @@ import type {
   AnalysisArtifactRecord,
   AnalysisJobType,
   CuratedEvidenceImportResponse,
+  CuratedEvidencePreviewResponse,
   EnzymeRecordBundle,
   EnzymeSummary,
   ExpressionRecord,
@@ -390,6 +391,21 @@ export async function importCuratedEvidence(
 ): Promise<CuratedEvidenceImportResponse> {
   return fetchWithTokenAndErrorMessage<CuratedEvidenceImportResponse>(
     `/enzymes/${enzymeId}/curated-evidence/import`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ csv_text: csvText })
+    }
+  );
+}
+
+export async function previewCuratedEvidence(
+  enzymeId: string,
+  token: string,
+  csvText: string
+): Promise<CuratedEvidencePreviewResponse> {
+  return fetchWithTokenAndErrorMessage<CuratedEvidencePreviewResponse>(
+    `/enzymes/${enzymeId}/curated-evidence/import-preview`,
     token,
     {
       method: "POST",

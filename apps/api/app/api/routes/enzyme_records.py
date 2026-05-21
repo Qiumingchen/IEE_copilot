@@ -32,6 +32,7 @@ from app.schemas.enzyme_record import (
     AnalysisArtifactResponse,
     CuratedEvidenceImportRequest,
     CuratedEvidenceImportResponse,
+    CuratedEvidencePreviewResponse,
     ExperimentConditionCreate,
     ExperimentConditionResponse,
     ExpressionRecordCreate,
@@ -52,6 +53,7 @@ from app.schemas.enzyme_record import (
 from app.services.curated_evidence_import import (
     CuratedEvidenceImportError,
     import_curated_evidence,
+    preview_curated_evidence,
 )
 from app.schemas.experiment import (
     ExperimentImportPreviewResponse,
@@ -1002,6 +1004,34 @@ def list_properties(
             .where(PropertyRecord.enzyme_entry_id == enzyme_id)
             .order_by(PropertyRecord.created_at)
         )
+    )
+
+
+@router.post(
+    "/{enzyme_id}/curated-evidence/import-preview",
+    response_model=CuratedEvidencePreviewResponse,
+)
+def preview_curated_evidence_records(
+    enzyme_id: str,
+    request: CuratedEvidenceImportRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> CuratedEvidencePreviewResponse:
+    _require_curator(user)
+    _get_enzyme(db, enzyme_id)
+    try:
+        result = preview_curated_evidence(request.csv_text)
+    except CuratedEvidenceImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return CuratedEvidencePreviewResponse(
+        fields=result.fields,
+        row_count=result.row_count,
+        record_counts=result.record_counts,
+        records=[record.__dict__ for record in result.records],
+        warnings=result.warnings,
     )
 
 

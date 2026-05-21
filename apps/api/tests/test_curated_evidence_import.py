@@ -105,6 +105,66 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
     assert mutation.assay_condition_summary["evidence"] == "S2P increased half-life"
 
 
+def test_curator_can_preview_curated_evidence_without_writing_records(client, db_session):
+    email = "curated-preview@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,property_type,value_original,unit_original,substrate,mutation_string,doi,reference_title,evidence_text",
+            "property,optimal_pH,7.0,pH,casein,,10.1000/preview,Preview paper,Optimum pH reported",
+            "mutation,,,,casein,S2P,10.1000/preview,Preview paper,S2P increased half-life",
+        ]
+    )
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import-preview",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["row_count"] == 2
+    assert body["record_counts"] == {"properties": 1, "kinetics": 0, "mutations": 1}
+    assert body["fields"] == [
+        "record_type",
+        "property_type",
+        "value_original",
+        "unit_original",
+        "substrate",
+        "mutation_string",
+        "doi",
+        "reference_title",
+        "evidence_text",
+    ]
+    assert body["records"][0]["record_type"] == "property"
+    assert body["records"][0]["summary"] == "optimal_pH 7.0 pH"
+    assert body["records"][1]["record_type"] == "mutation"
+    assert body["records"][1]["summary"] == "S2P"
+
+    assert db_session.scalar(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == seeded_enzyme.id)) is None
+    assert db_session.scalar(select(MutationRecord).where(MutationRecord.enzyme_entry_id == seeded_enzyme.id)) is None
+    assert db_session.scalar(select(LiteratureReference).where(LiteratureReference.doi == "10.1000/preview")) is None
+
+
+def test_curated_evidence_preview_returns_validation_errors(client, db_session):
+    email = "curated-preview-errors@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import-preview",
+        headers=headers,
+        json={"csv_text": "record_type,mutation_string\nmutation,S2"},
+    )
+
+    assert response.status_code == 422
+    assert "row 2" in response.json()["error"]["message"]
+
+
 def test_non_curator_cannot_import_curated_evidence(client, db_session):
     headers = _auth_headers(client, "curated-denied@example.com")
     seeded_enzyme = _seed_enzyme(db_session)

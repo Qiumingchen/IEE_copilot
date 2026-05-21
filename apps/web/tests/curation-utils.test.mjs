@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   canSubmitRejection,
+  curatedEvidenceCsvTemplate,
+  summarizeCuratedEvidencePreview,
   summarizeCuratedEvidenceImport,
   summarizeVisibilityRequest
 } from "../app/curation/curation-utils.ts";
@@ -52,4 +54,24 @@ test("summarizeCuratedEvidenceImport reports created evidence counts", () => {
     }),
     "Created 2 property, 1 kinetic, 3 mutation records from 2 references."
   );
+});
+
+test("summarizeCuratedEvidencePreview reports parsed evidence counts", () => {
+  assert.equal(
+    summarizeCuratedEvidencePreview({
+      fields: ["record_type", "property_type"],
+      row_count: 4,
+      record_counts: { properties: 2, kinetics: 1, mutations: 1 },
+      records: [],
+      warnings: []
+    }),
+    "4 rows parsed: 2 property, 1 kinetic, 1 mutation records."
+  );
+});
+
+test("curatedEvidenceCsvTemplate includes all supported evidence record types", () => {
+  assert.equal(curatedEvidenceCsvTemplate.includes("record_type"), true);
+  assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
+  assert.equal(curatedEvidenceCsvTemplate.includes("kinetic,"), true);
+  assert.equal(curatedEvidenceCsvTemplate.includes("mutation,"), true);
 });
