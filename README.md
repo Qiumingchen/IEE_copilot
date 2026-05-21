@@ -64,12 +64,18 @@ tool installs.
 
 - `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, and literature adapters.
 - `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
+- `HOMOLOG_PROVIDER_FETCH_SIZE=25` limits the upstream UniProt candidate pool before local identity and coverage filtering.
 - `MAFFT_BIN="mafft --auto -"` configures the MAFFT runner.
 - `ROSETTA_DDG_COMMAND="python /path/to/rosetta_ddg_wrapper.py"` configures the Rosetta ddG runner boundary.
 - `ROSETTA_DDG_BIN="/path/to/rosetta_ddg"` can be used when a direct executable is enough.
 
 When fallbacks are enabled, artifacts are still marked with `mode=fallback`.
 Fallback outputs should not be treated as real scientific results.
+
+For mature microbial transglutaminases, engineering calculations use the
+UniProt mature chain when a `Chain` feature is available. The bundled seed
+entry uses P81453 full length as the stored sequence and its mature chain as
+the engineering target.
 
 ## Development Checks
 

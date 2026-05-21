@@ -6,8 +6,19 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 import app.db.models  # noqa: F401
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def default_to_mock_science_providers(monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "false")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.fixture

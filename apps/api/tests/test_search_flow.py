@@ -15,8 +15,44 @@ from app.db.models import (
     SearchCacheRecord,
     StructureEntry,
 )
-from app.external.uniprot import UniProtEntry, UniProtSearchHit
+from app.api.routes.enzymes import _ensure_protein_sequence
+from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, UniProtEntry, UniProtSearchHit
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
+
+
+def test_seed_mtgase_sequence_repair_updates_old_mock_mature_sequence(db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        source="seed",
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLNDTLLAIGGQ",
+            mature_sequence="AEAKLLNDTLLAIGGQ",
+            source="seed",
+            checksum="old-mock-checksum",
+        )
+    )
+    db_session.commit()
+
+    _ensure_protein_sequence(db_session, enzyme, EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE)
+
+    sequence = db_session.scalar(select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id))
+    assert sequence.sequence == P81453_FULL_SEQUENCE
+    assert sequence.mature_sequence == P81453_MATURE_SEQUENCE
+    assert sequence.checksum != "old-mock-checksum"
 
 
 def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
