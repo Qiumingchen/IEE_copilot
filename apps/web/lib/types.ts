@@ -310,6 +310,7 @@ export type CuratedEvidencePreviewRecord = {
   record_type: string;
   summary: string;
   reference_key: string | null;
+  reference_match_mode: string | null;
   evidence_text: string | null;
 };
 

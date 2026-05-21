@@ -279,12 +279,47 @@ def test_curator_can_preview_curated_evidence_without_writing_records(client, db
     ]
     assert body["records"][0]["record_type"] == "property"
     assert body["records"][0]["summary"] == "optimal_pH 7.0 pH"
+    assert body["records"][0]["reference_key"] == "10.1000/preview"
+    assert body["records"][0]["reference_match_mode"] == "doi"
     assert body["records"][1]["record_type"] == "mutation"
     assert body["records"][1]["summary"] == "S2P"
+    assert body["records"][1]["reference_key"] == "10.1000/preview"
+    assert body["records"][1]["reference_match_mode"] == "doi"
 
     assert db_session.scalar(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == seeded_enzyme.id)) is None
     assert db_session.scalar(select(MutationRecord).where(MutationRecord.enzyme_entry_id == seeded_enzyme.id)) is None
     assert db_session.scalar(select(LiteratureReference).where(LiteratureReference.doi == "10.1000/preview")) is None
+
+
+def test_curated_evidence_preview_reports_reference_match_modes(client, db_session):
+    email = "curated-preview-reference-modes@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,property_type,value_original,unit_original,mutation_string,doi,pubmed_id,reference_title,journal,year,source,evidence_text",
+            "property,optimal_pH,7.0,pH,,doi:10.1000/mode,,DOI Mode Paper,Journal,2024,curated_literature,DOI evidence",
+            "mutation,,,,S2P,,PMID: 123456,PMID Mode Paper,Journal,2023,curated_literature,PMID evidence",
+            "property,optimal_temperature,58,degC,,,,Title Mode Paper,Journal,2022,curated_literature,Title evidence",
+        ]
+    )
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import-preview",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert response.status_code == 200
+    assert [
+        (record["reference_key"], record["reference_match_mode"])
+        for record in response.json()["records"]
+    ] == [
+        ("10.1000/mode", "doi"),
+        ("123456", "pubmed_id"),
+        ("title mode paper:2022:curated_literature", "title_year_source"),
+    ]
 
 
 def test_curated_evidence_preview_returns_row_level_validation_report(client, db_session):

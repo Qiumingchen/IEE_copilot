@@ -19,6 +19,7 @@ import {
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
   formatImportedReference,
+  formatPreviewReference,
   summarizeCuratedEvidenceImport,
   summarizeCuratedEvidencePreview,
   summarizeVisibilityRequest
@@ -294,6 +295,7 @@ export default function CurationClient() {
                     <th className="px-3 py-2">Type</th>
                     <th className="px-3 py-2">Summary</th>
                     <th className="px-3 py-2">Reference</th>
+                    <th className="px-3 py-2">Match</th>
                     <th className="px-3 py-2">Evidence</th>
                   </tr>
                 </thead>
@@ -303,7 +305,12 @@ export default function CurationClient() {
                       <td className="whitespace-nowrap px-3 py-2 text-slate-600">{record.row_number}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-slate-800">{record.record_type}</td>
                       <td className="min-w-48 px-3 py-2 text-slate-800">{record.summary}</td>
-                      <td className="min-w-44 px-3 py-2 text-slate-600">{record.reference_key ?? "-"}</td>
+                      <td className="min-w-44 px-3 py-2 font-mono text-xs text-slate-600">
+                        {record.reference_key ?? "-"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                        {formatPreviewReference(record).split(" · ").at(1) ?? "-"}
+                      </td>
                       <td className="min-w-64 px-3 py-2 text-slate-600">{record.evidence_text ?? "-"}</td>
                     </tr>
                   ))}

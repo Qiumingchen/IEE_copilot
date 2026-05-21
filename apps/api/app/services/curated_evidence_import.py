@@ -38,7 +38,14 @@ class CuratedEvidencePreviewRecord:
     record_type: str
     summary: str
     reference_key: str | None = None
+    reference_match_mode: str | None = None
     evidence_text: str | None = None
+
+
+@dataclass(frozen=True)
+class ReferenceIdentity:
+    key: str | None
+    match_mode: str | None
 
 
 @dataclass
@@ -94,12 +101,14 @@ def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
                 record_counts["mutations"] += 1
 
         if not any(error.row_number == index for error in errors):
+            reference_identity = _reference_identity(row)
             records.append(
                 CuratedEvidencePreviewRecord(
                     row_number=index,
                     record_type=record_type,
                     summary=_summarize_row(record_type, row),
-                    reference_key=_reference_key(row),
+                    reference_key=reference_identity.key,
+                    reference_match_mode=reference_identity.match_mode,
                     evidence_text=_value(row, "evidence_text") or None,
                 )
             )
@@ -386,15 +395,27 @@ def _summarize_row(record_type: str, row: dict[str, str]) -> str:
 
 
 def _reference_key(row: dict[str, str]) -> str | None:
+    return _reference_identity(row).key
+
+
+def _reference_identity(row: dict[str, str]) -> ReferenceIdentity:
+    doi = _normalize_doi(_value(row, "doi"))
+    if doi:
+        return ReferenceIdentity(key=doi, match_mode="doi")
+
+    pubmed_id = _normalize_pubmed_id(_value(row, "pubmed_id"))
+    if pubmed_id:
+        return ReferenceIdentity(key=pubmed_id, match_mode="pubmed_id")
+
     title = _normalize_reference_title(_value(row, "reference_title"))
-    year = _value(row, "year")
+    year = str(_int_or_none(_value(row, "year")) or "")
     source = _value(row, "source") or "curated_literature"
-    return (
-        _normalize_doi(_value(row, "doi"))
-        or _normalize_pubmed_id(_value(row, "pubmed_id"))
-        or (":".join(part for part in [title, year, source] if part) if title else None)
-        or None
-    )
+    if title:
+        return ReferenceIdentity(
+            key=":".join(part for part in [title, year, source] if part),
+            match_mode="title_year_source",
+        )
+    return ReferenceIdentity(key=None, match_mode=None)
 
 
 def _normalize_doi(value: str) -> str:

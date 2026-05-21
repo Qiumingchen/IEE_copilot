@@ -111,6 +111,7 @@ class CuratedEvidencePreviewRecord(BaseModel):
     record_type: str
     summary: str
     reference_key: str | None = None
+    reference_match_mode: str | None = None
     evidence_text: str | None = None
 
 

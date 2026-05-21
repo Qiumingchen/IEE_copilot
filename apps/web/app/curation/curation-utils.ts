@@ -37,6 +37,24 @@ export function formatImportedReference(reference: LiteratureReferenceRecord): s
   return `${label} · ${reference.source}`;
 }
 
+export function formatPreviewReference(record: {
+  reference_key: string | null;
+  reference_match_mode: string | null;
+}): string {
+  if (!record.reference_key) {
+    return "-";
+  }
+  const matchModeLabels: Record<string, string> = {
+    doi: "DOI",
+    pubmed_id: "PMID",
+    title_year_source: "title/year/source"
+  };
+  const matchMode = record.reference_match_mode
+    ? (matchModeLabels[record.reference_match_mode] ?? record.reference_match_mode)
+    : null;
+  return [record.reference_key, matchMode].filter(Boolean).join(" · ");
+}
+
 export function normalizeDoiForDisplay(value: string | null | undefined): string {
   if (!value) {
     return "";

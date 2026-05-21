@@ -5,6 +5,7 @@ import {
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
   formatImportedReference,
+  formatPreviewReference,
   summarizeCuratedEvidencePreview,
   summarizeCuratedEvidenceImport,
   summarizeVisibilityRequest
@@ -95,6 +96,31 @@ test("curatedEvidenceCsvTemplate includes all supported evidence record types", 
   assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("kinetic,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("mutation,"), true);
+});
+
+test("formatPreviewReference includes the reference match mode", () => {
+  assert.equal(
+    formatPreviewReference({
+      row_number: 2,
+      record_type: "property",
+      summary: "optimal_pH 7.0 pH",
+      reference_key: "10.1000/mode",
+      reference_match_mode: "doi",
+      evidence_text: "Optimum pH reported"
+    }),
+    "10.1000/mode · DOI"
+  );
+  assert.equal(
+    formatPreviewReference({
+      row_number: 3,
+      record_type: "mutation",
+      summary: "S2P",
+      reference_key: "title mode paper:2022:curated_literature",
+      reference_match_mode: "title_year_source",
+      evidence_text: "S2P increased half-life"
+    }),
+    "title mode paper:2022:curated_literature · title/year/source"
+  );
 });
 
 test("formatImportedReference shows DOI title and source", () => {
