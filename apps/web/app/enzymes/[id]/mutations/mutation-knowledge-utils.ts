@@ -40,11 +40,11 @@ export function formatPropertyDelta(delta: Record<string, unknown> | null | unde
 }
 
 export function formatMutationEvidence(
-  record: Pick<MutationRecord, "assay_condition_summary" | "reference_id">,
+  record: Pick<MutationRecord, "assay_condition_summary" | "reference_id" | "reference">,
   referencesById: Record<string, LiteratureReferenceRecord> = {}
 ): string {
   const summary = record.assay_condition_summary;
-  const reference = record.reference_id ? referencesById[record.reference_id] : null;
+  const reference = record.reference ?? (record.reference_id ? referencesById[record.reference_id] : null);
   if (!summary && !reference) {
     return "-";
   }

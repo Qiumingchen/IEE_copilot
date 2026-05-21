@@ -98,6 +98,7 @@ class PropertyRecordCreate(BaseModel):
 class PropertyRecordResponse(PropertyRecordCreate):
     id: str
     enzyme_entry_id: str
+    reference: "LiteratureReferenceResponse | None" = None
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
@@ -191,6 +192,7 @@ class MutationRecordResponse(BaseModel):
     substrate: str | None = None
     assay_condition_summary: dict[str, Any] | None = None
     reference_id: str | None = None
+    reference: LiteratureReferenceResponse | None = None
     is_user_uploaded: bool
     visibility: Visibility
     curation_status: CurationStatus
@@ -215,6 +217,7 @@ class KineticRecordCreate(BaseModel):
 class KineticRecordResponse(KineticRecordCreate):
     id: str
     enzyme_entry_id: str
+    reference: LiteratureReferenceResponse | None = None
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 

@@ -143,6 +143,7 @@ export type PropertyRecord = {
   buffer: string | null;
   method: string | null;
   reference_id: string | null;
+  reference: LiteratureReferenceRecord | null;
   evidence_text: string | null;
   visibility: string;
   curation_status: string;
@@ -197,6 +198,7 @@ export type MutationRecord = {
   substrate: string | null;
   assay_condition_summary: Record<string, unknown> | null;
   reference_id: string | null;
+  reference: LiteratureReferenceRecord | null;
   is_user_uploaded: boolean;
   visibility: string;
   curation_status: string;
@@ -222,6 +224,7 @@ export type KineticRecord = {
   assay_pH: string | null;
   method: string | null;
   reference_id: string | null;
+  reference: LiteratureReferenceRecord | null;
   visibility: string;
   curation_status: string;
 };

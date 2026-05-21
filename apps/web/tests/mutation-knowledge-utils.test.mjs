@@ -49,6 +49,29 @@ test("formatMutationEvidence combines source and evidence text", () => {
 });
 
 test("formatMutationEvidence prefers readable reference metadata when available", () => {
+  const reference = {
+    id: "ref-1",
+    title: "Thermostable MTGase variant",
+    authors: null,
+    journal: "Biocatalysis Reports",
+    year: 2024,
+    doi: "10.1000/s2p",
+    pubmed_id: null,
+    source: "curated_literature",
+    provenance: { mode: "curated" }
+  };
+
+  assert.equal(
+    formatMutationEvidence({
+      reference_id: "ref-1",
+      reference,
+      assay_condition_summary: {
+        source: "curated_literature",
+        evidence: "S2P increased half-life"
+      }
+    }),
+    "10.1000/s2p · Thermostable MTGase variant · S2P increased half-life"
+  );
   assert.equal(
     formatMutationEvidence(
       {
@@ -60,15 +83,7 @@ test("formatMutationEvidence prefers readable reference metadata when available"
       },
       {
         "ref-1": {
-          id: "ref-1",
-          title: "Thermostable MTGase variant",
-          authors: null,
-          journal: "Biocatalysis Reports",
-          year: 2024,
-          doi: "10.1000/s2p",
-          pubmed_id: null,
-          source: "curated_literature",
-          provenance: { mode: "curated" }
+          ...reference
         }
       }
     ),

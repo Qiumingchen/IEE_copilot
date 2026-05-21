@@ -18,8 +18,8 @@ import type {
 import {
   buildPropertyOptions,
   formatAssayContext,
+  formatKineticEvidence,
   formatPropertyEvidence,
-  formatReferenceLabel,
   formatRankingValue,
   summarizeRankingGroup
 } from "./property-dashboard-utils";
@@ -301,9 +301,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         .join(" · ") || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {record.reference_id && referencesById[record.reference_id]
-                        ? `${formatReferenceLabel(referencesById[record.reference_id])} · ${referencesById[record.reference_id].source}`
-                        : record.reference_id ?? "-"}
+                      {formatKineticEvidence(record, referencesById)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {record.visibility} / {record.curation_status}

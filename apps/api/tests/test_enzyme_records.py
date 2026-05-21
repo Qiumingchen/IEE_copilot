@@ -7,8 +7,11 @@ from app.db.models import (
     EnzymeFamily,
     EnzymeModule,
     JobStatus,
+    KineticRecord,
+    LiteratureReference,
     MutationRecord,
     ProteinSequence,
+    PropertyRecord,
     StructureEntry,
     Visibility,
 )
@@ -161,6 +164,64 @@ def test_create_and_list_enzyme_domain_records(client, db_session):
     assert list_properties.json()[0]["value_original"] == "55"
     assert list_kinetics.json()[0]["km"] == "1.8"
     assert list_expression.json()[0]["condition"]["method"] == "shake flask expression"
+
+
+def test_list_evidence_records_embed_literature_reference(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    reference = LiteratureReference(
+        title="Traceable MTGase evidence",
+        journal="Biocatalysis Reports",
+        year=2024,
+        doi="10.1000/traceable",
+        source="curated_literature",
+        metadata_json={"provenance": {"provider": "curated_literature", "mode": "curated"}},
+    )
+    db_session.add(reference)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme_id,
+                property_type="optimal_temperature",
+                value_original="58",
+                unit_original="degC",
+                reference_id=reference.id,
+                evidence_text="Optimum temperature reported in Table 1",
+                visibility=Visibility.PUBLIC,
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme_id,
+                substrate="casein",
+                km="2.1",
+                kcat="31",
+                reference_id=reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="S2P",
+                mutation_positions=[{"wildtype": "S", "position": 2, "mutant": "P"}],
+                effect_summary="Improved thermostability",
+                reference_id=reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    properties = client.get(f"/enzymes/{enzyme_id}/properties", headers=headers).json()
+    kinetics = client.get(f"/enzymes/{enzyme_id}/kinetics", headers=headers).json()
+    mutations = client.get(f"/enzymes/{enzyme_id}/mutations", headers=headers).json()
+
+    assert properties[0]["reference"]["doi"] == "10.1000/traceable"
+    assert properties[0]["reference"]["title"] == "Traceable MTGase evidence"
+    assert properties[0]["reference"]["provenance"] == {
+        "provider": "curated_literature",
+        "mode": "curated",
+    }
+    assert kinetics[0]["reference"]["doi"] == "10.1000/traceable"
+    assert mutations[0]["reference"]["doi"] == "10.1000/traceable"
 
 
 def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):

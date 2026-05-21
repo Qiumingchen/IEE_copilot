@@ -167,6 +167,27 @@ def _literature_reference_response(reference: LiteratureReference) -> Literature
     )
 
 
+def _optional_literature_reference_response(
+    reference: LiteratureReference | None,
+) -> LiteratureReferenceResponse | None:
+    return _literature_reference_response(reference) if reference is not None else None
+
+
+def _references_by_id_for_records(
+    db: Session,
+    records: list[PropertyRecord] | list[KineticRecord] | list[MutationRecord],
+) -> dict[str, LiteratureReference]:
+    reference_ids = {record.reference_id for record in records if record.reference_id}
+    if not reference_ids:
+        return {}
+    return {
+        reference.id: reference
+        for reference in db.scalars(
+            select(LiteratureReference).where(LiteratureReference.id.in_(reference_ids))
+        )
+    }
+
+
 def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
     protein_sequence = db.scalar(
         select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme_id)
@@ -750,6 +771,54 @@ def _property_ranking_response(ranking) -> PropertyRankingResponse:
     )
 
 
+def _property_response(
+    record: PropertyRecord,
+    reference: LiteratureReference | None = None,
+) -> PropertyRecordResponse:
+    return PropertyRecordResponse(
+        id=record.id,
+        enzyme_entry_id=record.enzyme_entry_id,
+        property_type=record.property_type,
+        value_original=record.value_original,
+        unit_original=record.unit_original,
+        value_standardized=record.value_standardized,
+        unit_standardized=record.unit_standardized,
+        standardization_status=record.standardization_status,
+        substrate=record.substrate,
+        assay_temperature=record.assay_temperature,
+        assay_pH=record.assay_pH,
+        buffer=record.buffer,
+        method=record.method,
+        reference_id=record.reference_id,
+        evidence_text=record.evidence_text,
+        visibility=record.visibility,
+        curation_status=record.curation_status,
+        reference=_optional_literature_reference_response(reference),
+    )
+
+
+def _kinetic_response(
+    record: KineticRecord,
+    reference: LiteratureReference | None = None,
+) -> KineticRecordResponse:
+    return KineticRecordResponse(
+        id=record.id,
+        enzyme_entry_id=record.enzyme_entry_id,
+        substrate=record.substrate,
+        km=record.km,
+        kcat=record.kcat,
+        kcat_km=record.kcat_km,
+        unit_original=record.unit_original,
+        assay_temperature=record.assay_temperature,
+        assay_pH=record.assay_pH,
+        method=record.method,
+        reference_id=record.reference_id,
+        visibility=record.visibility,
+        curation_status=record.curation_status,
+        reference=_optional_literature_reference_response(reference),
+    )
+
+
 def _mutation_positions_response(record: MutationRecord) -> list[dict]:
     if isinstance(record.mutation_positions, list):
         return record.mutation_positions
@@ -764,7 +833,10 @@ def _mutation_positions_response(record: MutationRecord) -> list[dict]:
         return []
 
 
-def _mutation_response(record: MutationRecord) -> MutationRecordResponse:
+def _mutation_response(
+    record: MutationRecord,
+    reference: LiteratureReference | None = None,
+) -> MutationRecordResponse:
     return MutationRecordResponse(
         id=record.id,
         enzyme_entry_id=record.enzyme_entry_id,
@@ -776,6 +848,7 @@ def _mutation_response(record: MutationRecord) -> MutationRecordResponse:
         substrate=record.substrate,
         assay_condition_summary=record.assay_condition_summary,
         reference_id=record.reference_id,
+        reference=_optional_literature_reference_response(reference),
         is_user_uploaded=record.is_user_uploaded,
         visibility=record.visibility,
         curation_status=record.curation_status,
@@ -1040,15 +1113,20 @@ def list_properties(
     enzyme_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> list[PropertyRecord]:
+) -> list[PropertyRecordResponse]:
     _get_enzyme(db, enzyme_id)
-    return list(
+    records = list(
         db.scalars(
             select(PropertyRecord)
             .where(PropertyRecord.enzyme_entry_id == enzyme_id)
             .order_by(PropertyRecord.created_at)
         )
     )
+    references_by_id = _references_by_id_for_records(db, records)
+    return [
+        _property_response(record, references_by_id.get(record.reference_id or ""))
+        for record in records
+    ]
 
 
 @router.get("/{enzyme_id}/references", response_model=list[LiteratureReferenceResponse])
@@ -1147,7 +1225,7 @@ def create_property(
     request: PropertyRecordCreate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> PropertyRecord:
+) -> PropertyRecordResponse:
     enzyme = _get_enzyme(db, enzyme_id)
     payload = request.model_dump()
     if (
@@ -1167,7 +1245,8 @@ def create_property(
     db.add(record)
     db.commit()
     db.refresh(record)
-    return record
+    reference = db.get(LiteratureReference, record.reference_id) if record.reference_id else None
+    return _property_response(record, reference)
 
 
 @router.get("/{enzyme_id}/property-rankings", response_model=PropertyRankingResponse)
@@ -1226,8 +1305,9 @@ def list_mutations(
             .order_by(MutationRecord.created_at)
         )
     )
+    references_by_id = _references_by_id_for_records(db, records)
     return [
-        _mutation_response(record)
+        _mutation_response(record, references_by_id.get(record.reference_id or ""))
         for record in records
         if _mutation_record_matches_position(record, position)
         and _mutation_record_matches_source(record, source)
@@ -1240,15 +1320,20 @@ def list_kinetics(
     enzyme_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> list[KineticRecord]:
+) -> list[KineticRecordResponse]:
     _get_enzyme(db, enzyme_id)
-    return list(
+    records = list(
         db.scalars(
             select(KineticRecord)
             .where(KineticRecord.enzyme_entry_id == enzyme_id)
             .order_by(KineticRecord.created_at)
         )
     )
+    references_by_id = _references_by_id_for_records(db, records)
+    return [
+        _kinetic_response(record, references_by_id.get(record.reference_id or ""))
+        for record in records
+    ]
 
 
 @router.post(
@@ -1261,13 +1346,14 @@ def create_kinetic(
     request: KineticRecordCreate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> KineticRecord:
+) -> KineticRecordResponse:
     enzyme = _get_enzyme(db, enzyme_id)
     record = KineticRecord(enzyme_entry_id=enzyme.id, **request.model_dump())
     db.add(record)
     db.commit()
     db.refresh(record)
-    return record
+    reference = db.get(LiteratureReference, record.reference_id) if record.reference_id else None
+    return _kinetic_response(record, reference)
 
 
 def _create_condition(

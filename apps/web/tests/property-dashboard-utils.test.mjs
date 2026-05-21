@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildPropertyOptions,
+  formatKineticEvidence,
   formatPropertyEvidence,
   formatRankingValue,
   summarizeRankingGroup
@@ -57,6 +58,28 @@ test("formatPropertyEvidence exposes literature evidence and reference", () => {
 });
 
 test("formatPropertyEvidence prefers readable DOI and title when reference metadata is available", () => {
+  const reference = {
+    id: "ref-1",
+    title: "Thermostability of MTGase",
+    authors: null,
+    journal: "Biocatalysis Reports",
+    year: 2024,
+    doi: "10.1000/mtgase",
+    pubmed_id: null,
+    source: "curated_literature",
+    provenance: { mode: "curated" }
+  };
+
+  assert.equal(
+    formatPropertyEvidence({
+      reference_id: "ref-1",
+      reference,
+      evidence_text: "Reported at pH 7.0 after 30 min assay.",
+      visibility: "public",
+      curation_status: "approved"
+    }),
+    "10.1000/mtgase · Thermostability of MTGase · Reported at pH 7.0 after 30 min assay. · public / approved"
+  );
   assert.equal(
     formatPropertyEvidence(
       {
@@ -67,19 +90,33 @@ test("formatPropertyEvidence prefers readable DOI and title when reference metad
       },
       {
         "ref-1": {
-          id: "ref-1",
-          title: "Thermostability of MTGase",
-          authors: null,
-          journal: "Biocatalysis Reports",
-          year: 2024,
-          doi: "10.1000/mtgase",
-          pubmed_id: null,
-          source: "curated_literature",
-          provenance: { mode: "curated" }
+          ...reference
         }
       }
     ),
     "10.1000/mtgase · Thermostability of MTGase · Reported at pH 7.0 after 30 min assay. · public / approved"
+  );
+});
+
+test("formatKineticEvidence prefers embedded reference metadata", () => {
+  assert.equal(
+    formatKineticEvidence({
+      reference_id: "ref-1",
+      reference: {
+        id: "ref-1",
+        title: "MTGase kinetics",
+        authors: null,
+        journal: "Biocatalysis Reports",
+        year: 2024,
+        doi: null,
+        pubmed_id: "123456",
+        source: "curated_literature",
+        provenance: { mode: "curated" }
+      },
+      visibility: "public",
+      curation_status: "approved"
+    }),
+    "PMID 123456 · MTGase kinetics · curated_literature · public / approved"
   );
 });
 
