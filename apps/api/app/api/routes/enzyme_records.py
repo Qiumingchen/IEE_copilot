@@ -336,6 +336,27 @@ def _latest_recommendation_candidates_for_library(db: Session, enzyme_id: str) -
     return [candidate for candidate in candidates if isinstance(candidate, dict)]
 
 
+def _recommendation_candidates_from_artifact(db: Session, enzyme_id: str, artifact_id: str) -> list[dict]:
+    row = db.execute(
+        select(AnalysisArtifact, AnalysisJob)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisArtifact.job_id)
+        .where(
+            AnalysisArtifact.id == artifact_id,
+            AnalysisArtifact.enzyme_entry_id == enzyme_id,
+            AnalysisArtifact.artifact_type == "mutation_recommendations",
+        )
+    ).first()
+    if row is None:
+        return []
+
+    _artifact, job = row
+    summary = job.result_summary_json or {}
+    candidates = summary.get("candidates", [])
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
 def _rosetta_results_for_library(db: Session, enzyme_id: str) -> list[dict]:
     rows = db.execute(
         select(AnalysisArtifact, AnalysisJob)
@@ -477,7 +498,26 @@ def _analysis_job_parameters(
         parameters["mutation_string"] = normalize_mutation_string(mutations)
         parameters["parsed_mutations"] = [mutation.model_dump() for mutation in mutations]
     if job_type == "library_design":
-        parameters["recommendation_candidates"] = _latest_recommendation_candidates_for_library(db, enzyme_id)
+        recommendation_artifact_id = parameters.get("recommendation_artifact_id")
+        if isinstance(recommendation_artifact_id, str) and recommendation_artifact_id.strip():
+            recommendation_candidates = _recommendation_candidates_from_artifact(
+                db,
+                enzyme_id,
+                recommendation_artifact_id,
+            )
+            parameters["recommendation_source"] = {
+                "type": "recommendation_artifact",
+                "artifact_id": recommendation_artifact_id,
+                "candidate_count": len(recommendation_candidates),
+            }
+        else:
+            recommendation_candidates = _latest_recommendation_candidates_for_library(db, enzyme_id)
+            if recommendation_candidates:
+                parameters["recommendation_source"] = {
+                    "type": "latest_recommendation_artifact",
+                    "candidate_count": len(recommendation_candidates),
+                }
+        parameters["recommendation_candidates"] = recommendation_candidates
         parameters["rosetta_results"] = _rosetta_results_for_library(db, enzyme_id)
         parameters["library_size"] = int(parameters.get("library_size") or 24)
         parameters["max_order"] = int(parameters.get("max_order") or 2)

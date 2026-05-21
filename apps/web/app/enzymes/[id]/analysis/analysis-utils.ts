@@ -45,6 +45,8 @@ export type ConservationInputMode = "latest" | "artifact";
 
 export type MutationRecommendationInputMode = "latest" | "artifact";
 
+export type MutationLibraryInputMode = "latest" | "artifact";
+
 export type HomologArtifactOption = {
   id: string;
   label: string;
@@ -56,6 +58,11 @@ export type MsaArtifactOption = {
 };
 
 export type ConservationArtifactOption = {
+  id: string;
+  label: string;
+};
+
+export type RecommendationArtifactOption = {
   id: string;
   label: string;
 };
@@ -152,13 +159,19 @@ export type MutationLibraryView = {
 export function buildLibraryDesignParameters(
   librarySize: number,
   maxOrder: number,
-  plateFormat: number
-): Record<string, number> {
-  return {
+  plateFormat: number,
+  inputMode: MutationLibraryInputMode = "latest",
+  recommendationArtifactId = ""
+): Record<string, number | string> {
+  const parameters: Record<string, number | string> = {
     library_size: librarySize,
     max_order: maxOrder,
     plate_format: plateFormat
   };
+  if (inputMode === "artifact" && recommendationArtifactId.trim()) {
+    parameters.recommendation_artifact_id = recommendationArtifactId.trim();
+  }
+  return parameters;
 }
 
 export function buildMsaJobParameters(
@@ -221,6 +234,21 @@ export function getConservationArtifactOptions(
       return {
         id: artifact.id,
         label: `${artifact.created_at} | ${siteCount} sites | ${sequenceCount} seqs`
+      };
+    });
+}
+
+export function getRecommendationArtifactOptions(
+  artifacts: AnalysisArtifactRecord[]
+): RecommendationArtifactOption[] {
+  return artifacts
+    .filter((artifact) => artifact.artifact_type === "mutation_recommendations")
+    .map((artifact) => {
+      const summary = artifact.result_summary_json ?? {};
+      const candidateCount = typeof summary.candidate_count === "number" ? summary.candidate_count : 0;
+      return {
+        id: artifact.id,
+        label: `${artifact.created_at} | ${candidateCount} candidates`
       };
     });
 }

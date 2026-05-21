@@ -36,6 +36,7 @@ import {
   getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
+  getRecommendationArtifactOptions,
   getRosettaDdgResults,
   getRosettaDdgRunViews
 } from "./analysis-utils";
@@ -48,6 +49,7 @@ import type {
   HomologSequenceView,
   MsaInputMode,
   MsaRecordView,
+  MutationLibraryInputMode,
   MutationRecommendationInputMode,
   MutationLibraryView,
   MutationRecommendationCandidateView,
@@ -138,6 +140,8 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [librarySize, setLibrarySize] = useState(24);
   const [maxOrder, setMaxOrder] = useState(2);
   const [plateFormat, setPlateFormat] = useState(96);
+  const [libraryInputMode, setLibraryInputMode] = useState<MutationLibraryInputMode>("latest");
+  const [selectedRecommendationArtifactId, setSelectedRecommendationArtifactId] = useState("");
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
   const [isRunningLibraryDesign, setIsRunningLibraryDesign] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
@@ -350,7 +354,15 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setIsRunningLibraryDesign(true);
     try {
       const job = await createAnalysisJob(enzymeId, token, "library_design", {
-        ...buildLibraryDesignParameters(librarySize, maxOrder, plateFormat)
+        ...buildLibraryDesignParameters(
+          librarySize,
+          maxOrder,
+          plateFormat,
+          libraryInputMode,
+          selectedRecommendationArtifactId ||
+            recommendationArtifactOptions[recommendationArtifactOptions.length - 1]?.id ||
+            ""
+        )
       });
       setNotice(`${job.job_type} job queued: ${job.id}`);
       await loadArtifacts(token);
@@ -495,6 +507,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const homologArtifactOptions = getHomologArtifactOptions(artifacts);
   const msaArtifactOptions = getMsaArtifactOptions(artifacts);
   const conservationArtifactOptions = getConservationArtifactOptions(artifacts);
+  const recommendationArtifactOptions = getRecommendationArtifactOptions(artifacts);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -1115,6 +1128,40 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-medium uppercase text-slate-500" htmlFor="library-source">
+                Source
+              </label>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                id="library-source"
+                onChange={(event) => setLibraryInputMode(event.target.value as MutationLibraryInputMode)}
+                value={libraryInputMode}
+              >
+                <option value="latest">Latest recommendations</option>
+                <option value="artifact">Previous recommendation run</option>
+              </select>
+              {libraryInputMode === "artifact" ? (
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  disabled={recommendationArtifactOptions.length === 0}
+                  onChange={(event) => setSelectedRecommendationArtifactId(event.target.value)}
+                  value={
+                    selectedRecommendationArtifactId ||
+                    recommendationArtifactOptions[recommendationArtifactOptions.length - 1]?.id ||
+                    ""
+                  }
+                >
+                  {recommendationArtifactOptions.length === 0 ? (
+                    <option value="">No recommendation runs</option>
+                  ) : (
+                    recommendationArtifactOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))
+                  )}
+                </select>
+              ) : null}
               <label className="text-xs font-medium uppercase text-slate-500" htmlFor="library-size">
                 Size
               </label>
@@ -1155,7 +1202,11 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
               </select>
               <button
                 className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-                disabled={!token || isRunningLibraryDesign}
+                disabled={
+                  !token ||
+                  isRunningLibraryDesign ||
+                  (libraryInputMode === "artifact" && recommendationArtifactOptions.length === 0)
+                }
                 onClick={() => void runLibraryDesign()}
                 type="button"
               >

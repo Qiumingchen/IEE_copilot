@@ -20,6 +20,7 @@ import {
   getMsaArtifactOptions,
   getMsaRecords,
   getMutationLibrary,
+  getRecommendationArtifactOptions,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
   getRosettaDdgRunViews
@@ -651,11 +652,47 @@ test("extracts mutation library variants and plate layout from artifact content"
 });
 
 test("builds mutation library design parameters from selected controls", () => {
-  assert.deepEqual(buildLibraryDesignParameters(384, 3, 384), {
+  assert.deepEqual(buildLibraryDesignParameters(384, 3, 384, "latest", "recommendation-1"), {
     library_size: 384,
     max_order: 3,
     plate_format: 384
   });
+  assert.deepEqual(buildLibraryDesignParameters(48, 2, 96, "artifact", "recommendation-1"), {
+    library_size: 48,
+    max_order: 2,
+    plate_format: 96,
+    recommendation_artifact_id: "recommendation-1"
+  });
+});
+
+test("builds recommendation artifact options for mutation library selection", () => {
+  const options = getRecommendationArtifactOptions([
+    {
+      id: "artifact-1",
+      enzyme_entry_id: "enzyme-1",
+      job_id: "job-1",
+      job_status: "finished",
+      artifact_type: "mutation_recommendations",
+      bucket: "iee-artifacts",
+      object_key: "analysis-jobs/job-1/mutation-recommendations.json",
+      checksum: null,
+      content_type: "application/json",
+      size_bytes: 100,
+      source: "worker",
+      visibility: "private",
+      created_at: "2026-05-21T10:00:00",
+      result_summary_json: {
+        candidate_count: 4
+      }
+    }
+  ]);
+
+  assert.deepEqual(options, [
+    {
+      id: "artifact-1",
+      label: "2026-05-21T10:00:00 | 4 candidates"
+    }
+  ]);
 });
 
 test("builds xlsx workbook bytes for mutation library export", () => {

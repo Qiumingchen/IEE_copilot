@@ -1290,6 +1290,107 @@ def test_create_library_design_job_uses_latest_recommendation_and_rosetta_artifa
     assert enqueued_job_ids == [body["id"]]
 
 
+def test_create_library_design_job_uses_selected_recommendation_artifact(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="selected-library-design-sequence",
+        )
+    )
+    older_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="mutation_recommendation",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "candidates": [
+                {
+                    "query_position": 2,
+                    "wildtype_residue": "C",
+                    "conservation_category": "highly_conserved",
+                    "priority_score": 1.1,
+                    "suggested_mutations": ["C2A"],
+                    "rationale": "selected older recommendation",
+                }
+            ]
+        },
+    )
+    newer_job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="mutation_recommendation",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "candidates": [
+                {
+                    "query_position": 10,
+                    "wildtype_residue": "L",
+                    "conservation_category": "variable",
+                    "priority_score": 1.8,
+                    "suggested_mutations": ["L10A"],
+                    "rationale": "newer recommendation",
+                }
+            ]
+        },
+    )
+    db_session.add_all([older_job, newer_job])
+    db_session.flush()
+    older_artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=older_job.id,
+        artifact_type="mutation_recommendations",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{older_job.id}/mutation-recommendations.json",
+        content_type="application/json",
+        size_bytes=256,
+    )
+    db_session.add(older_artifact)
+    db_session.add(
+        AnalysisArtifact(
+            enzyme_entry_id=enzyme_id,
+            job_id=newer_job.id,
+            artifact_type="mutation_recommendations",
+            bucket="iee-artifacts",
+            object_key=f"analysis-jobs/{newer_job.id}/mutation-recommendations.json",
+            content_type="application/json",
+            size_bytes=256,
+        )
+    )
+    db_session.commit()
+
+    class LibraryDesignTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_library_design",
+        LibraryDesignTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "library_design",
+            "parameters_json": {"recommendation_artifact_id": older_artifact.id},
+        },
+    )
+
+    assert response.status_code == 201
+    parameters = response.json()["parameters_json"]
+    assert parameters["recommendation_candidates"] == older_job.result_summary_json["candidates"]
+    assert parameters["recommendation_source"]["artifact_id"] == older_artifact.id
+
+
 def test_create_analysis_job_rejects_unsupported_job_type(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
