@@ -1031,7 +1031,9 @@ def preview_curated_evidence_records(
         row_count=result.row_count,
         record_counts=result.record_counts,
         records=[record.__dict__ for record in result.records],
+        errors=[error.__dict__ for error in result.errors],
         warnings=result.warnings,
+        valid=result.valid,
     )
 
 

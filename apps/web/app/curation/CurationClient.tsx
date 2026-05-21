@@ -215,7 +215,7 @@ export default function CurationClient() {
           </button>
           <button
             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={!token || isImporting || !importPreview}
+            disabled={!token || isImporting || !importPreview || !importPreview.valid}
             onClick={() => void handleCuratedImport()}
             type="button"
           >
@@ -292,6 +292,36 @@ export default function CurationClient() {
                 </tbody>
               </table>
             </div>
+
+            {importPreview.errors.length ? (
+              <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3">
+                <h4 className="text-sm font-semibold text-red-800">Validation errors</h4>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="min-w-full divide-y divide-red-200 text-sm">
+                    <thead className="text-left text-xs font-medium uppercase text-red-700">
+                      <tr>
+                        <th className="px-3 py-2">Row</th>
+                        <th className="px-3 py-2">Field</th>
+                        <th className="px-3 py-2">Message</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-red-100">
+                      {importPreview.errors.map((previewError) => (
+                        <tr key={`${previewError.row_number}-${previewError.field}-${previewError.message}`}>
+                          <td className="whitespace-nowrap px-3 py-2 text-red-900">
+                            {previewError.row_number}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 font-mono text-red-900">
+                            {previewError.field}
+                          </td>
+                          <td className="min-w-64 px-3 py-2 text-red-900">{previewError.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>

@@ -63,9 +63,28 @@ test("summarizeCuratedEvidencePreview reports parsed evidence counts", () => {
       row_count: 4,
       record_counts: { properties: 2, kinetics: 1, mutations: 1 },
       records: [],
+      errors: [],
+      valid: true,
       warnings: []
     }),
     "4 rows parsed: 2 property, 1 kinetic, 1 mutation records."
+  );
+});
+
+test("summarizeCuratedEvidencePreview includes validation error count", () => {
+  assert.equal(
+    summarizeCuratedEvidencePreview({
+      fields: ["record_type"],
+      row_count: 2,
+      record_counts: { properties: 1, kinetics: 0, mutations: 0 },
+      records: [],
+      errors: [
+        { row_number: 3, field: "mutation_string", message: "invalid mutation format: S2" }
+      ],
+      warnings: [],
+      valid: false
+    }),
+    "2 rows parsed: 1 property, 0 kinetic, 0 mutation records. 1 validation error."
   );
 });
 

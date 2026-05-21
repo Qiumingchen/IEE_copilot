@@ -33,5 +33,8 @@ export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewR
   const propertyCount = preview.record_counts.properties ?? 0;
   const kineticCount = preview.record_counts.kinetics ?? 0;
   const mutationCount = preview.record_counts.mutations ?? 0;
-  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records.`;
+  const errorCount = preview.errors.length;
+  const errorSummary =
+    errorCount > 0 ? ` ${errorCount} validation ${errorCount === 1 ? "error" : "errors"}.` : "";
+  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records.${errorSummary}`;
 }

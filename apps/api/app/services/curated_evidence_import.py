@@ -42,50 +42,74 @@ class CuratedEvidencePreviewRecord:
 
 
 @dataclass
+class CuratedEvidencePreviewError:
+    row_number: int
+    field: str
+    message: str
+
+
+@dataclass
 class CuratedEvidencePreviewResult:
     fields: list[str]
     row_count: int
     record_counts: dict[str, int]
     records: list[CuratedEvidencePreviewRecord]
+    errors: list[CuratedEvidencePreviewError] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
 
 
 def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
     rows, fields = _parse_rows_with_fields(csv_text)
     record_counts = {"properties": 0, "kinetics": 0, "mutations": 0}
     records: list[CuratedEvidencePreviewRecord] = []
+    errors: list[CuratedEvidencePreviewError] = []
 
     for index, row in enumerate(rows, start=2):
-        record_type = _validated_record_type(row, index)
+        record_type = _value(row, "record_type").lower()
+        if record_type not in {"property", "kinetic", "mutation"}:
+            errors.append(
+                CuratedEvidencePreviewError(
+                    row_number=index,
+                    field="record_type",
+                    message="unsupported record_type",
+                )
+            )
+            continue
+
         if record_type == "property":
-            _required_for_row(row, "property_type", index)
-            _required_for_row(row, "value_original", index)
-            record_counts["properties"] += 1
+            row_errors = _validate_property_row(row, index)
+            errors.extend(row_errors)
+            if not row_errors:
+                record_counts["properties"] += 1
         elif record_type == "kinetic":
             record_counts["kinetics"] += 1
         else:
-            mutation_string = _required_for_row(row, "mutation_string", index)
-            try:
-                parse_mutation_string(mutation_string)
-            except ValueError as exc:
-                raise CuratedEvidenceImportError(f"row {index}: {exc}") from exc
-            record_counts["mutations"] += 1
+            row_errors = _validate_mutation_row(row, index)
+            errors.extend(row_errors)
+            if not row_errors:
+                record_counts["mutations"] += 1
 
-        records.append(
-            CuratedEvidencePreviewRecord(
-                row_number=index,
-                record_type=record_type,
-                summary=_summarize_row(record_type, row),
-                reference_key=_reference_key(row),
-                evidence_text=_value(row, "evidence_text") or None,
+        if not any(error.row_number == index for error in errors):
+            records.append(
+                CuratedEvidencePreviewRecord(
+                    row_number=index,
+                    record_type=record_type,
+                    summary=_summarize_row(record_type, row),
+                    reference_key=_reference_key(row),
+                    evidence_text=_value(row, "evidence_text") or None,
+                )
             )
-        )
 
     return CuratedEvidencePreviewResult(
         fields=fields,
         row_count=len(rows),
         record_counts=record_counts,
         records=records,
+        errors=errors,
     )
 
 
@@ -95,6 +119,10 @@ def import_curated_evidence(
     enzyme: EnzymeEntry,
     csv_text: str,
 ) -> CuratedEvidenceImportResult:
+    preview = preview_curated_evidence(csv_text)
+    if not preview.valid:
+        raise CuratedEvidenceImportError(_format_preview_errors(preview.errors))
+
     rows = _parse_rows(csv_text)
     result = CuratedEvidenceImportResult()
     reference_ids: set[str] = set()
@@ -142,6 +170,49 @@ def _validated_record_type(row: dict[str, str], row_number: int) -> str:
     if record_type not in {"property", "kinetic", "mutation"}:
         raise CuratedEvidenceImportError(f"row {row_number}: unsupported record_type")
     return record_type
+
+
+def _validate_property_row(row: dict[str, str], row_number: int) -> list[CuratedEvidencePreviewError]:
+    errors: list[CuratedEvidencePreviewError] = []
+    for field_name in ("property_type", "value_original"):
+        if not _value(row, field_name):
+            errors.append(
+                CuratedEvidencePreviewError(
+                    row_number=row_number,
+                    field=field_name,
+                    message=f"{field_name} is required",
+                )
+            )
+    return errors
+
+
+def _validate_mutation_row(row: dict[str, str], row_number: int) -> list[CuratedEvidencePreviewError]:
+    mutation_string = _value(row, "mutation_string")
+    if not mutation_string:
+        return [
+            CuratedEvidencePreviewError(
+                row_number=row_number,
+                field="mutation_string",
+                message="mutation_string is required",
+            )
+        ]
+    try:
+        parse_mutation_string(mutation_string)
+    except ValueError:
+        return [
+            CuratedEvidencePreviewError(
+                row_number=row_number,
+                field="mutation_string",
+                message=f"invalid mutation format: {mutation_string}",
+            )
+        ]
+    return []
+
+
+def _format_preview_errors(errors: list[CuratedEvidencePreviewError]) -> str:
+    return "; ".join(
+        f"row {error.row_number} {error.field}: {error.message}" for error in errors
+    )
 
 
 def _get_or_create_reference(db: Session, row: dict[str, str]) -> LiteratureReference | None:

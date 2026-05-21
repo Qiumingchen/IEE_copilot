@@ -300,12 +300,20 @@ export type CuratedEvidencePreviewRecord = {
   evidence_text: string | null;
 };
 
+export type CuratedEvidencePreviewError = {
+  row_number: number;
+  field: string;
+  message: string;
+};
+
 export type CuratedEvidencePreviewResponse = {
   fields: string[];
   row_count: number;
   record_counts: Record<string, number>;
   records: CuratedEvidencePreviewRecord[];
+  errors: CuratedEvidencePreviewError[];
   warnings: string[];
+  valid: boolean;
 };
 
 export type UserExperimentRecord = {

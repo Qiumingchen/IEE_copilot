@@ -114,12 +114,20 @@ class CuratedEvidencePreviewRecord(BaseModel):
     evidence_text: str | None = None
 
 
+class CuratedEvidencePreviewError(BaseModel):
+    row_number: int
+    field: str
+    message: str
+
+
 class CuratedEvidencePreviewResponse(BaseModel):
     fields: list[str]
     row_count: int
     record_counts: dict[str, int]
     records: list[CuratedEvidencePreviewRecord] = Field(default_factory=list)
+    errors: list[CuratedEvidencePreviewError] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    valid: bool = True
 
 
 class CuratedEvidenceImportResponse(BaseModel):
