@@ -70,6 +70,7 @@ export type MutationLibraryVariantView = {
   score: number | string;
   risk_flags: string[];
   reasons: string[];
+  member_scores: Array<{ mutation_string: string; total_score: number | string }>;
 };
 
 export type MutationLibraryPlateWellView = {
@@ -104,12 +105,13 @@ export function buildLibraryDesignParameters(
 
 export function buildMutationLibraryWorkbookBytes(library: MutationLibraryView): Uint8Array {
   const variantRows = [
-    ["variant_id", "mutation_string", "order", "score", "risk_flags", "reasons"],
+    ["variant_id", "mutation_string", "order", "score", "member_scores", "risk_flags", "reasons"],
     ...library.variants.map((variant) => [
       variant.variant_id,
       variant.mutation_string,
       String(variant.order),
       String(variant.score),
+      formatMemberScores(variant.member_scores),
       variant.risk_flags.join("; "),
       variant.reasons.join("; ")
     ])
@@ -298,6 +300,26 @@ function getParsedMutations(value: unknown): Array<Record<string, number | strin
     }));
 }
 
+function getMemberScores(value: unknown): Array<{ mutation_string: string; total_score: number | string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((score): score is Record<string, unknown> => (
+      typeof score === "object" && score !== null
+    ))
+    .map((score) => ({
+      mutation_string: String(valueOrDash(score.mutation_string)),
+      total_score: valueOrDash(score.total_score)
+    }));
+}
+
+function formatMemberScores(memberScores: Array<{ mutation_string: string; total_score: number | string }>): string {
+  return memberScores
+    .map((memberScore) => `${memberScore.mutation_string}: ${memberScore.total_score}`)
+    .join("; ");
+}
+
 export function getRosettaDdgResults(content: AnalysisArtifactContentRecord): RosettaDdgResultView[] {
   if (content.artifact_type !== "rosetta_ddg" || !content.content_json) {
     return [];
@@ -365,7 +387,8 @@ export function getMutationLibrary(content: AnalysisArtifactContentRecord): Muta
           order: valueOrDash(variant.order),
           score: valueOrDash(variant.score),
           risk_flags: Array.isArray(variant.risk_flags) ? variant.risk_flags.map(String) : [],
-          reasons: Array.isArray(variant.reasons) ? variant.reasons.map(String) : []
+          reasons: Array.isArray(variant.reasons) ? variant.reasons.map(String) : [],
+          member_scores: getMemberScores(variant.member_scores)
         }))
       : [],
     plate_layout: Array.isArray(rawPlateLayout)

@@ -251,7 +251,11 @@ test("extracts mutation library variants and plate layout from artifact content"
           order: 2,
           score: 2.1,
           risk_flags: ["ddg_destabilizing_member"],
-          reasons: ["test reason"]
+          reasons: ["test reason"],
+          member_scores: [
+            { mutation_string: "L10A", total_score: 3.4 },
+            { mutation_string: "F12A", total_score: 2.2 }
+          ]
         }
       ],
       plate_layout: [
@@ -279,7 +283,11 @@ test("extracts mutation library variants and plate layout from artifact content"
         order: 2,
         score: 2.1,
         risk_flags: ["ddg_destabilizing_member"],
-        reasons: ["test reason"]
+        reasons: ["test reason"],
+        member_scores: [
+          { mutation_string: "L10A", total_score: 3.4 },
+          { mutation_string: "F12A", total_score: 2.2 }
+        ]
       }
     ],
     plate_layout: [
@@ -316,7 +324,11 @@ test("builds xlsx workbook bytes for mutation library export", () => {
         order: 2,
         score: 2.1,
         risk_flags: ["ddg_destabilizing_member"],
-        reasons: ["test reason"]
+        reasons: ["test reason"],
+        member_scores: [
+          { mutation_string: "L10A", total_score: 3.4 },
+          { mutation_string: "F12A", total_score: 2.2 }
+        ]
       }
     ],
     plate_layout: [
@@ -338,4 +350,5 @@ test("builds xlsx workbook bytes for mutation library export", () => {
   assert.match(workbookText, /\[Content_Types\]\.xml/);
   assert.match(workbookText, /xl\/worksheets\/sheet1\.xml/);
   assert.match(workbookText, /L10A\/F12A/);
+  assert.match(workbookText, /L10A: 3\.4/);
 });

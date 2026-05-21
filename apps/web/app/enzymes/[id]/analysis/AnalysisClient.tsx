@@ -795,6 +795,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Order</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Member scores</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Risk</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Reason</th>
               </tr>
@@ -807,6 +808,9 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                     <td className="px-4 py-3 font-mono text-slate-950">{variant.mutation_string}</td>
                     <td className="px-4 py-3">{variant.order}</td>
                     <td className="px-4 py-3">{variant.score}</td>
+                    <td className="px-4 py-3">
+                      <MemberScoreList memberScores={variant.member_scores} />
+                    </td>
                     <td className="px-4 py-3 text-xs">{variant.risk_flags.join(", ") || "-"}</td>
                     <td className="min-w-80 px-4 py-3 text-xs text-slate-600">
                       {variant.reasons.join("; ")}
@@ -815,7 +819,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={6}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={7}>
                     No mutation library artifact
                   </td>
                 </tr>
@@ -891,6 +895,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Variant</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Score</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Member scores</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Risk</th>
               </tr>
             </thead>
@@ -900,6 +905,9 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
                   <td className="px-4 py-3 font-mono text-xs text-slate-950">{variant.variant_id}</td>
                   <td className="px-4 py-3 font-mono text-slate-950">{variant.mutation_string}</td>
                   <td className="px-4 py-3">{variant.score}</td>
+                  <td className="px-4 py-3">
+                    <MemberScoreList memberScores={variant.member_scores} />
+                  </td>
                   <td className="px-4 py-3 text-xs">{variant.risk_flags.join(", ") || "-"}</td>
                 </tr>
               ))}
@@ -1076,5 +1084,27 @@ function ScoreComponents({ components }: { components: ScoredMutationSuggestionV
         </div>
       ))}
     </dl>
+  );
+}
+
+function MemberScoreList({
+  memberScores
+}: {
+  memberScores: Array<{ mutation_string: string; total_score: number | string }>;
+}) {
+  if (memberScores.length === 0) {
+    return <span className="text-xs text-slate-500">-</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {memberScores.map((memberScore) => (
+        <span
+          className="rounded bg-emerald-50 px-2 py-1 font-mono text-xs font-medium text-emerald-700"
+          key={`${memberScore.mutation_string}-${memberScore.total_score}`}
+        >
+          {memberScore.mutation_string}: {memberScore.total_score}
+        </span>
+      ))}
+    </div>
   );
 }
