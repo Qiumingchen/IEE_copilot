@@ -22,6 +22,7 @@ import {
   filterConservationSites,
   getArtifactRunnerLabel,
   getConservationSites,
+  getHomologSequences,
   getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
@@ -30,6 +31,8 @@ import {
 import type {
   ConservationCategoryFilter,
   ConservationSiteView,
+  ArtifactRunnerLabel,
+  HomologSequenceView,
   MutationLibraryView,
   MutationRecommendationCandidateView,
   ScoredMutationSuggestionView,
@@ -88,6 +91,10 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
   const [latestConservationContent, setLatestConservationContent] =
     useState<AnalysisArtifactContentRecord | null>(null);
+  const [latestHomologContent, setLatestHomologContent] =
+    useState<AnalysisArtifactContentRecord | null>(null);
+  const [homologSequences, setHomologSequences] = useState<HomologSequenceView[]>([]);
+  const [homologObjectKey, setHomologObjectKey] = useState<string | null>(null);
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
@@ -113,6 +120,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     try {
       const nextArtifacts = await getAnalysisArtifacts(enzymeId, nextToken);
       setArtifacts(nextArtifacts);
+      await loadLatestHomologSequences(nextArtifacts, nextToken);
       await loadLatestConservationProfile(nextArtifacts, nextToken);
       await loadLatestRecommendations(nextArtifacts, nextToken);
       loadLatestRosettaDdgArtifact(nextArtifacts);
@@ -122,6 +130,33 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadLatestHomologSequences(
+    nextArtifacts: AnalysisArtifactRecord[],
+    nextToken: string
+  ) {
+    const homologArtifacts = nextArtifacts.filter(
+      (artifact) => artifact.artifact_type === "homolog_sequences"
+    );
+    const latestHomologArtifact = homologArtifacts[homologArtifacts.length - 1];
+    if (!latestHomologArtifact) {
+      setLatestHomologContent(null);
+      setHomologSequences([]);
+      setHomologObjectKey(null);
+      return;
+    }
+
+    try {
+      const content = await getAnalysisArtifactContent(enzymeId, latestHomologArtifact.id, nextToken);
+      setLatestHomologContent(content);
+      setHomologSequences(getHomologSequences(content));
+      setHomologObjectKey(content.object_key);
+    } catch {
+      setLatestHomologContent(null);
+      setHomologSequences([]);
+      setHomologObjectKey(latestHomologArtifact.object_key);
     }
   }
 
@@ -505,6 +540,73 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
         <div className="border-b border-slate-200 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
+              <h2 className="text-base font-semibold text-slate-950">Homolog sequence hits</h2>
+              {homologObjectKey ? (
+                <p className="mt-1 break-words font-mono text-xs text-slate-500">{homologObjectKey}</p>
+              ) : null}
+              <p className="mt-1 text-xs text-slate-500">{homologSequences.length} filtered homologs</p>
+            </div>
+            {latestHomologContent ? (
+              <RunnerBadge label={getArtifactRunnerLabel(latestHomologContent)} />
+            ) : null}
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Accession
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Protein
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Organism
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Identity
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Coverage
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Length
+                </th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                  Source
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {homologSequences.length > 0 ? (
+                homologSequences.map((homolog) => (
+                  <tr key={homolog.accession}>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-950">{homolog.accession}</td>
+                    <td className="max-w-sm px-4 py-3 text-slate-950">{homolog.name}</td>
+                    <td className="px-4 py-3">{homolog.organism}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{homolog.identity}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{homolog.coverage}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{homolog.sequence_length}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{homolog.source}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-4 text-slate-500" colSpan={7}>
+                    {homologObjectKey ? "No homologs passed identity and coverage filters" : "No homolog sequence artifact"}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
               <h2 className="text-base font-semibold text-slate-950">Conservation profile</h2>
               {conservationObjectKey ? (
                 <p className="mt-1 break-words font-mono text-xs text-slate-500">{conservationObjectKey}</p>
@@ -851,6 +953,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 }
 
 function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRecord }) {
+  const homologs = getHomologSequences(content);
   const sites = getConservationSites(content);
   const candidates = getMutationRecommendationCandidates(content);
   const rosettaResults = getRosettaDdgResults(content);
@@ -868,7 +971,36 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
           {runnerLabel.warning ? <span className="text-amber-700">{runnerLabel.warning}</span> : null}
         </div>
       </div>
-      {rosettaResults.length > 0 ? (
+      {homologs.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Accession</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Protein</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Organism</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Identity</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Coverage</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Length</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {homologs.map((homolog) => (
+                <tr key={homolog.accession}>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-950">{homolog.accession}</td>
+                  <td className="max-w-sm px-4 py-3 text-slate-950">{homolog.name}</td>
+                  <td className="px-4 py-3">{homolog.organism}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{homolog.identity}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{homolog.coverage}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{homolog.sequence_length}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{homolog.source}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : rosettaResults.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -998,6 +1130,22 @@ function StatusPill({ value }: { value: string }) {
     <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
       {value}
     </span>
+  );
+}
+
+function RunnerBadge({ label }: { label: ArtifactRunnerLabel }) {
+  const modeClassName = label.mode === "real"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : label.mode === "fallback"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-slate-200 bg-slate-50 text-slate-700";
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className={`rounded border px-2 py-1 font-mono ${modeClassName}`}>
+        {label.text}
+      </span>
+      {label.warning ? <span className="text-amber-700">{label.warning}</span> : null}
+    </div>
   );
 }
 

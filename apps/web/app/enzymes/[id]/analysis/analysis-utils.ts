@@ -8,6 +8,16 @@ export type ConservationSiteView = {
   conservation_category: string;
 };
 
+export type HomologSequenceView = {
+  accession: string;
+  name: string;
+  organism: string;
+  identity: number | string;
+  coverage: number | string;
+  source: string;
+  sequence_length: number | string;
+};
+
 export type ConservationCategoryFilter =
   | "all"
   | "highly_conserved"
@@ -233,6 +243,27 @@ export function buildConservationDownloadJson(
   );
 }
 
+export function getHomologSequences(content: AnalysisArtifactContentRecord): HomologSequenceView[] {
+  const rawHomologs = content.content_json?.homologs;
+  if (!Array.isArray(rawHomologs)) {
+    return [];
+  }
+  return rawHomologs
+    .filter((homolog): homolog is Record<string, unknown> => typeof homolog === "object" && homolog !== null)
+    .map((homolog) => {
+      const sequence = typeof homolog.sequence === "string" ? homolog.sequence : "";
+      return {
+        accession: String(valueOrDash(homolog.accession)),
+        name: String(valueOrDash(homolog.name)),
+        organism: String(valueOrDash(homolog.organism)),
+        identity: formatFractionPercent(homolog.identity),
+        coverage: formatFractionPercent(homolog.coverage),
+        source: String(valueOrDash(homolog.source)),
+        sequence_length: sequence.length > 0 ? sequence.length : "-"
+      };
+    });
+}
+
 export function getMutationRecommendationCandidates(
   content: AnalysisArtifactContentRecord
 ): MutationRecommendationCandidateView[] {
@@ -445,6 +476,13 @@ function valueOrDash(value: unknown): string | number {
     return value;
   }
   return "-";
+}
+
+function formatFractionPercent(value: unknown): string | number {
+  if (typeof value !== "number") {
+    return valueOrDash(value);
+  }
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function worksheetRowsXml(rows: string[][]): string {
