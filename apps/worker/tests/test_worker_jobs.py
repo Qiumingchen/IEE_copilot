@@ -166,13 +166,20 @@ def test_finish_msa_job_creates_msa_artifact_from_target_sequence():
         )
 
     assert job.status == JobStatus.FINISHED
-    assert job.result_summary_json == {
-        "message": "MSA completed",
-        "sequence_count": 3,
-        "alignment_length": 10,
-        "artifact_type": "msa",
-        "msa_fasta": ">query\nACDEFGHIKL\n>homolog_1\nACDEFGHIVL\n>homolog_2\nACDEYGHIKL\n",
-    }
+    assert job.result_summary_json["message"] == "MSA completed"
+    assert job.result_summary_json["sequence_count"] == 3
+    assert job.result_summary_json["alignment_length"] == 10
+    assert job.result_summary_json["artifact_type"] == "msa"
+    assert (
+        job.result_summary_json["msa_fasta"]
+        == ">query\nACDEFGHIKL\n>homolog_1\nACDEFGHIVL\n>homolog_2\nACDEYGHIKL\n"
+    )
+    assert job.result_summary_json["runner"]["provider"] == "mafft"
+    assert job.result_summary_json["runner"]["mode"] == "fallback"
+    assert (
+        job.result_summary_json["runner"]["warning"]
+        == "MAFFT executable not configured; mock alignment used."
+    )
     assert artifact is not None
     assert artifact.enzyme_entry_id == enzyme_id
     assert artifact.bucket == "iee-artifacts"

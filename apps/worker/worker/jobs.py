@@ -18,7 +18,8 @@ from app.services.mutations import (
     parse_mutation_string,
 )
 from app.services.mutation_recommendation import recommend_mutation_hotspots
-from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence, run_mock_mafft
+from app.services.msa import MsaAlignedRecord, MsaAlignment, MsaInputSequence
+from app.services.msa_runner import run_msa_with_runner
 from app.services.residue_features import build_residue_feature_records
 from app.tasks.celery_app import celery_app
 
@@ -147,12 +148,16 @@ def finish_msa_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
     db.commit()
 
     query_sequence = protein_sequence.mature_sequence or protein_sequence.sequence
-    alignment = run_mock_mafft(
+    settings = get_settings()
+    msa_result = run_msa_with_runner(
         [
             MsaInputSequence(identifier="query", sequence=query_sequence),
             *_homolog_inputs_from_job(job),
-        ]
+        ],
+        mafft_bin=settings.mafft_bin,
+        allow_fallback=settings.allow_science_fallbacks,
     )
+    alignment = msa_result.alignment
     payload_bytes = alignment.to_fasta().encode("utf-8")
 
     db.add(
@@ -177,6 +182,7 @@ def finish_msa_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:
         "alignment_length": alignment.alignment_length,
         "artifact_type": "msa",
         "msa_fasta": alignment.to_fasta(),
+        "runner": msa_result.runner,
     }
     db.commit()
     db.refresh(job)

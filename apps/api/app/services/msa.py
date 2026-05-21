@@ -33,6 +33,39 @@ class MsaAlignment:
             f">{record.identifier}\n{record.aligned_sequence}\n" for record in self.records
         )
 
+    @classmethod
+    def from_fasta(cls, fasta: str) -> "MsaAlignment":
+        records: list[MsaAlignedRecord] = []
+        identifier: str | None = None
+        sequence_lines: list[str] = []
+
+        for line in fasta.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(">"):
+                if identifier is not None:
+                    records.append(
+                        MsaAlignedRecord(
+                            identifier=identifier,
+                            aligned_sequence="".join(sequence_lines),
+                        )
+                    )
+                identifier = stripped[1:].split()[0]
+                sequence_lines = []
+                continue
+            if identifier is not None:
+                sequence_lines.append(stripped)
+
+        if identifier is not None:
+            records.append(
+                MsaAlignedRecord(
+                    identifier=identifier,
+                    aligned_sequence="".join(sequence_lines),
+                )
+            )
+        return cls(records=records)
+
 
 def run_mock_mafft(sequences: Iterable[MsaInputSequence]) -> MsaAlignment:
     normalized = [
