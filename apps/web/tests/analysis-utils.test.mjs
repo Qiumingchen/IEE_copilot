@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildHomologCsv,
   buildHomologFasta,
+  buildMsaDownloadFasta,
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
@@ -11,6 +12,7 @@ import {
   getConservationSites,
   getArtifactRunnerLabel,
   getHomologDiagnostics,
+  getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
@@ -185,6 +187,33 @@ test("builds homolog CSV export from artifact content", () => {
       'B0B2,"Candidate, quoted",,70.0%,90.0%,uniprot,4,MNOP'
     ].join("\n")
   );
+});
+
+test("extracts MSA records and builds FASTA download text", () => {
+  const content = {
+    artifact_id: "artifact-msa",
+    artifact_type: "msa",
+    content_type: "text/x-fasta",
+    object_key: "analysis-jobs/job-msa/msa.fasta",
+    content_text: ">query\nACD-EF\n>A0A1\nA-DGEF\n",
+    content_json: {}
+  };
+
+  assert.deepEqual(getMsaRecords(content), [
+    {
+      identifier: "query",
+      aligned_sequence: "ACD-EF",
+      sequence_length: 6,
+      gap_count: 1
+    },
+    {
+      identifier: "A0A1",
+      aligned_sequence: "A-DGEF",
+      sequence_length: 6,
+      gap_count: 1
+    }
+  ]);
+  assert.equal(buildMsaDownloadFasta(content), ">query\nACD-EF\n>A0A1\nA-DGEF\n");
 });
 
 test("extracts mutation recommendation candidates from artifact content", () => {

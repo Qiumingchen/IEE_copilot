@@ -32,6 +32,13 @@ export type HomologDiagnosticsView = {
   summary: string;
 };
 
+export type MsaRecordView = {
+  identifier: string;
+  aligned_sequence: string;
+  sequence_length: number;
+  gap_count: number;
+};
+
 export type ConservationCategoryFilter =
   | "all"
   | "highly_conserved"
@@ -312,6 +319,52 @@ export function buildHomologCsv(content: AnalysisArtifactContentRecord): string 
     })
   ];
   return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
+export function getMsaRecords(content: AnalysisArtifactContentRecord): MsaRecordView[] {
+  const fasta = buildMsaDownloadFasta(content);
+  const records: MsaRecordView[] = [];
+  let identifier: string | null = null;
+  let sequenceLines: string[] = [];
+
+  function flushRecord() {
+    if (!identifier) {
+      return;
+    }
+    const alignedSequence = sequenceLines.join("");
+    records.push({
+      identifier,
+      aligned_sequence: alignedSequence,
+      sequence_length: alignedSequence.length,
+      gap_count: [...alignedSequence].filter((residue) => residue === "-").length
+    });
+  }
+
+  for (const line of fasta.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (!stripped) {
+      continue;
+    }
+    if (stripped.startsWith(">")) {
+      flushRecord();
+      identifier = stripped.slice(1).trim().split(/\s+/)[0] || null;
+      sequenceLines = [];
+      continue;
+    }
+    if (identifier) {
+      sequenceLines.push(stripped);
+    }
+  }
+  flushRecord();
+  return records;
+}
+
+export function buildMsaDownloadFasta(content: AnalysisArtifactContentRecord): string {
+  if (typeof content.content_text === "string") {
+    return content.content_text;
+  }
+  const msaFasta = content.content_json?.msa_fasta;
+  return typeof msaFasta === "string" ? msaFasta : "";
 }
 
 export function getHomologDiagnostics(content: AnalysisArtifactContentRecord): HomologDiagnosticsView | null {

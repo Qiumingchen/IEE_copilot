@@ -18,6 +18,7 @@ import type {
 import {
   buildHomologCsv,
   buildHomologFasta,
+  buildMsaDownloadFasta,
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
@@ -26,6 +27,7 @@ import {
   getConservationSites,
   getHomologDiagnostics,
   getHomologSequences,
+  getMsaRecords,
   getMutationLibrary,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
@@ -37,6 +39,7 @@ import type {
   ArtifactRunnerLabel,
   HomologDiagnosticsView,
   HomologSequenceView,
+  MsaRecordView,
   MutationLibraryView,
   MutationRecommendationCandidateView,
   ScoredMutationSuggestionView,
@@ -1047,11 +1050,27 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
 
 function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRecord }) {
   const homologs = getHomologSequences(content);
+  const msaRecords = getMsaRecords(content);
   const sites = getConservationSites(content);
   const candidates = getMutationRecommendationCandidates(content);
   const rosettaResults = getRosettaDdgResults(content);
   const mutationLibrary = getMutationLibrary(content);
   const runnerLabel = getArtifactRunnerLabel(content);
+
+  function downloadMsaFasta() {
+    const fasta = buildMsaDownloadFasta(content);
+    if (!fasta) {
+      return;
+    }
+    const blob = new Blob([fasta], { type: "text/x-fasta" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "msa.fasta";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
@@ -1062,6 +1081,15 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
             {runnerLabel.text}
           </span>
           {runnerLabel.warning ? <span className="text-amber-700">{runnerLabel.warning}</span> : null}
+          {msaRecords.length > 0 ? (
+            <button
+              className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-800"
+              onClick={downloadMsaFasta}
+              type="button"
+            >
+              FASTA
+            </button>
+          ) : null}
         </div>
       </div>
       {homologs.length > 0 ? (
@@ -1093,6 +1121,8 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
             </tbody>
           </table>
         </div>
+      ) : msaRecords.length > 0 ? (
+        <MsaRecordTable records={msaRecords} />
       ) : rosettaResults.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -1271,6 +1301,35 @@ function HomologDiagnosticsStrip({ diagnostics }: { diagnostics: HomologDiagnost
       <span className="rounded border border-slate-200 bg-white px-2 py-1">
         Duplicates: <span className="font-mono text-slate-950">{diagnostics.duplicate_count}</span>
       </span>
+    </div>
+  );
+}
+
+function MsaRecordTable({ records }: { records: MsaRecordView[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <tr>
+            <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Identifier</th>
+            <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Length</th>
+            <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Gaps</th>
+            <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Aligned sequence</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 text-slate-700">
+          {records.map((record) => (
+            <tr key={record.identifier}>
+              <td className="px-4 py-3 font-mono text-xs text-slate-950">{record.identifier}</td>
+              <td className="px-4 py-3 font-mono text-xs">{record.sequence_length}</td>
+              <td className="px-4 py-3 font-mono text-xs">{record.gap_count}</td>
+              <td className="max-w-xl truncate px-4 py-3 font-mono text-xs" title={record.aligned_sequence}>
+                {record.aligned_sequence}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
