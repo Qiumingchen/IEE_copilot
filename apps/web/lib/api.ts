@@ -138,6 +138,13 @@ export async function getEnzymeRecordBundle(
   return { enzyme, substrates, structures, properties, kinetics, expression };
 }
 
+export async function listStructures(
+  enzymeId: string,
+  token: string
+): Promise<StructureRecord[]> {
+  return fetchWithToken<StructureRecord[]>(`/enzymes/${enzymeId}/structures`, token);
+}
+
 export async function getAnalysisArtifacts(
   enzymeId: string,
   token: string

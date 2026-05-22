@@ -1,4 +1,9 @@
-import type { AnalysisArtifactContentRecord, AnalysisArtifactRecord, JobResponse } from "../../../../lib/types";
+import type {
+  AnalysisArtifactContentRecord,
+  AnalysisArtifactRecord,
+  JobResponse,
+  StructureRecord
+} from "../../../../lib/types";
 
 export type ConservationSiteView = {
   query_position: number | string;
@@ -63,6 +68,11 @@ export type ConservationArtifactOption = {
 };
 
 export type RecommendationArtifactOption = {
+  id: string;
+  label: string;
+};
+
+export type StructureContextOption = {
   id: string;
   label: string;
 };
@@ -221,6 +231,24 @@ export function buildRosettaDdgJobParameters(
     parameters.structure_id = structureId.trim();
   }
   return parameters;
+}
+
+export function getStructureContextOptions(
+  structures: Array<Pick<StructureRecord, "id" | "structure_type" | "complex_state" | "pdb_id" | "artifact">>,
+  requestedStructureId: string
+): { selectedStructureId: string; options: StructureContextOption[] } {
+  const options = structures.map((structure) => ({
+    id: structure.id,
+    label: [
+      structure.structure_type,
+      structure.complex_state,
+      structure.artifact?.object_key ?? structure.pdb_id ?? structure.id
+    ].join(" | ")
+  }));
+  const selectedStructureId = options.some((option) => option.id === requestedStructureId)
+    ? requestedStructureId
+    : options[0]?.id ?? "";
+  return { selectedStructureId, options };
 }
 
 export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): HomologArtifactOption[] {

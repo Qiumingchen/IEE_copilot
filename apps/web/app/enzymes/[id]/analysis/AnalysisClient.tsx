@@ -7,13 +7,15 @@ import {
   createAnalysisJob,
   getAnalysisArtifactContent,
   getAnalysisArtifacts,
+  listStructures,
   listJobs,
   retryJob
 } from "../../../../lib/api";
 import type {
   AnalysisArtifactContentRecord,
   AnalysisArtifactRecord,
-  AnalysisJobType
+  AnalysisJobType,
+  StructureRecord
 } from "../../../../lib/types";
 import {
   buildConservationJobParameters,
@@ -42,7 +44,8 @@ import {
   getMutationRecommendationCandidates,
   getRecommendationArtifactOptions,
   getRosettaDdgResults,
-  getRosettaDdgRunViews
+  getRosettaDdgRunViews,
+  getStructureContextOptions
 } from "./analysis-utils";
 import type {
   ConservationCategoryFilter,
@@ -114,6 +117,7 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<AnalysisArtifactRecord[]>([]);
+  const [structures, setStructures] = useState<StructureRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [runningJobType, setRunningJobType] = useState<AnalysisJobType | null>(null);
   const [selectedContent, setSelectedContent] = useState<AnalysisArtifactContentRecord | null>(null);
@@ -171,6 +175,17 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
       setError("Unable to load analysis artifacts. Please check the API service and your login.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadStructures(nextToken: string) {
+    try {
+      const nextStructures = await listStructures(enzymeId, nextToken);
+      setStructures(nextStructures);
+      const structureContext = getStructureContextOptions(nextStructures, selectedStructureId);
+      setSelectedStructureId(structureContext.selectedStructureId);
+    } catch {
+      setStructures([]);
     }
   }
 
@@ -528,6 +543,7 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
     }
     setToken(storedToken);
     void loadArtifacts(storedToken);
+    void loadStructures(storedToken);
   }, [enzymeId, router]);
 
   const filteredConservationSites = filterConservationSites(conservationSites, conservationFilter);
@@ -536,6 +552,7 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
   const msaArtifactOptions = getMsaArtifactOptions(artifacts);
   const conservationArtifactOptions = getConservationArtifactOptions(artifacts);
   const recommendationArtifactOptions = getRecommendationArtifactOptions(artifacts);
+  const structureContext = getStructureContextOptions(structures, selectedStructureId);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -1110,12 +1127,21 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
           <p className="mt-1 text-xs text-slate-500">{rosettaRuns.length} submitted jobs</p>
           <label className="mt-3 grid max-w-xl gap-1 text-xs font-medium text-slate-600">
             Structure context for new ddG jobs
-            <input
+            <select
               className="rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-950"
               onChange={(event) => setSelectedStructureId(event.target.value)}
-              placeholder="Optional structure id"
-              value={selectedStructureId}
-            />
+              value={structureContext.selectedStructureId}
+            >
+              {structureContext.options.length > 0 ? (
+                structureContext.options.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))
+              ) : (
+                <option value="">No structure available</option>
+              )}
+            </select>
           </label>
         </div>
         <div className="overflow-x-auto">

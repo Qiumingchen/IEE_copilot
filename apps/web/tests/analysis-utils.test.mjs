@@ -27,7 +27,8 @@ import {
   getRecommendationArtifactOptions,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
-  getRosettaDdgRunViews
+  getRosettaDdgRunViews,
+  getStructureContextOptions
 } from "../app/enzymes/[id]/analysis/analysis-utils.ts";
 
 const conservationContent = {
@@ -504,6 +505,41 @@ test("builds Rosetta ddG parameters with selected structure context", () => {
     mutation_string: "L10A",
     source: "hotspot_recommendation"
   });
+});
+
+test("builds structure context options for Rosetta ddG selection", () => {
+  const structures = [
+    {
+      id: "structure-apo",
+      structure_type: "uploaded_pdb",
+      complex_state: "apo",
+      pdb_id: null,
+      artifact: { object_key: "structures/apo.pdb" }
+    },
+    {
+      id: "structure-complex",
+      structure_type: "uploaded_pdb",
+      complex_state: "enzyme_substrate_complex",
+      pdb_id: null,
+      artifact: { object_key: "structures/complex.pdb" }
+    }
+  ];
+
+  assert.deepEqual(getStructureContextOptions(structures, "structure-complex"), {
+    selectedStructureId: "structure-complex",
+    options: [
+      {
+        id: "structure-apo",
+        label: "uploaded_pdb | apo | structures/apo.pdb"
+      },
+      {
+        id: "structure-complex",
+        label: "uploaded_pdb | enzyme_substrate_complex | structures/complex.pdb"
+      }
+    ]
+  });
+
+  assert.deepEqual(getStructureContextOptions(structures, "missing-structure").selectedStructureId, "structure-apo");
 });
 
 test("formats fallback artifact runner labels", () => {
