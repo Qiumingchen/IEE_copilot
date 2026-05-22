@@ -18,6 +18,7 @@ import type {
 import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
+  buildKineticEvidenceCsv,
   buildPropertyRankingCsv,
   buildPropertyDistribution,
   buildKineticSummary,
@@ -137,6 +138,13 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     downloadCsv(
       `property-ranking-${enzymeId}-${selectedPropertyType}-${rankingMode}.csv`,
       buildPropertyRankingCsv(ranking)
+    );
+  }
+
+  function handleDownloadKineticEvidenceCsv() {
+    downloadCsv(
+      `kinetic-evidence-${enzymeId}.csv`,
+      buildKineticEvidenceCsv(bundle?.kinetics ?? [])
     );
   }
 
@@ -401,8 +409,20 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
 
         <section className="min-w-0 rounded-md border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-4 py-4">
-            <h2 className="text-base font-semibold text-slate-950">Kinetic evidence</h2>
-            <p className="mt-1 text-sm text-slate-500">{bundle?.kinetics.length ?? 0} kinetic records</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Kinetic evidence</h2>
+                <p className="mt-1 text-sm text-slate-500">{bundle?.kinetics.length ?? 0} kinetic records</p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
+                disabled={(bundle?.kinetics.length ?? 0) === 0}
+                onClick={handleDownloadKineticEvidenceCsv}
+                type="button"
+              >
+                Download CSV
+              </button>
+            </div>
           </div>
           <KineticSummaryPanel summary={kineticSummary} />
           <div className="overflow-x-auto">

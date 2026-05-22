@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
+  buildKineticEvidenceCsv,
   buildPropertyRankingCsv,
   buildKineticSummary,
   buildPropertyDistribution,
@@ -173,6 +174,44 @@ test("buildPropertyEvidenceCsv exports citation and assay fields", () => {
     [
       "property_type,value_original,unit_original,value_standardized,unit_standardized,substrate,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
       'optimal_temperature,58,degC,58,degC,casein,37,7.0,activity assay,"10.1000/mtgase · MTGase, thermal evidence · Biocatalysis Reports · 2024 · curated_literature",Table 1,public,approved'
+    ].join("\n")
+  );
+});
+
+test("buildKineticEvidenceCsv exports kinetic parameters and citation fields", () => {
+  const csv = buildKineticEvidenceCsv([
+    {
+      substrate: "CBZ-Gln-Gly",
+      km: "2.1",
+      kcat: "31",
+      kcat_km: "14.8",
+      unit_original: "mM; s-1",
+      assay_temperature: "37",
+      assay_pH: "7.0",
+      method: "HPLC assay",
+      reference_id: "ref-kinetic",
+      reference: {
+        id: "ref-kinetic",
+        title: "MTGase kinetics",
+        authors: null,
+        journal: "Enzyme Reports",
+        year: 2025,
+        doi: null,
+        pubmed_id: "123456",
+        source: "curated_literature",
+        provenance: null
+      },
+      evidence_text: "Table 2",
+      visibility: "public",
+      curation_status: "approved"
+    }
+  ]);
+
+  assert.equal(
+    csv,
+    [
+      "substrate,km,kcat,kcat_km,unit_original,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
+      "CBZ-Gln-Gly,2.1,31,14.8,mM; s-1,37,7.0,HPLC assay,PMID 123456 · MTGase kinetics · Enzyme Reports · 2025 · curated_literature,Table 2,public,approved"
     ].join("\n")
   );
 });

@@ -176,6 +176,59 @@ export function buildPropertyEvidenceCsv(
   return [header.join(","), ...rows].join("\n");
 }
 
+export function buildKineticEvidenceCsv(
+  records: Array<
+    Pick<
+      KineticRecord,
+      | "substrate"
+      | "km"
+      | "kcat"
+      | "kcat_km"
+      | "unit_original"
+      | "assay_temperature"
+      | "assay_pH"
+      | "method"
+      | "reference"
+      | "reference_id"
+      | "evidence_text"
+      | "visibility"
+      | "curation_status"
+    >
+  >
+): string {
+  const header = [
+    "substrate",
+    "km",
+    "kcat",
+    "kcat_km",
+    "unit_original",
+    "assay_temperature",
+    "assay_pH",
+    "method",
+    "reference",
+    "evidence_text",
+    "visibility",
+    "curation_status"
+  ];
+  const rows = records.map((record) =>
+    [
+      record.substrate,
+      record.km,
+      record.kcat,
+      record.kcat_km,
+      record.unit_original,
+      record.assay_temperature,
+      record.assay_pH,
+      record.method,
+      record.reference ? formatReferenceCitation(record.reference) : record.reference_id,
+      record.evidence_text,
+      record.visibility,
+      record.curation_status
+    ].map(formatCsvCell).join(",")
+  );
+  return [header.join(","), ...rows].join("\n");
+}
+
 export function buildPropertyRankingCsv(ranking: {
   groups: PropertyRankingGroupRecord[];
   items: PropertyRankingItemRecord[];
