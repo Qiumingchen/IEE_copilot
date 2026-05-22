@@ -25,6 +25,13 @@ export type LigandView = {
   nearest_residues: Record<"4A" | "6A" | "8A", string[]>;
 };
 
+export type MetalIonView = {
+  ligand_code: string;
+  ligand_name: string;
+  location: string;
+  atom_count: number | string;
+};
+
 export type StructureStatsView = {
   chain_count: number | string;
   ligand_count: number | string;
@@ -180,6 +187,20 @@ export function getLigandViews(structure: StructureRecord): LigandView[] {
   });
 }
 
+export function getMetalIonViews(structure: StructureRecord): MetalIonView[] {
+  const metalIons = getRecordArray(structure.ligand_summary, "metal_ions");
+  return metalIons.map((metalIon) => {
+    const chainId = String(valueOrDash(metalIon.chain_id));
+    const residueNumber = String(valueOrDash(metalIon.residue_number));
+    return {
+      ligand_code: String(valueOrDash(metalIon.ligand_code)),
+      ligand_name: String(valueOrDash(metalIon.ligand_name)),
+      location: `${chainId}${residueNumber}`,
+      atom_count: valueOrDash(metalIon.atom_count)
+    };
+  });
+}
+
 export function getStructureStats(structure: StructureRecord): StructureStatsView {
   const chains = getRecordArray(structure.chain_summary, "chains");
   return {
@@ -206,6 +227,7 @@ export function getStructureQualityChecks(structure: StructureRecord): Structure
   const warnings = buildStructureWarnings(structure);
   const ligandCount = numberValue(structure.ligand_summary?.ligand_count);
   const distanceRows = getDistanceMatrixRows(structure);
+  const hasGappedMapping = chains.some((chain) => String(chain.mapping_quality) === "gapped");
 
   return [
     {
@@ -215,10 +237,11 @@ export function getStructureQualityChecks(structure: StructureRecord): Structure
     },
     {
       label: "Residue mapping",
-      status: residueRows.length > 0 ? "pass" : "fail",
+      status: residueRows.length > 0 ? (hasGappedMapping ? "warn" : "pass") : "fail",
       detail:
         residueRows.length > 0
-          ? pluralize(residueRows.length, "residue") + " mapped to sequence positions."
+          ? pluralize(residueRows.length, "residue") +
+            (hasGappedMapping ? " mapped with gapped numbering." : " mapped to sequence positions.")
           : "No residues could be mapped to sequence positions."
     },
     {
@@ -323,6 +346,7 @@ export function buildStructureReportJson(
       readiness: getStructureReadiness(structure),
       warnings: buildStructureWarnings(structure),
       ligands: getLigandViews(structure),
+      metal_ions: getMetalIonViews(structure),
       distance_matrix: getDistanceMatrixRows(structure),
       residue_mapping: getResidueRows(structure, options.selectedChainId ?? null),
       preview_atoms: getStructurePreviewAtoms(structure)

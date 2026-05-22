@@ -28,6 +28,29 @@ END
 """
 
 
+CIF_COMPLEX_UPLOAD = """\
+data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+ATOM 1 N N MET A 1 ? 11.104 13.207 9.342
+ATOM 2 C CA MET A 1 ? 12.560 13.407 9.142
+ATOM 3 N N GLY A 2 ? 14.104 11.907 8.242
+ATOM 4 C CA GLY A 2 ? 15.560 11.407 8.142
+HETATM 5 C C1 AQ1 B 501 ? 16.000 11.000 8.000
+#
+"""
+
+
 def _auth_headers(client) -> dict[str, str]:
     client.post(
         "/auth/register",
@@ -266,6 +289,49 @@ def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_se
     assert body["ligand_summary"]["ligands"][0]["ligand_code"] == "AQ1"
     assert body["ligand_summary"]["metal_ions"][0]["ligand_code"] == "ZN"
     assert body["ligands"][0]["ligand_code"] == "AQ1"
+
+
+def test_upload_cif_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    def fake_store_structure_file(*, file_name, content, content_type):
+        assert file_name == "complex.cif"
+        assert b"_atom_site.group_PDB" in content
+        assert content_type == "chemical/x-cif"
+        return {
+            "bucket": "iee-artifacts",
+            "object_key": "structures/test/complex.cif",
+            "checksum": "checksum-cif",
+            "content_type": content_type,
+            "size_bytes": len(content),
+        }
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.store_structure_file",
+        fake_store_structure_file,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures/upload",
+        headers=headers,
+        files={
+            "file": (
+                "complex.cif",
+                CIF_COMPLEX_UPLOAD.encode(),
+                "chemical/x-cif",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["structure_type"] == "uploaded_cif"
+    assert body["complex_state"] == "enzyme_substrate_complex"
+    assert body["artifact"]["object_key"] == "structures/test/complex.cif"
+    assert body["chain_summary"]["format"] == "cif"
+    assert body["chain_summary"]["chains"][0]["sequence"] == "MG"
+    assert body["ligand_summary"]["ligands"][0]["ligand_code"] == "AQ1"
 
 
 def test_download_structure_file_returns_stored_artifact(client, db_session, monkeypatch):

@@ -11,6 +11,7 @@ import {
   getDefaultStructureId,
   getDistanceMatrixRows,
   getLigandViews,
+  getMetalIonViews,
   getStructureQualityChecks,
   getStructurePreviewAtoms,
   getStructureProvenanceView,
@@ -210,6 +211,17 @@ test("builds ligand views with nearest residues by cutoff", () => {
   ]);
 });
 
+test("builds metal ion views from structure summaries", () => {
+  assert.deepEqual(getMetalIonViews(structure), [
+    {
+      ligand_code: "ZN",
+      ligand_name: "ZN",
+      location: "C601",
+      atom_count: 1
+    }
+  ]);
+});
+
 test("summarizes structure stats and warnings", () => {
   assert.deepEqual(getStructureStats(structure), {
     chain_count: 1,
@@ -251,6 +263,19 @@ test("builds structure quality checks from parsed chains and ligand contacts", (
     chain_summary: { chains: [], warnings: [] },
     ligand_summary: { ligand_count: 1, distance_matrix: [] }
   };
+  const gappedStructure = {
+    ...structure,
+    chain_summary: {
+      ...structure.chain_summary,
+      chains: [
+        {
+          ...structure.chain_summary.chains[0],
+          mapping_quality: "gapped"
+        }
+      ],
+      warnings: ["Missing residue numbering gap detected in chain A between 1 and 3."]
+    }
+  };
 
   assert.deepEqual(getStructureQualityChecks(incompleteStructure), [
     {
@@ -274,6 +299,12 @@ test("builds structure quality checks from parsed chains and ligand contacts", (
       detail: "Complex-like structure has ligands, but no ligand distance matrix is available."
     }
   ]);
+
+  assert.deepEqual(getStructureQualityChecks(gappedStructure)[1], {
+    label: "Residue mapping",
+    status: "warn",
+    detail: "2 residues mapped with gapped numbering."
+  });
 });
 
 test("builds structure provenance display view", () => {
@@ -447,6 +478,7 @@ test("builds structure analysis report JSON for export", () => {
   assert.equal(payload.readiness.status, "ready");
   assert.equal(payload.warnings[0], "missing residue around A3");
   assert.equal(payload.ligands[0].ligand_code, "AQ1");
+  assert.equal(payload.metal_ions[0].ligand_code, "ZN");
   assert.equal(payload.distance_matrix[0].distance_angstrom, "0.6");
   assert.equal(payload.residue_mapping[0].one_letter, "M");
   assert.equal(payload.preview_atoms[1].kind, "ligand");

@@ -22,6 +22,21 @@ END
 """
 
 
+PDB_GAPPED_CHAIN = """\
+ATOM      1  CA  MET A   1      12.560  13.407   9.142  1.00 20.00           C
+ATOM      2  CA  GLY A   3      15.560  11.407   8.142  1.00 20.00           C
+END
+"""
+
+
+PDB_INSERTION_CODE = """\
+ATOM      1  CA  MET A   1      12.560  13.407   9.142  1.00 20.00           C
+ATOM      2  CA  SER A   2A     14.560  12.407   8.642  1.00 20.00           C
+ATOM      3  CA  GLY A   3      15.560  11.407   8.142  1.00 20.00           C
+END
+"""
+
+
 PDB_COMPLEX_WITHOUT_COORDS = """\
 ATOM      1  CA  MET A   1
 HETATM    2  C1  AQ1 B 501
@@ -129,6 +144,35 @@ def test_parse_pdb_maps_pdb_residues_to_sequence_positions():
         },
     ]
     assert summary.chain_summary["chains"][0]["mapping_quality"] == "complete"
+
+
+def test_parse_pdb_reports_gapped_residue_mapping_quality():
+    summary = parse_structure_text(PDB_GAPPED_CHAIN, file_name="gapped.pdb")
+
+    chain = summary.chain_summary["chains"][0]
+
+    assert chain["sequence"] == "MG"
+    assert chain["residue_numbers"] == ["1", "3"]
+    assert chain["mapping_quality"] == "gapped"
+    assert summary.chain_summary["warnings"] == [
+        "Missing residue numbering gap detected in chain A between 1 and 3."
+    ]
+
+
+def test_parse_pdb_preserves_insertion_codes_in_residue_mapping():
+    summary = parse_structure_text(PDB_INSERTION_CODE, file_name="insertion.pdb")
+
+    residues = summary.chain_summary["chains"][0]["residues"]
+
+    assert summary.chain_summary["chains"][0]["mapping_quality"] == "complete"
+    assert residues[1] == {
+        "chain_id": "A",
+        "residue_number": "2",
+        "insertion_code": "A",
+        "sequence_position": 2,
+        "residue_name": "SER",
+        "one_letter": "S",
+    }
 
 
 def test_parse_pdb_reports_ligand_neighbor_residues_by_cutoff():

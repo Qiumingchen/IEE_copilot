@@ -17,6 +17,7 @@ import {
   getDefaultStructureId,
   getDistanceMatrixRows,
   getLigandViews,
+  getMetalIonViews,
   getResidueRows,
   getStructurePreviewAtoms,
   getStructureQualityChecks,
@@ -81,6 +82,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const chainOptions = useMemo(() => getChainOptions(selectedStructure ? [selectedStructure] : []), [selectedStructure]);
   const selectedChain = chainOptions.find((chain) => chain.chain_id === selectedChainId) ?? chainOptions[0] ?? null;
   const ligandViews = selectedStructure ? getLigandViews(selectedStructure) : [];
+  const metalIonViews = selectedStructure ? getMetalIonViews(selectedStructure) : [];
   const stats = selectedStructure ? getStructureStats(selectedStructure) : null;
   const provenance = selectedStructure ? getStructureProvenanceView(selectedStructure) : null;
   const warnings = selectedStructure ? buildStructureWarnings(selectedStructure) : [];
@@ -387,6 +389,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
             ) : null}
 
             <LigandTable ligands={ligandViews} />
+            <MetalIonTable metalIons={metalIonViews} />
             <DistanceMatrixTable onDownloadCsv={downloadDistanceMatrixCsv} rows={distanceMatrixRows} />
             <ResidueMappingTable onDownloadCsv={downloadResidueMappingCsv} rows={residueRows} />
           </div>
@@ -647,6 +650,44 @@ function LigandTable({ ligands }: { ligands: ReturnType<typeof getLigandViews> }
               <tr>
                 <td className="px-4 py-4 text-slate-500" colSpan={6}>
                   No non-metal ligand detected
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function MetalIonTable({ metalIons }: { metalIons: ReturnType<typeof getMetalIonViews> }) {
+  return (
+    <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Metal ions</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Ion</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Location</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Atoms</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-slate-700">
+            {metalIons.length > 0 ? (
+              metalIons.map((metalIon) => (
+                <tr key={`${metalIon.ligand_code}-${metalIon.location}`}>
+                  <td className="px-4 py-3 font-mono text-slate-950">{metalIon.ligand_code}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{metalIon.location}</td>
+                  <td className="px-4 py-3">{metalIon.atom_count}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-4 py-4 text-slate-500" colSpan={3}>
+                  No metal ions detected
                 </td>
               </tr>
             )}

@@ -77,7 +77,7 @@ def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
     chains = _summarize_chains(protein_residues)
     ligand_summary, ligands = _summarize_ligands(atom_rows, protein_residues)
     complex_state = "enzyme_substrate_complex" if ligand_summary["ligand_count"] > 0 else "apo"
-    warnings = _build_structure_warnings(protein_residues, ligand_summary)
+    warnings = _build_structure_warnings(protein_residues, ligand_summary, chains)
     return ParsedStructure(
         structure_type=structure_type,
         complex_state=complex_state,
@@ -330,6 +330,7 @@ def _summarize_chains(protein_residues: list[dict[str, Any]]) -> list[dict[str, 
     chains: list[dict[str, Any]] = []
     for chain_id, residues in sorted(chain_residues.items()):
         sequence = "".join(residue["one_letter"] for residue in residues)
+        residue_number_gaps = _detect_residue_number_gaps(residues)
         chains.append(
             {
                 "chain_id": chain_id,
@@ -352,7 +353,11 @@ def _summarize_chains(protein_residues: list[dict[str, Any]]) -> list[dict[str, 
                     }
                     for residue in residues
                 ],
-                "mapping_quality": "complete",
+                "mapping_quality": "gapped" if residue_number_gaps else "complete",
+                "mapping_warnings": [
+                    _format_residue_gap_warning(chain_id, gap)
+                    for gap in residue_number_gaps
+                ],
             }
         )
     return chains
@@ -471,6 +476,7 @@ def _calculate_ligand_residue_distances(
 def _build_structure_warnings(
     protein_residues: list[dict[str, Any]],
     ligand_summary: dict[str, Any],
+    chains: list[dict[str, Any]],
 ) -> list[str]:
     warnings: list[str] = []
     if not protein_residues:
@@ -483,7 +489,50 @@ def _build_structure_warnings(
     if ligand_count and not distance_matrix:
         warnings.append("Ligands were detected, but no ligand-residue distance matrix could be calculated.")
 
+    for chain in chains:
+        chain_warnings = chain.get("mapping_warnings")
+        if isinstance(chain_warnings, list):
+            warnings.extend(str(warning) for warning in chain_warnings if warning)
+
     return warnings
+
+
+def _detect_residue_number_gaps(residues: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    gaps: list[tuple[str, str]] = []
+    previous_number: int | None = None
+    previous_label: str | None = None
+    for residue in residues:
+        current_number = _residue_number_as_int(residue.get("residue_number"))
+        current_label = _residue_label(residue)
+        if current_number is None:
+            previous_number = None
+            previous_label = None
+            continue
+        if (
+            previous_number is not None
+            and previous_label is not None
+            and current_number - previous_number > 1
+        ):
+            gaps.append((previous_label, current_label))
+        previous_number = current_number
+        previous_label = current_label
+    return gaps
+
+
+def _format_residue_gap_warning(chain_id: str, gap: tuple[str, str]) -> str:
+    return f"Missing residue numbering gap detected in chain {chain_id} between {gap[0]} and {gap[1]}."
+
+
+def _residue_number_as_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _residue_label(residue: dict[str, Any]) -> str:
+    insertion_code = str(residue.get("insertion_code") or "")
+    return f"{residue.get('residue_number')}{insertion_code}"
 
 
 def _public_ligand(ligand: dict[str, Any]) -> dict[str, Any]:
