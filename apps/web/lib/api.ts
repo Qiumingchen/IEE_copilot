@@ -29,10 +29,15 @@ import type {
   VisibilityRequestRecord
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/backend";
+
+export function apiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${normalizedPath}`;
+}
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
+  const response = await fetch(apiUrl("/auth/login"), {
     method: "POST",
     headers: {
       "content-type": "application/json"
@@ -48,7 +53,7 @@ export async function login(email: string, password: string): Promise<TokenRespo
 }
 
 export async function searchEnzyme(query: string, token: string): Promise<SearchResponse> {
-  const response = await fetch(`${API_BASE}/enzymes/search`, {
+  const response = await fetch(apiUrl("/enzymes/search"), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -67,7 +72,7 @@ export async function searchEnzyme(query: string, token: string): Promise<Search
 export async function discoverEnzymeFromPdb(file: File, token: string): Promise<PdbDiscoveryResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${API_BASE}/enzymes/discover-pdb`, {
+  const response = await fetch(apiUrl("/enzymes/discover-pdb"), {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`
@@ -83,7 +88,7 @@ export async function discoverEnzymeFromPdb(file: File, token: string): Promise<
 }
 
 async function fetchWithToken<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -104,7 +109,7 @@ async function fetchWithTokenAndErrorMessage<T>(
   token: string,
   init?: RequestInit
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -325,7 +330,7 @@ export async function uploadStructureFile(
 ): Promise<StructureRecord> {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${API_BASE}/enzymes/${enzymeId}/structures/upload`, {
+  const response = await fetch(apiUrl(`/enzymes/${enzymeId}/structures/upload`), {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`
@@ -348,7 +353,7 @@ export async function downloadStructureFile(
   structureId: string,
   token: string
 ): Promise<Blob> {
-  const response = await fetch(`${API_BASE}/enzymes/${enzymeId}/structures/${structureId}/file`, {
+  const response = await fetch(apiUrl(`/enzymes/${enzymeId}/structures/${structureId}/file`), {
     headers: {
       authorization: `Bearer ${token}`
     }
