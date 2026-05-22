@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildStructureAnalysisHref,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   searchResultMatches
@@ -67,5 +68,12 @@ test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hi
       confidence: "high"
     }),
     "87.5% identity | 75.0% coverage | high confidence | sequence_similarity, local_database"
+  );
+});
+
+test("buildStructureAnalysisHref points discovery uploads at the selected structure", () => {
+  assert.equal(
+    buildStructureAnalysisHref("enzyme 1", "structure/2"),
+    "/enzymes/enzyme%201/structures?structure_id=structure%2F2"
   );
 });

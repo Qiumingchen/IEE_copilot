@@ -28,3 +28,7 @@ export function formatPdbDiscoveryHitSubtitle(hit: PdbDiscoveryHit): string {
     .filter(Boolean)
     .join(" | ");
 }
+
+export function buildStructureAnalysisHref(enzymeId: string, structureId: string): string {
+  return `/enzymes/${encodeURIComponent(enzymeId)}/structures?structure_id=${encodeURIComponent(structureId)}`;
+}

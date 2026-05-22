@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
-import { discoverEnzymeFromPdb, searchEnzyme } from "../../lib/api";
-import type { PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
+import { discoverEnzymeFromPdb, searchEnzyme, uploadStructureFile } from "../../lib/api";
+import type { PdbDiscoveryHit, PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
 import {
+  buildStructureAnalysisHref,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   searchResultMatches
@@ -25,6 +26,7 @@ export default function SearchPage() {
   const [pdbDiscovery, setPdbDiscovery] = useState<PdbDiscoveryResponse | null>(null);
   const [pdbDiscoveryError, setPdbDiscoveryError] = useState<string | null>(null);
   const [isDiscoveringPdb, setIsDiscoveringPdb] = useState(false);
+  const [attachingHitId, setAttachingHitId] = useState<string | null>(null);
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
@@ -87,6 +89,29 @@ export default function SearchPage() {
       );
     } finally {
       setIsDiscoveringPdb(false);
+    }
+  }
+
+  async function handleAttachDiscoveredStructure(hit: PdbDiscoveryHit) {
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+    if (!selectedPdbFile || attachingHitId) {
+      return;
+    }
+
+    setPdbDiscoveryError(null);
+    setAttachingHitId(hit.enzyme.id);
+    try {
+      const structure = await uploadStructureFile(hit.enzyme.id, token, selectedPdbFile);
+      router.push(buildStructureAnalysisHref(hit.enzyme.id, structure.id));
+    } catch {
+      setPdbDiscoveryError(
+        "Unable to save the uploaded structure to this enzyme. Please try again from the structure page."
+      );
+    } finally {
+      setAttachingHitId(null);
     }
   }
 
@@ -213,14 +238,18 @@ export default function SearchPage() {
           <div className="mt-5 grid gap-3">
             {pdbDiscovery.hits.length > 0 ? (
               pdbDiscovery.hits.map((hit) => (
-                <Link
+                <article
                   className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
-                  href={`/enzymes/${hit.enzyme.id}`}
                   key={hit.enzyme.id}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">{hit.enzyme.name}</h3>
+                      <Link
+                        className="text-base font-semibold text-slate-950 hover:underline"
+                        href={`/enzymes/${hit.enzyme.id}`}
+                      >
+                        {hit.enzyme.name}
+                      </Link>
                       <p className="mt-1 text-sm text-slate-600">
                         {formatSearchMatchSubtitle(hit.enzyme)}
                       </p>
@@ -228,11 +257,21 @@ export default function SearchPage() {
                         {formatPdbDiscoveryHitSubtitle(hit)}
                       </p>
                     </div>
-                    <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-                      {hit.enzyme.source}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                        {hit.enzyme.source}
+                      </span>
+                      <button
+                        className="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                        disabled={!selectedPdbFile || Boolean(attachingHitId)}
+                        onClick={() => void handleAttachDiscoveredStructure(hit)}
+                        type="button"
+                      >
+                        {attachingHitId === hit.enzyme.id ? "Saving..." : "Use uploaded structure"}
+                      </button>
+                    </div>
                   </div>
-                </Link>
+                </article>
               ))
             ) : (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

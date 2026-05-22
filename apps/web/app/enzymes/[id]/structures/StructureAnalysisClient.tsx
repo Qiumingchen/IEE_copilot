@@ -34,13 +34,14 @@ const TOKEN_KEY = "iee-copilot-token";
 
 type StructureAnalysisClientProps = {
   enzymeId: string;
+  initialStructureId?: string;
 };
 
-export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisClientProps) {
+export default function StructureAnalysisClient({ enzymeId, initialStructureId = "" }: StructureAnalysisClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [bundle, setBundle] = useState<EnzymeRecordBundle | null>(null);
-  const [selectedStructureId, setSelectedStructureId] = useState<string | null>(null);
+  const [selectedStructureId, setSelectedStructureId] = useState<string | null>(initialStructureId || null);
   const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isUploadingStructure, setIsUploadingStructure] = useState(false);
@@ -56,7 +57,13 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
     try {
       const nextBundle = await getEnzymeRecordBundle(enzymeId, nextToken);
       setBundle(nextBundle);
-      setSelectedStructureId((current) => preferredStructureId ?? current ?? getDefaultStructureId(nextBundle.structures));
+      setSelectedStructureId((current) => {
+        const requestedStructureId = preferredStructureId ?? current ?? initialStructureId;
+        const hasRequestedStructure = nextBundle.structures.some(
+          (structure) => structure.id === requestedStructureId
+        );
+        return hasRequestedStructure ? requestedStructureId : getDefaultStructureId(nextBundle.structures);
+      });
     } catch {
       setError("Unable to load structure analysis data. Please check the API service and your login.");
     } finally {
