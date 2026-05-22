@@ -31,3 +31,40 @@ class EnzymeSearchResponse(BaseModel):
     module: EnzymeModule
 
     model_config = ConfigDict(use_enum_values=True)
+
+
+class PdbDiscoveryChain(BaseModel):
+    chain_id: str
+    sequence: str
+    residue_count: int
+    mapping_quality: str | None = None
+
+
+class PdbDiscoveryMetadata(BaseModel):
+    pdb_id: str | None = None
+    title: str | None = None
+    enzyme_name: str | None = None
+    organism: str | None = None
+    uniprot_id: str | None = None
+
+
+class PdbDiscoveryHit(BaseModel):
+    enzyme: EnzymeSummary
+    identity: float
+    coverage: float
+    aligned_length: int
+    evidence: list[str] = Field(default_factory=list)
+    confidence: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PdbDiscoveryResponse(BaseModel):
+    file_name: str
+    metadata: PdbDiscoveryMetadata
+    structure_type: str
+    complex_state: str
+    chains: list[PdbDiscoveryChain]
+    query_chain_id: str
+    query_sequence: str
+    hits: list[PdbDiscoveryHit] = Field(default_factory=list)

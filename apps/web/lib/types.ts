@@ -19,6 +19,41 @@ export type SearchResponse = {
   module: string;
 };
 
+export type PdbDiscoveryChain = {
+  chain_id: string;
+  sequence: string;
+  residue_count: number;
+  mapping_quality: string | null;
+};
+
+export type PdbDiscoveryMetadata = {
+  pdb_id: string | null;
+  title: string | null;
+  enzyme_name: string | null;
+  organism: string | null;
+  uniprot_id: string | null;
+};
+
+export type PdbDiscoveryHit = {
+  enzyme: EnzymeSummary;
+  identity: number;
+  coverage: number;
+  aligned_length: number;
+  evidence: string[];
+  confidence: string;
+};
+
+export type PdbDiscoveryResponse = {
+  file_name: string;
+  metadata: PdbDiscoveryMetadata;
+  structure_type: string;
+  complex_state: string;
+  chains: PdbDiscoveryChain[];
+  query_chain_id: string;
+  query_sequence: string;
+  hits: PdbDiscoveryHit[];
+};
+
 export type TokenResponse = {
   access_token: string;
   token_type: string;

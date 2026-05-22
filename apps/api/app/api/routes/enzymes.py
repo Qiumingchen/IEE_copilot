@@ -1,9 +1,10 @@
 import hashlib
+import re
 from dataclasses import replace
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -45,7 +46,15 @@ from app.external.uniprot import (
     get_uniprot_client,
     parse_fasta_sequence,
 )
-from app.schemas.enzyme import EnzymeSearchRequest, EnzymeSearchResponse, EnzymeSummary
+from app.schemas.enzyme import (
+    EnzymeSearchRequest,
+    EnzymeSearchResponse,
+    EnzymeSummary,
+    PdbDiscoveryChain,
+    PdbDiscoveryHit,
+    PdbDiscoveryMetadata,
+    PdbDiscoveryResponse,
+)
 from app.services.cache import (
     find_fresh_search_cache,
     find_fresh_uniprot_hit,
@@ -56,7 +65,8 @@ from app.services.cache import (
 from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
 from app.services.provenance import build_fallback_provenance, build_real_provenance
-from app.services.similarity_matching import find_level_two_similarity_match
+from app.services.similarity_matching import calculate_ungapped_similarity, find_level_two_similarity_match
+from app.services.structure_parser import StructureParseError, parse_structure_text
 from worker.jobs import run_placeholder_analysis
 
 
@@ -634,6 +644,114 @@ def _search_result_matches(
     return matches
 
 
+def _extract_pdb_metadata(text: str) -> PdbDiscoveryMetadata:
+    title_parts: list[str] = []
+    compnd_parts: list[str] = []
+    source_parts: list[str] = []
+    pdb_id: str | None = None
+    uniprot_id: str | None = None
+
+    for line in text.splitlines():
+        record = line[0:6].strip().upper()
+        if record == "HEADER":
+            candidate_id = line[62:67].strip().upper()
+            if not candidate_id:
+                match = re.search(r"\b[0-9][A-Z0-9]{3}\b", line.upper())
+                candidate_id = match.group(0) if match else ""
+            if candidate_id:
+                pdb_id = candidate_id
+        elif record == "TITLE":
+            title_parts.append(line[10:].strip())
+        elif record == "COMPND":
+            compnd_parts.append(line[10:].strip())
+        elif record == "SOURCE":
+            source_parts.append(line[10:].strip())
+        elif record == "DBREF" and len(line) >= 42:
+            database = line[26:32].strip().upper()
+            accession = line[33:41].strip()
+            if database in {"UNP", "UNIPROT"} and accession:
+                uniprot_id = accession
+
+    compnd_text = " ".join(compnd_parts)
+    source_text = " ".join(source_parts)
+    return PdbDiscoveryMetadata(
+        pdb_id=pdb_id,
+        title=" ".join(title_parts) or None,
+        enzyme_name=_extract_pdb_semicolon_field(compnd_text, "MOLECULE"),
+        organism=_extract_pdb_semicolon_field(source_text, "ORGANISM_SCIENTIFIC"),
+        uniprot_id=uniprot_id,
+    )
+
+
+def _extract_pdb_semicolon_field(text: str, field_name: str) -> str | None:
+    match = re.search(rf"{re.escape(field_name)}\s*:\s*([^;]+)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value or None
+
+
+def _discovery_chains(chain_summary: dict) -> list[PdbDiscoveryChain]:
+    chains = chain_summary.get("chains", [])
+    if not isinstance(chains, list):
+        return []
+    return [
+        PdbDiscoveryChain(
+            chain_id=str(chain.get("chain_id") or "-"),
+            sequence=str(chain.get("sequence") or ""),
+            residue_count=int(chain.get("residue_count") or 0),
+            mapping_quality=str(chain.get("mapping_quality") or "") or None,
+        )
+        for chain in chains
+        if isinstance(chain, dict) and str(chain.get("sequence") or "")
+    ]
+
+
+def _local_pdb_discovery_hits(
+    db: Session,
+    *,
+    query_sequence: str,
+    module: EnzymeModule,
+    limit: int = 12,
+) -> list[PdbDiscoveryHit]:
+    rows = db.execute(
+        select(EnzymeEntry, ProteinSequence)
+        .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+        .join(ProteinSequence, ProteinSequence.enzyme_entry_id == EnzymeEntry.id)
+        .where(EnzymeFamily.module == module)
+    ).all()
+
+    hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
+    for enzyme, protein_sequence in rows:
+        candidate_sequence = protein_sequence.mature_sequence or protein_sequence.sequence
+        similarity = calculate_ungapped_similarity(query_sequence, candidate_sequence)
+        if similarity.identity < 0.4 or similarity.coverage < 0.7:
+            continue
+        confidence = "high" if similarity.identity >= 0.8 and similarity.coverage >= 0.8 else "medium"
+        hit = PdbDiscoveryHit(
+            enzyme=enzyme,
+            identity=round(similarity.identity, 4),
+            coverage=round(similarity.coverage, 4),
+            aligned_length=similarity.aligned_length,
+            evidence=["sequence_similarity", "local_database"],
+            confidence=confidence,
+        )
+        existing_hit = hits_by_enzyme_id.get(enzyme.id)
+        if existing_hit is None or _pdb_discovery_hit_score(hit) > _pdb_discovery_hit_score(existing_hit):
+            hits_by_enzyme_id[enzyme.id] = hit
+
+    hits = sorted(
+        hits_by_enzyme_id.values(),
+        key=_pdb_discovery_hit_score,
+        reverse=True,
+    )
+    return hits[:limit]
+
+
+def _pdb_discovery_hit_score(hit: PdbDiscoveryHit) -> tuple[float, float, int]:
+    return (hit.identity, hit.coverage, hit.aligned_length)
+
+
 @router.post("/search", response_model=EnzymeSearchResponse)
 def search_enzymes(
     request: EnzymeSearchRequest,
@@ -821,6 +939,53 @@ def search_enzymes(
         cache_status=cache_status,
         query_kind=resolved.kind.value,
         module=module,
+    )
+
+
+@router.post("/discover-pdb", response_model=PdbDiscoveryResponse)
+async def discover_enzyme_from_pdb(
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> PdbDiscoveryResponse:
+    file_name = file.filename or "structure.pdb"
+    if not file_name.lower().endswith((".pdb", ".cif")):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="only .pdb and .cif structure files are supported",
+        )
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+        parsed = parse_structure_text(text, file_name=file_name)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="structure file must be UTF-8 text",
+        ) from exc
+    except StructureParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    chains = _discovery_chains(parsed.chain_summary)
+    if not chains:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="uploaded structure does not contain a protein sequence",
+        )
+    query_chain = max(chains, key=lambda chain: chain.residue_count)
+    module = EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
+    return PdbDiscoveryResponse(
+        file_name=file_name,
+        metadata=_extract_pdb_metadata(text),
+        structure_type=parsed.structure_type,
+        complex_state=parsed.complex_state,
+        chains=chains,
+        query_chain_id=query_chain.chain_id,
+        query_sequence=query_chain.sequence,
+        hits=_local_pdb_discovery_hits(db, query_sequence=query_chain.sequence, module=module),
     )
 
 

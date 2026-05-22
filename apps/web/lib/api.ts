@@ -15,6 +15,7 @@ import type {
   LiteratureReferenceRecord,
   MutationQueryFilters,
   MutationRecord,
+  PdbDiscoveryResponse,
   PropertyRankingMode,
   PropertyRankingResponse,
   PropertyRecord,
@@ -61,6 +62,24 @@ export async function searchEnzyme(query: string, token: string): Promise<Search
   }
 
   return response.json() as Promise<SearchResponse>;
+}
+
+export async function discoverEnzymeFromPdb(file: File, token: string): Promise<PdbDiscoveryResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${API_BASE}/enzymes/discover-pdb`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(`PDB discovery failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<PdbDiscoveryResponse>;
 }
 
 async function fetchWithToken<T>(path: string, token: string, init?: RequestInit): Promise<T> {

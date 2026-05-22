@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatSearchMatchSubtitle, searchResultMatches } from "../app/search/search-utils.ts";
+import {
+  formatPdbDiscoveryHitSubtitle,
+  formatSearchMatchSubtitle,
+  searchResultMatches
+} from "../app/search/search-utils.ts";
 
 const enzyme = {
   id: "enzyme-1",
@@ -16,7 +20,17 @@ const enzyme = {
 };
 
 test("searchResultMatches falls back to the primary enzyme and deduplicates matches", () => {
-  assert.deepEqual(searchResultMatches({ enzyme, matches: [], job_id: "job-1", cache_status: "hit", query_kind: "keyword", module: "MICROBIAL_TRANSGLUTAMINASE_MATURE" }), [enzyme]);
+  assert.deepEqual(
+    searchResultMatches({
+      enzyme,
+      matches: [],
+      job_id: "job-1",
+      cache_status: "hit",
+      query_kind: "keyword",
+      module: "MICROBIAL_TRANSGLUTAMINASE_MATURE"
+    }),
+    [enzyme]
+  );
 
   assert.deepEqual(
     searchResultMatches({
@@ -34,10 +48,24 @@ test("searchResultMatches falls back to the primary enzyme and deduplicates matc
 test("formatSearchMatchSubtitle combines organism identifiers and source details", () => {
   assert.equal(
     formatSearchMatchSubtitle(enzyme),
-    "Streptomyces mobaraensis · EC 2.3.2.13 · P81453"
+    "Streptomyces mobaraensis | EC 2.3.2.13 | P81453"
   );
   assert.equal(
     formatSearchMatchSubtitle({ ...enzyme, organism: null, ec_number: null, uniprot_id: null }),
     "Source details not reported"
+  );
+});
+
+test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hits", () => {
+  assert.equal(
+    formatPdbDiscoveryHitSubtitle({
+      enzyme,
+      identity: 0.875,
+      coverage: 0.75,
+      aligned_length: 120,
+      evidence: ["sequence_similarity", "local_database"],
+      confidence: "high"
+    }),
+    "87.5% identity | 75.0% coverage | high confidence | sequence_similarity, local_database"
   );
 });
