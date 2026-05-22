@@ -7,6 +7,7 @@ import {
   getDefaultStructureId,
   getDistanceMatrixRows,
   getLigandViews,
+  getStructureQualityChecks,
   getStructureProvenanceView,
   getStructureReadiness,
   getStructureStats,
@@ -192,6 +193,60 @@ test("summarizes structure stats and warnings", () => {
     artifact_object_key: "structures/structure-1/complex.pdb"
   });
   assert.deepEqual(buildStructureWarnings(structure), ["missing residue around A3"]);
+});
+
+test("builds structure quality checks from parsed chains and ligand contacts", () => {
+  assert.deepEqual(getStructureQualityChecks(structure), [
+    {
+      label: "Protein chains",
+      status: "pass",
+      detail: "1 chain detected."
+    },
+    {
+      label: "Residue mapping",
+      status: "pass",
+      detail: "2 residues mapped to sequence positions."
+    },
+    {
+      label: "Parser warnings",
+      status: "warn",
+      detail: "1 warning reported."
+    },
+    {
+      label: "Ligand contact matrix",
+      status: "pass",
+      detail: "2 ligand-residue distances available."
+    }
+  ]);
+
+  const incompleteStructure = {
+    ...structure,
+    chain_summary: { chains: [], warnings: [] },
+    ligand_summary: { ligand_count: 1, distance_matrix: [] }
+  };
+
+  assert.deepEqual(getStructureQualityChecks(incompleteStructure), [
+    {
+      label: "Protein chains",
+      status: "fail",
+      detail: "No protein chain was detected."
+    },
+    {
+      label: "Residue mapping",
+      status: "fail",
+      detail: "No residues could be mapped to sequence positions."
+    },
+    {
+      label: "Parser warnings",
+      status: "pass",
+      detail: "No parser warnings reported."
+    },
+    {
+      label: "Ligand contact matrix",
+      status: "warn",
+      detail: "Complex-like structure has ligands, but no ligand distance matrix is available."
+    }
+  ]);
 });
 
 test("builds structure provenance display view", () => {

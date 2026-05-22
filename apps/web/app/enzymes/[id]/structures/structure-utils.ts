@@ -61,6 +61,12 @@ export type DistanceMatrixRowView = {
   distance_angstrom: string | number;
 };
 
+export type StructureQualityCheckView = {
+  label: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+};
+
 export const structureUploadAccept = ".pdb,.cif,chemical/x-pdb,chemical/x-cif,text/plain";
 
 export function isStructureUploadFileName(fileName: string): boolean {
@@ -139,6 +145,48 @@ export function buildStructureWarnings(structure: StructureRecord): string[] {
     return [];
   }
   return warnings.map(String).filter(Boolean);
+}
+
+export function getStructureQualityChecks(structure: StructureRecord): StructureQualityCheckView[] {
+  const chains = getRecordArray(structure.chain_summary, "chains");
+  const residueRows = getResidueRows(structure, null);
+  const warnings = buildStructureWarnings(structure);
+  const ligandCount = numberValue(structure.ligand_summary?.ligand_count);
+  const distanceRows = getDistanceMatrixRows(structure);
+
+  return [
+    {
+      label: "Protein chains",
+      status: chains.length > 0 ? "pass" : "fail",
+      detail: chains.length > 0 ? pluralize(chains.length, "chain") + " detected." : "No protein chain was detected."
+    },
+    {
+      label: "Residue mapping",
+      status: residueRows.length > 0 ? "pass" : "fail",
+      detail:
+        residueRows.length > 0
+          ? pluralize(residueRows.length, "residue") + " mapped to sequence positions."
+          : "No residues could be mapped to sequence positions."
+    },
+    {
+      label: "Parser warnings",
+      status: warnings.length > 0 ? "warn" : "pass",
+      detail:
+        warnings.length > 0
+          ? pluralize(warnings.length, "warning") + " reported."
+          : "No parser warnings reported."
+    },
+    {
+      label: "Ligand contact matrix",
+      status: ligandCount > 0 && distanceRows.length === 0 ? "warn" : "pass",
+      detail:
+        ligandCount > 0
+          ? distanceRows.length > 0
+            ? pluralize(distanceRows.length, "ligand-residue distance") + " available."
+            : "Complex-like structure has ligands, but no ligand distance matrix is available."
+          : "No ligand contact matrix is required for apo structures."
+    }
+  ];
 }
 
 export function getStructureProvenanceView(structure: StructureRecord): StructureProvenanceView {

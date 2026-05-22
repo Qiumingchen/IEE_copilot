@@ -14,6 +14,7 @@ import {
   getDistanceMatrixRows,
   getLigandViews,
   getResidueRows,
+  getStructureQualityChecks,
   getStructureReadiness,
   getStructureProvenanceView,
   getStructureStats,
@@ -79,6 +80,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const warnings = selectedStructure ? buildStructureWarnings(selectedStructure) : [];
   const residueRows = selectedStructure ? getResidueRows(selectedStructure, selectedChain?.chain_id ?? null) : [];
   const readiness = selectedStructure ? getStructureReadiness(selectedStructure) : null;
+  const qualityChecks = selectedStructure ? getStructureQualityChecks(selectedStructure) : [];
   const workflowActions = selectedStructure ? getStructureWorkflowActions(selectedStructure, enzymeId) : [];
   const distanceMatrixRows = selectedStructure ? getDistanceMatrixRows(selectedStructure) : [];
 
@@ -238,6 +240,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
 
             {provenance ? <ProvenancePanel provenance={provenance} /> : null}
             {readiness ? <ReadinessPanel readiness={readiness} /> : null}
+            <QualityChecksPanel checks={qualityChecks} />
             <WorkflowActions actions={workflowActions} />
 
             <section className="rounded-md border border-slate-200 bg-white">
@@ -311,6 +314,33 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
       </section>
     </main>
   );
+}
+
+function QualityChecksPanel({ checks }: { checks: ReturnType<typeof getStructureQualityChecks> }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Structure quality checks</h2>
+      </div>
+      <div className="grid gap-3 p-4 md:grid-cols-2">
+        {checks.map((check) => (
+          <div className="flex items-start gap-3 rounded-md border border-slate-200 p-3" key={check.label}>
+            <QualityDot status={check.status} />
+            <div>
+              <h3 className="text-sm font-semibold text-slate-950">{check.label}</h3>
+              <p className="mt-1 text-sm text-slate-600">{check.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function QualityDot({ status }: { status: "pass" | "warn" | "fail" }) {
+  const toneClass =
+    status === "pass" ? "bg-emerald-500" : status === "warn" ? "bg-amber-500" : "bg-red-500";
+  return <span aria-label={status} className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${toneClass}`} />;
 }
 
 function ReadinessPanel({ readiness }: { readiness: ReturnType<typeof getStructureReadiness> }) {
