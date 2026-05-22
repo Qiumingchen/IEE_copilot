@@ -5,7 +5,9 @@ import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
   buildKineticEvidenceCsv,
+  buildExpressionEvidenceCsv,
   buildPropertyRankingCsv,
+  buildExpressionSummary,
   buildKineticSummary,
   buildPropertyDistribution,
   filterPropertyEvidenceRecords,
@@ -92,6 +94,46 @@ test("buildKineticSummary summarizes Km, kcat, and catalytic efficiency", () => 
       { label: "kcat", count: 2, min: 31, median: 35.5, max: 40 },
       { label: "kcat/Km", count: 2, min: 14.8, median: 17.4, max: 20 }
     ]
+  );
+});
+
+test("buildExpressionSummary summarizes expression level and soluble labels", () => {
+  assert.deepEqual(
+    buildExpressionSummary([
+      {
+        expression_level_original: "90",
+        expression_level_standardized: "90",
+        unit_original: "mg/L",
+        unit_standardized: "mg/L",
+        soluble_expression: "high soluble fraction"
+      },
+      {
+        expression_level_original: "150",
+        expression_level_standardized: "150",
+        unit_original: "mg/L",
+        unit_standardized: "mg/L",
+        soluble_expression: "low soluble fraction"
+      },
+      {
+        expression_level_original: "not quantified",
+        expression_level_standardized: null,
+        unit_original: null,
+        unit_standardized: null,
+        soluble_expression: "high soluble fraction"
+      }
+    ]),
+    {
+      count: 3,
+      numeric_count: 2,
+      unit: "mg/L",
+      min: 90,
+      median: 120,
+      max: 150,
+      soluble_counts: [
+        { label: "high soluble fraction", count: 2 },
+        { label: "low soluble fraction", count: 1 }
+      ]
+    }
   );
 });
 
@@ -212,6 +254,47 @@ test("buildKineticEvidenceCsv exports kinetic parameters and citation fields", (
     [
       "substrate,km,kcat,kcat_km,unit_original,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
       "CBZ-Gln-Gly,2.1,31,14.8,mM; s-1,37,7.0,HPLC assay,PMID 123456 · MTGase kinetics · Enzyme Reports · 2025 · curated_literature,Table 2,public,approved"
+    ].join("\n")
+  );
+});
+
+test("buildExpressionEvidenceCsv exports expression records with condition and citation fields", () => {
+  const csv = buildExpressionEvidenceCsv([
+    {
+      expression_host: "E. coli BL21(DE3)",
+      vector: "pET-28a",
+      expression_level_original: "90",
+      expression_level_standardized: "90",
+      unit_original: "mg/L",
+      unit_standardized: "mg/L",
+      soluble_expression: "high soluble fraction",
+      condition: {
+        assay_temperature: "25",
+        assay_pH: "7.0",
+        method: "shake flask expression"
+      },
+      reference_id: "ref-expression",
+      reference: {
+        id: "ref-expression",
+        title: "Soluble MTGase expression",
+        authors: null,
+        journal: "Expression Reports",
+        year: 2025,
+        doi: "10.1000/expression",
+        pubmed_id: null,
+        source: "curated_literature",
+        provenance: null
+      },
+      visibility: "public",
+      curation_status: "approved"
+    }
+  ]);
+
+  assert.equal(
+    csv,
+    [
+      "expression_host,vector,expression_level_original,expression_level_standardized,unit_original,unit_standardized,soluble_expression,assay_temperature,assay_pH,method,reference,visibility,curation_status",
+      "E. coli BL21(DE3),pET-28a,90,90,mg/L,mg/L,high soluble fraction,25,7.0,shake flask expression,10.1000/expression · Soluble MTGase expression · Expression Reports · 2025 · curated_literature,public,approved"
     ].join("\n")
   );
 });

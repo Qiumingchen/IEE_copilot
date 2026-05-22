@@ -1,4 +1,5 @@
 import type {
+  ExpressionRecord,
   KineticRecord,
   LiteratureReferenceRecord,
   PropertyRankingGroupRecord,
@@ -60,6 +61,16 @@ export type KineticSummaryItem = {
   max: number | null;
 };
 
+export type ExpressionSummary = {
+  count: number;
+  numeric_count: number;
+  unit: string | null;
+  min: number | null;
+  median: number | null;
+  max: number | null;
+  soluble_counts: Array<{ label: string; count: number }>;
+};
+
 export function buildPropertyDistribution(
   records: Array<
     Pick<
@@ -100,6 +111,45 @@ export function buildKineticSummary(
     kineticSummaryItem("kcat", records.map((record) => record.kcat)),
     kineticSummaryItem("kcat/Km", records.map((record) => record.kcat_km))
   ];
+}
+
+export function buildExpressionSummary(
+  records: Array<
+    Pick<
+      ExpressionRecord,
+      | "expression_level_original"
+      | "expression_level_standardized"
+      | "unit_original"
+      | "unit_standardized"
+      | "soluble_expression"
+    >
+  >
+): ExpressionSummary {
+  const values = records
+    .map((record) => numericValue(record.expression_level_standardized ?? record.expression_level_original))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  const unitRecord = records.find((record) => record.unit_standardized || record.unit_original);
+  const solubleCounts = new Map<string, number>();
+  records.forEach((record) => {
+    const label = record.soluble_expression?.trim();
+    if (!label) {
+      return;
+    }
+    solubleCounts.set(label, (solubleCounts.get(label) ?? 0) + 1);
+  });
+
+  return {
+    count: records.length,
+    numeric_count: values.length,
+    unit: unitRecord?.unit_standardized ?? unitRecord?.unit_original ?? null,
+    min: values[0] ?? null,
+    median: values.length > 0 ? medianValue(values) : null,
+    max: values[values.length - 1] ?? null,
+    soluble_counts: Array.from(solubleCounts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+  };
 }
 
 export function filterPropertyEvidenceRecords<T extends {
@@ -222,6 +272,60 @@ export function buildKineticEvidenceCsv(
       record.method,
       record.reference ? formatReferenceCitation(record.reference) : record.reference_id,
       record.evidence_text,
+      record.visibility,
+      record.curation_status
+    ].map(formatCsvCell).join(",")
+  );
+  return [header.join(","), ...rows].join("\n");
+}
+
+export function buildExpressionEvidenceCsv(
+  records: Array<
+    Pick<
+      ExpressionRecord,
+      | "expression_host"
+      | "vector"
+      | "expression_level_original"
+      | "expression_level_standardized"
+      | "unit_original"
+      | "unit_standardized"
+      | "soluble_expression"
+      | "condition"
+      | "reference"
+      | "reference_id"
+      | "visibility"
+      | "curation_status"
+    >
+  >
+): string {
+  const header = [
+    "expression_host",
+    "vector",
+    "expression_level_original",
+    "expression_level_standardized",
+    "unit_original",
+    "unit_standardized",
+    "soluble_expression",
+    "assay_temperature",
+    "assay_pH",
+    "method",
+    "reference",
+    "visibility",
+    "curation_status"
+  ];
+  const rows = records.map((record) =>
+    [
+      record.expression_host,
+      record.vector,
+      record.expression_level_original,
+      record.expression_level_standardized,
+      record.unit_original,
+      record.unit_standardized,
+      record.soluble_expression,
+      record.condition?.assay_temperature,
+      record.condition?.assay_pH,
+      record.condition?.method,
+      record.reference ? formatReferenceCitation(record.reference) : record.reference_id,
       record.visibility,
       record.curation_status
     ].map(formatCsvCell).join(",")

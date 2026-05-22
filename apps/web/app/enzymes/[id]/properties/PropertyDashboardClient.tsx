@@ -18,9 +18,11 @@ import type {
 import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
+  buildExpressionEvidenceCsv,
   buildKineticEvidenceCsv,
   buildPropertyRankingCsv,
   buildPropertyDistribution,
+  buildExpressionSummary,
   buildKineticSummary,
   filterPropertyEvidenceRecords,
   formatAssayContext,
@@ -148,6 +150,13 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     );
   }
 
+  function handleDownloadExpressionEvidenceCsv() {
+    downloadCsv(
+      `expression-evidence-${enzymeId}.csv`,
+      buildExpressionEvidenceCsv(bundle?.expression ?? [])
+    );
+  }
+
   const propertyRecordsWithFallbackReferences = useMemo(
     () =>
       (bundle?.properties ?? []).map((record) => ({
@@ -177,6 +186,10 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
   const kineticSummary = useMemo(
     () => buildKineticSummary(bundle?.kinetics ?? []),
     [bundle?.kinetics]
+  );
+  const expressionSummary = useMemo(
+    () => buildExpressionSummary(bundle?.expression ?? []),
+    [bundle?.expression]
   );
 
   return (
@@ -474,6 +487,78 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
           </div>
         </section>
       </section>
+
+      <section className="mt-6 rounded-md border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Expression evidence</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {bundle?.expression.length ?? 0} expression and soluble-expression records
+              </p>
+            </div>
+            <button
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
+              disabled={(bundle?.expression.length ?? 0) === 0}
+              onClick={handleDownloadExpressionEvidenceCsv}
+              type="button"
+            >
+              Download CSV
+            </button>
+          </div>
+        </div>
+        <ExpressionSummaryPanel summary={expressionSummary} />
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Host</th>
+                <th className="px-4 py-3">Vector</th>
+                <th className="px-4 py-3">Expression level</th>
+                <th className="px-4 py-3">Soluble expression</th>
+                <th className="px-4 py-3">Condition</th>
+                <th className="px-4 py-3">Reference</th>
+                <th className="px-4 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {(bundle?.expression ?? []).map((record) => (
+                <tr key={record.id}>
+                  <td className="min-w-44 px-4 py-3 text-slate-800">{record.expression_host ?? "-"}</td>
+                  <td className="min-w-36 px-4 py-3 text-slate-600">{record.vector ?? "-"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                    {formatExpressionLevel(record)}
+                  </td>
+                  <td className="min-w-44 px-4 py-3 text-slate-600">{record.soluble_expression ?? "-"}</td>
+                  <td className="min-w-56 px-4 py-3 text-slate-600">
+                    {[
+                      record.condition?.assay_temperature ? `${record.condition.assay_temperature} degC` : null,
+                      record.condition?.assay_pH ? `pH ${record.condition.assay_pH}` : null,
+                      record.condition?.method
+                    ].filter(Boolean).join(" · ") || "-"}
+                  </td>
+                  <td className="min-w-64 px-4 py-3 text-slate-600">
+                    <ReferenceCitation
+                      fallback={record.reference_id ?? "-"}
+                      reference={record.reference ?? referencesById[record.reference_id ?? ""]}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    {record.visibility} / {record.curation_status}
+                  </td>
+                </tr>
+              ))}
+              {(bundle?.expression.length ?? 0) === 0 ? (
+                <tr>
+                  <td className="px-4 py-6 text-sm text-slate-500" colSpan={7}>
+                    No expression evidence rows are available yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   );
 }
@@ -557,6 +642,36 @@ function KineticSummaryPanel({ summary }: { summary: ReturnType<typeof buildKine
   );
 }
 
+function ExpressionSummaryPanel({ summary }: { summary: ReturnType<typeof buildExpressionSummary> }) {
+  return (
+    <div className="grid gap-3 border-b border-slate-200 p-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <DistributionMetric label="Records" value={summary.count} />
+        <DistributionMetric label="Numeric" value={summary.numeric_count} />
+        <DistributionMetric label="Median" value={formatDistributionValue(summary.median, summary.unit)} />
+        <DistributionMetric label="Range" value={formatRange(summary.min, summary.max, summary.unit)} />
+      </dl>
+      <div className="rounded-md border border-slate-200 p-3">
+        <h3 className="text-sm font-semibold text-slate-950">Soluble expression</h3>
+        {summary.soluble_counts.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {summary.soluble_counts.map((item) => (
+              <span
+                className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700"
+                key={item.label}
+              >
+                {item.label}: {item.count}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">No soluble-expression labels are available yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function KineticMetric({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
@@ -584,6 +699,27 @@ function formatDistributionValue(value: number | null, unit: string | null): str
 
 function formatNullableNumber(value: number | null): string {
   return value === null ? "-" : String(value);
+}
+
+function formatRange(min: number | null, max: number | null, unit: string | null): string {
+  if (min === null || max === null) {
+    return "-";
+  }
+  return `${min}-${max}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatExpressionLevel(record: {
+  expression_level_original: string | null;
+  expression_level_standardized: string | null;
+  unit_original: string | null;
+  unit_standardized: string | null;
+}): string {
+  const value = record.expression_level_standardized ?? record.expression_level_original;
+  if (!value) {
+    return "-";
+  }
+  const unit = record.unit_standardized ?? record.unit_original;
+  return `${value}${unit ? ` ${unit}` : ""}`;
 }
 
 function ReportedRanking({ ranking }: { ranking: PropertyRankingResponse | null }) {
