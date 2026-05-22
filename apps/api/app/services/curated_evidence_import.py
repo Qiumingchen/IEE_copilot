@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     CurationStatus,
     EnzymeEntry,
+    ExperimentCondition,
+    ExpressionRecord,
     KineticRecord,
     LiteratureReference,
     MutationRecord,
@@ -26,7 +28,7 @@ class CuratedEvidenceImportError(ValueError):
 @dataclass
 class CuratedEvidenceImportResult:
     created: dict[str, int] = field(
-        default_factory=lambda: {"properties": 0, "kinetics": 0, "mutations": 0}
+        default_factory=lambda: {"properties": 0, "kinetics": 0, "mutations": 0, "expressions": 0}
     )
     reference_ids: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -71,14 +73,14 @@ class CuratedEvidencePreviewResult:
 
 def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
     rows, fields = _parse_rows_with_fields(csv_text)
-    record_counts = {"properties": 0, "kinetics": 0, "mutations": 0}
+    record_counts = {"properties": 0, "kinetics": 0, "mutations": 0, "expressions": 0}
     records: list[CuratedEvidencePreviewRecord] = []
     errors: list[CuratedEvidencePreviewError] = []
     warnings: list[str] = []
 
     for index, row in enumerate(rows, start=2):
         record_type = _value(row, "record_type").lower()
-        if record_type not in {"property", "kinetic", "mutation"}:
+        if record_type not in {"property", "kinetic", "mutation", "expression"}:
             errors.append(
                 CuratedEvidencePreviewError(
                     row_number=index,
@@ -95,11 +97,16 @@ def preview_curated_evidence(csv_text: str) -> CuratedEvidencePreviewResult:
                 record_counts["properties"] += 1
         elif record_type == "kinetic":
             record_counts["kinetics"] += 1
-        else:
+        elif record_type == "mutation":
             row_errors = _validate_mutation_row(row, index)
             errors.extend(row_errors)
             if not row_errors:
                 record_counts["mutations"] += 1
+        else:
+            row_errors = _validate_expression_row(row, index)
+            errors.extend(row_errors)
+            if not row_errors:
+                record_counts["expressions"] += 1
 
         if not any(error.row_number == index for error in errors):
             reference_identity = _reference_identity(row)
@@ -160,9 +167,12 @@ def import_curated_evidence(
         elif record_type == "kinetic":
             _create_kinetic(db, enzyme, row, reference)
             result.created["kinetics"] += 1
-        else:
+        elif record_type == "mutation":
             _create_mutation(db, enzyme, row, reference)
             result.created["mutations"] += 1
+        else:
+            _create_expression(db, enzyme, row, reference)
+            result.created["expressions"] += 1
 
     result.reference_ids = sorted(reference_ids)
     return result
@@ -187,7 +197,7 @@ def _parse_rows_with_fields(csv_text: str) -> tuple[list[dict[str, str]], list[s
 
 def _validated_record_type(row: dict[str, str], row_number: int) -> str:
     record_type = _value(row, "record_type").lower()
-    if record_type not in {"property", "kinetic", "mutation"}:
+    if record_type not in {"property", "kinetic", "mutation", "expression"}:
         raise CuratedEvidenceImportError(f"row {row_number}: unsupported record_type")
     return record_type
 
@@ -227,6 +237,18 @@ def _validate_mutation_row(row: dict[str, str], row_number: int) -> list[Curated
             )
         ]
     return []
+
+
+def _validate_expression_row(row: dict[str, str], row_number: int) -> list[CuratedEvidencePreviewError]:
+    if _value(row, "expression_host"):
+        return []
+    return [
+        CuratedEvidencePreviewError(
+            row_number=row_number,
+            field="expression_host",
+            message="expression_host is required",
+        )
+    ]
 
 
 def _format_preview_errors(errors: list[CuratedEvidencePreviewError]) -> str:
@@ -380,6 +402,65 @@ def _create_mutation(
     )
 
 
+def _create_expression(
+    db: Session,
+    enzyme: EnzymeEntry,
+    row: dict[str, str],
+    reference: LiteratureReference | None,
+) -> None:
+    condition = _create_expression_condition(db, enzyme, row, reference)
+    db.add(
+        ExpressionRecord(
+            enzyme_entry_id=enzyme.id,
+            expression_host=_required(row, "expression_host"),
+            vector=_value(row, "vector") or None,
+            expression_level_original=_value(row, "expression_level_original") or None,
+            expression_level_standardized=_value(row, "expression_level_standardized") or None,
+            soluble_expression=_value(row, "soluble_expression") or None,
+            unit_original=_value(row, "unit_original") or None,
+            unit_standardized=_value(row, "unit_standardized") or _value(row, "unit_original") or None,
+            condition_id=condition.id if condition else None,
+            reference_id=reference.id if reference else None,
+            visibility=Visibility.PUBLIC,
+            curation_status=CurationStatus.APPROVED,
+        )
+    )
+
+
+def _create_expression_condition(
+    db: Session,
+    enzyme: EnzymeEntry,
+    row: dict[str, str],
+    reference: LiteratureReference | None,
+) -> ExperimentCondition | None:
+    metadata = {
+        key: value
+        for key, value in {
+            "source": _value(row, "source") or "curated_literature",
+            "evidence": _value(row, "evidence_text") or None,
+        }.items()
+        if value
+    }
+    condition_values = {
+        "assay_temperature": _value(row, "assay_temperature") or None,
+        "assay_pH": _value(row, "assay_pH") or None,
+        "buffer": _value(row, "buffer") or None,
+        "method": _value(row, "method") or None,
+        "reference_id": reference.id if reference else None,
+        "metadata_json": metadata or None,
+    }
+    if not any(condition_values.values()):
+        return None
+    condition = ExperimentCondition(
+        enzyme_entry_id=enzyme.id,
+        substrate_entry_id=None,
+        **condition_values,
+    )
+    db.add(condition)
+    db.flush()
+    return condition
+
+
 def _property_delta(row: dict[str, str]) -> dict[str, Any] | None:
     key = _value(row, "property_delta_key")
     value = _value(row, "property_delta_value")
@@ -400,6 +481,14 @@ def _summarize_row(record_type: str, row: dict[str, str]) -> str:
             _value(row, "km") and f"Km {_value(row, 'km')}",
             _value(row, "kcat") and f"kcat {_value(row, 'kcat')}",
             _value(row, "kcat_km") and f"kcat/Km {_value(row, 'kcat_km')}",
+        ]
+        return " ".join(part for part in parts if part)
+    if record_type == "expression":
+        parts = [
+            _value(row, "expression_host"),
+            _value(row, "expression_level_original"),
+            _value(row, "unit_original"),
+            _value(row, "soluble_expression"),
         ]
         return " ".join(part for part in parts if part)
     return _value(row, "mutation_string")

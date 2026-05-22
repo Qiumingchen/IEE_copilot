@@ -6,11 +6,154 @@ import type {
 } from "../../lib/types";
 
 export const curatedEvidenceCsvTemplate = [
-  "record_type,property_type,value_original,unit_original,substrate,assay_temperature,assay_pH,method,km,kcat,kcat_km,mutation_string,effect_summary,property_delta_key,property_delta_value,doi,pubmed_id,reference_title,journal,year,evidence_text,source",
-  "property,optimal_temperature,58,degC,casein,37,7.0,activity assay,,,,,,,10.1000/example,,Example MTGase paper,Biocatalysis Reports,2024,Optimum temperature reported in Table 1,curated_literature",
-  "kinetic,,,,CBZ-Gln-Gly,37,7.0,HPLC,2.1,31,14.8,,,,10.1000/example,,Example MTGase paper,Biocatalysis Reports,2024,Km and kcat reported in Table 2,curated_literature",
-  "mutation,,,,casein,50,7.0,thermal assay,,,,S2P,Improved thermostability,optimal_temperature_delta_degC,5,10.1000/example,,Example MTGase paper,Biocatalysis Reports,2024,S2P increased thermal half-life,curated_literature"
-].join("\n");
+  [
+    "record_type",
+    "property_type",
+    "value_original",
+    "unit_original",
+    "substrate",
+    "assay_temperature",
+    "assay_pH",
+    "method",
+    "km",
+    "kcat",
+    "kcat_km",
+    "mutation_string",
+    "effect_summary",
+    "property_delta_key",
+    "property_delta_value",
+    "expression_host",
+    "vector",
+    "expression_level_original",
+    "unit_standardized",
+    "soluble_expression",
+    "doi",
+    "pubmed_id",
+    "reference_title",
+    "journal",
+    "year",
+    "evidence_text",
+    "source"
+  ],
+  [
+    "property",
+    "optimal_temperature",
+    "58",
+    "degC",
+    "casein",
+    "37",
+    "7.0",
+    "activity assay",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "10.1000/example",
+    "",
+    "Example MTGase paper",
+    "Biocatalysis Reports",
+    "2024",
+    "Optimum temperature reported in Table 1",
+    "curated_literature"
+  ],
+  [
+    "kinetic",
+    "",
+    "",
+    "",
+    "CBZ-Gln-Gly",
+    "37",
+    "7.0",
+    "HPLC",
+    "2.1",
+    "31",
+    "14.8",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "10.1000/example",
+    "",
+    "Example MTGase paper",
+    "Biocatalysis Reports",
+    "2024",
+    "Km and kcat reported in Table 2",
+    "curated_literature"
+  ],
+  [
+    "mutation",
+    "",
+    "",
+    "",
+    "casein",
+    "50",
+    "7.0",
+    "thermal assay",
+    "",
+    "",
+    "",
+    "S2P",
+    "Improved thermostability",
+    "optimal_temperature_delta_degC",
+    "5",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "10.1000/example",
+    "",
+    "Example MTGase paper",
+    "Biocatalysis Reports",
+    "2024",
+    "S2P increased thermal half-life",
+    "curated_literature"
+  ],
+  [
+    "expression",
+    "",
+    "",
+    "",
+    "",
+    "30",
+    "7.0",
+    "SDS-PAGE",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "E. coli BL21(DE3)",
+    "pET-22b",
+    "120",
+    "mg/L",
+    "high soluble fraction",
+    "10.1000/example",
+    "",
+    "Example MTGase paper",
+    "Biocatalysis Reports",
+    "2024",
+    "Soluble expression reported in Fig. 2",
+    "curated_literature"
+  ]
+]
+  .map((row) => row.join(","))
+  .join("\n");
 
 export const curatedEvidenceTemplateFileName = "curated-evidence-template.csv";
 
@@ -60,7 +203,8 @@ export function summarizeCuratedEvidenceImport(result: CuratedEvidenceImportResp
   const propertyCount = result.created.properties ?? 0;
   const kineticCount = result.created.kinetics ?? 0;
   const mutationCount = result.created.mutations ?? 0;
-  return `Created ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records from ${result.reference_ids.length} references.`;
+  const expressionCount = result.created.expressions ?? 0;
+  return `Created ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation, ${expressionCount} expression records from ${result.reference_ids.length} references.`;
 }
 
 export function formatImportedReference(reference: LiteratureReferenceRecord): string {
@@ -113,11 +257,12 @@ export function summarizeCuratedEvidencePreview(preview: CuratedEvidencePreviewR
   const propertyCount = preview.record_counts.properties ?? 0;
   const kineticCount = preview.record_counts.kinetics ?? 0;
   const mutationCount = preview.record_counts.mutations ?? 0;
+  const expressionCount = preview.record_counts.expressions ?? 0;
   const errorCount = preview.errors.length;
   const warningCount = preview.warnings.length;
   const errorSummary =
     errorCount > 0 ? ` ${errorCount} validation ${errorCount === 1 ? "error" : "errors"}.` : "";
   const warningSummary =
     warningCount > 0 ? ` ${warningCount} ${warningCount === 1 ? "warning" : "warnings"}.` : "";
-  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation records.${errorSummary}${warningSummary}`;
+  return `${preview.row_count} rows parsed: ${propertyCount} property, ${kineticCount} kinetic, ${mutationCount} mutation, ${expressionCount} expression records.${errorSummary}${warningSummary}`;
 }

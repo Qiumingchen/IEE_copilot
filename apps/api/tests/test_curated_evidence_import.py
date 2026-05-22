@@ -5,6 +5,8 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    ExperimentCondition,
+    ExpressionRecord,
     KineticRecord,
     LiteratureReference,
     MutationRecord,
@@ -79,7 +81,12 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
     )
 
     assert response.status_code == 201
-    assert response.json()["created"] == {"properties": 1, "kinetics": 1, "mutations": 1}
+    assert response.json()["created"] == {
+        "properties": 1,
+        "kinetics": 1,
+        "mutations": 1,
+        "expressions": 0,
+    }
     assert response.json()["references"] == [
         {
             "id": response.json()["reference_ids"][0],
@@ -116,6 +123,76 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
     assert mutation.mutation_positions == [{"wildtype": "S", "position": 2, "mutant": "P"}]
     assert mutation.reference_id == reference.id
     assert mutation.assay_condition_summary["evidence"] == "S2P increased half-life"
+
+
+def test_curator_can_import_curated_expression_evidence(client, db_session):
+    email = "curated-expression-importer@example.com"
+    headers = _auth_headers(client, email)
+    _set_user_role(db_session, email, UserRole.CURATOR)
+    seeded_enzyme = _seed_enzyme(db_session)
+    csv_text = "\n".join(
+        [
+            "record_type,expression_host,vector,expression_level_original,unit_original,soluble_expression,assay_temperature,assay_pH,method,doi,reference_title,journal,year,evidence_text,source",
+            "expression,E. coli BL21(DE3),pET-22b,120,mg/L,high soluble fraction,30,7.0,SDS-PAGE,10.1000/expression,MTGase expression paper,Protein Expression Reports,2024,Soluble expression reported in Fig. 2,curated_literature",
+        ]
+    )
+
+    preview_response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import-preview",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert preview_response.status_code == 200
+    assert preview_response.json()["record_counts"] == {
+        "properties": 0,
+        "kinetics": 0,
+        "mutations": 0,
+        "expressions": 1,
+    }
+    assert preview_response.json()["records"][0]["record_type"] == "expression"
+    assert preview_response.json()["records"][0]["summary"] == "E. coli BL21(DE3) 120 mg/L high soluble fraction"
+
+    response = client.post(
+        f"/enzymes/{seeded_enzyme.id}/curated-evidence/import",
+        headers=headers,
+        json={"csv_text": csv_text},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["created"] == {
+        "properties": 0,
+        "kinetics": 0,
+        "mutations": 0,
+        "expressions": 1,
+    }
+
+    reference = db_session.scalar(
+        select(LiteratureReference).where(LiteratureReference.doi == "10.1000/expression")
+    )
+    expression = db_session.scalar(
+        select(ExpressionRecord).where(ExpressionRecord.enzyme_entry_id == seeded_enzyme.id)
+    )
+    assert expression is not None
+    assert expression.expression_host == "E. coli BL21(DE3)"
+    assert expression.vector == "pET-22b"
+    assert expression.expression_level_original == "120"
+    assert expression.unit_original == "mg/L"
+    assert expression.unit_standardized == "mg/L"
+    assert expression.soluble_expression == "high soluble fraction"
+    assert expression.reference_id == reference.id
+    assert expression.visibility == Visibility.PUBLIC
+    assert expression.curation_status == CurationStatus.APPROVED
+
+    condition = db_session.get(ExperimentCondition, expression.condition_id)
+    assert condition.assay_temperature == "30"
+    assert condition.assay_pH == "7.0"
+    assert condition.method == "SDS-PAGE"
+    assert condition.reference_id == reference.id
+    assert condition.metadata_json == {
+        "source": "curated_literature",
+        "evidence": "Soluble expression reported in Fig. 2",
+    }
 
 
 def test_list_enzyme_references_returns_deduplicated_curated_literature(client, db_session):
@@ -265,7 +342,12 @@ def test_curator_can_preview_curated_evidence_without_writing_records(client, db
     assert response.status_code == 200
     body = response.json()
     assert body["row_count"] == 2
-    assert body["record_counts"] == {"properties": 1, "kinetics": 0, "mutations": 1}
+    assert body["record_counts"] == {
+        "properties": 1,
+        "kinetics": 0,
+        "mutations": 1,
+        "expressions": 0,
+    }
     assert body["fields"] == [
         "record_type",
         "property_type",
@@ -375,7 +457,12 @@ def test_curated_evidence_preview_returns_row_level_validation_report(client, db
     body = response.json()
     assert body["valid"] is False
     assert body["row_count"] == 3
-    assert body["record_counts"] == {"properties": 0, "kinetics": 1, "mutations": 0}
+    assert body["record_counts"] == {
+        "properties": 0,
+        "kinetics": 1,
+        "mutations": 0,
+        "expressions": 0,
+    }
     assert body["errors"] == [
         {"row_number": 2, "field": "value_original", "message": "value_original is required"},
         {"row_number": 3, "field": "mutation_string", "message": "invalid mutation format: S2"},

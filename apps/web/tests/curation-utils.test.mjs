@@ -57,12 +57,12 @@ test("canSubmitRejection requires a non-empty review comment", () => {
 test("summarizeCuratedEvidenceImport reports created evidence counts", () => {
   assert.equal(
     summarizeCuratedEvidenceImport({
-      created: { properties: 2, kinetics: 1, mutations: 3 },
+      created: { properties: 2, kinetics: 1, mutations: 3, expressions: 4 },
       reference_ids: ["ref-1", "ref-2"],
       references: [],
       warnings: []
     }),
-    "Created 2 property, 1 kinetic, 3 mutation records from 2 references."
+    "Created 2 property, 1 kinetic, 3 mutation, 4 expression records from 2 references."
   );
 });
 
@@ -71,13 +71,13 @@ test("summarizeCuratedEvidencePreview reports parsed evidence counts", () => {
     summarizeCuratedEvidencePreview({
       fields: ["record_type", "property_type"],
       row_count: 4,
-      record_counts: { properties: 2, kinetics: 1, mutations: 1 },
+      record_counts: { properties: 2, kinetics: 1, mutations: 1, expressions: 3 },
       records: [],
       errors: [],
       valid: true,
       warnings: []
     }),
-    "4 rows parsed: 2 property, 1 kinetic, 1 mutation records."
+    "4 rows parsed: 2 property, 1 kinetic, 1 mutation, 3 expression records."
   );
 });
 
@@ -94,7 +94,7 @@ test("summarizeCuratedEvidencePreview includes validation error count", () => {
       warnings: [],
       valid: false
     }),
-    "2 rows parsed: 1 property, 0 kinetic, 0 mutation records. 1 validation error."
+    "2 rows parsed: 1 property, 0 kinetic, 0 mutation, 0 expression records. 1 validation error."
   );
 });
 
@@ -109,7 +109,7 @@ test("summarizeCuratedEvidencePreview includes warning count", () => {
       warnings: ["row 2: no reference identifier supplied"],
       valid: true
     }),
-    "2 rows parsed: 1 property, 0 kinetic, 0 mutation records. 1 warning."
+    "2 rows parsed: 1 property, 0 kinetic, 0 mutation, 0 expression records. 1 warning."
   );
 });
 
@@ -118,21 +118,28 @@ test("curatedEvidenceCsvTemplate includes all supported evidence record types", 
   assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("kinetic,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("mutation,"), true);
+  assert.equal(curatedEvidenceCsvTemplate.includes("expression,"), true);
 });
 
 test("buildCuratedEvidenceTemplateCsv returns a downloadable CSV template", () => {
   const csv = buildCuratedEvidenceTemplateCsv();
   const [header, ...rows] = csv.trimEnd().split("\n");
+  const columnCount = header.split(",").length;
 
   assert.equal(curatedEvidenceTemplateFileName, "curated-evidence-template.csv");
   assert.equal(
     header,
-    "record_type,property_type,value_original,unit_original,substrate,assay_temperature,assay_pH,method,km,kcat,kcat_km,mutation_string,effect_summary,property_delta_key,property_delta_value,doi,pubmed_id,reference_title,journal,year,evidence_text,source"
+    "record_type,property_type,value_original,unit_original,substrate,assay_temperature,assay_pH,method,km,kcat,kcat_km,mutation_string,effect_summary,property_delta_key,property_delta_value,expression_host,vector,expression_level_original,unit_standardized,soluble_expression,doi,pubmed_id,reference_title,journal,year,evidence_text,source"
   );
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 4);
   assert.equal(rows.some((row) => row.startsWith("property,")), true);
   assert.equal(rows.some((row) => row.startsWith("kinetic,")), true);
   assert.equal(rows.some((row) => row.startsWith("mutation,")), true);
+  assert.equal(rows.some((row) => row.startsWith("expression,")), true);
+  assert.deepEqual(
+    rows.map((row) => row.split(",").length),
+    Array.from({ length: rows.length }, () => columnCount)
+  );
   assert.equal(csv.endsWith("\n"), true);
 });
 
