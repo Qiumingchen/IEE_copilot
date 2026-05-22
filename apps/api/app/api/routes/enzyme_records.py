@@ -1,6 +1,7 @@
 import base64
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -70,7 +71,7 @@ from app.services.experiment_import import (
     parse_experiment_xlsx,
     validate_experiment_rows,
 )
-from app.services.object_storage import store_structure_file
+from app.services.object_storage import read_structure_file, store_structure_file
 from app.services.property_ranking import build_property_ranking
 from app.services.property_standardization import standardize_property_value
 from app.services.structure_parser import StructureParseError, parse_structure_text
@@ -1001,6 +1002,30 @@ def list_structures(
         )
         for structure in structures
     ]
+
+
+@router.get("/{enzyme_id}/structures/{structure_id}/file")
+def download_structure_file(
+    enzyme_id: str,
+    structure_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    _get_enzyme(db, enzyme_id)
+    structure = db.get(StructureEntry, structure_id)
+    if structure is None or structure.enzyme_entry_id != enzyme_id or not structure.artifact_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="structure file not found")
+    artifact = db.get(AnalysisArtifact, structure.artifact_id)
+    if artifact is None or artifact.artifact_type != "structure_file":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="structure file not found")
+
+    content = read_structure_file(object_key=artifact.object_key)
+    file_name = Path(artifact.object_key).name or "structure.pdb"
+    return Response(
+        content=content,
+        media_type=artifact.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
 
 
 @router.post(

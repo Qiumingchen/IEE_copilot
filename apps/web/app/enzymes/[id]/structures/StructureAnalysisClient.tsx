@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getEnzymeRecordBundle, uploadStructureFile } from "../../../../lib/api";
+import { downloadStructureFile, getEnzymeRecordBundle, uploadStructureFile } from "../../../../lib/api";
 import type { EnzymeRecordBundle, StructureRecord } from "../../../../lib/types";
 import {
   buildStructureWarnings,
+  buildStructureDownloadFileName,
   getChainOptions,
   getDefaultStructureId,
   getDistanceMatrixRows,
@@ -38,6 +39,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isUploadingStructure, setIsUploadingStructure] = useState(false);
+  const [downloadingStructureId, setDownloadingStructureId] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +129,27 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
       setError(caught instanceof Error ? caught.message : "Unable to upload structure file.");
     } finally {
       setIsUploadingStructure(false);
+    }
+  }
+
+  async function handleStructureDownload(structure: StructureRecord) {
+    if (!token || !structure.artifact_id || downloadingStructureId) {
+      return;
+    }
+    setError(null);
+    setDownloadingStructureId(structure.id);
+    try {
+      const blob = await downloadStructureFile(enzymeId, structure.id, token);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = buildStructureDownloadFileName(structure);
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to download structure file.");
+    } finally {
+      setDownloadingStructureId(null);
     }
   }
 
@@ -245,10 +268,22 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
 
             <section className="rounded-md border border-slate-200 bg-white">
               <div className="border-b border-slate-200 px-4 py-3">
-                <h2 className="text-base font-semibold text-slate-950">Structure preview</h2>
-                <p className="mt-1 break-words font-mono text-xs text-slate-500">
-                  {stats.artifact_object_key}
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-950">Structure preview</h2>
+                    <p className="mt-1 break-words font-mono text-xs text-slate-500">
+                      {stats.artifact_object_key}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                    disabled={!token || !selectedStructure.artifact_id || downloadingStructureId === selectedStructure.id}
+                    onClick={() => void handleStructureDownload(selectedStructure)}
+                    type="button"
+                  >
+                    {downloadingStructureId === selectedStructure.id ? "Downloading..." : "Download file"}
+                  </button>
+                </div>
               </div>
               <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
                 <div className="relative min-h-72 overflow-hidden rounded-md border border-slate-200 bg-slate-950">

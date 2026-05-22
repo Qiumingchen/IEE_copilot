@@ -39,3 +39,19 @@ def store_structure_file(
         "content_type": content_type,
         "size_bytes": len(content),
     }
+
+
+def read_structure_file(*, object_key: str) -> bytes:
+    settings = get_settings()
+    client = Minio(
+        settings.minio_endpoint,
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        secure=settings.minio_secure,
+    )
+    response = client.get_object(settings.minio_bucket, object_key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()

@@ -268,6 +268,50 @@ def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_se
     assert body["ligands"][0]["ligand_code"] == "AQ1"
 
 
+def test_download_structure_file_returns_stored_artifact(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        artifact_type="structure_file",
+        bucket="iee-artifacts",
+        object_key="structures/test/complex.pdb",
+        checksum="checksum",
+        content_type="chemical/x-pdb",
+        size_bytes=len(PDB_COMPLEX_UPLOAD.encode()),
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="enzyme_substrate_complex",
+        source="user_upload",
+        artifact_id=artifact.id,
+    )
+    db_session.add(structure)
+    db_session.commit()
+
+    def fake_read_structure_file(*, object_key):
+        assert object_key == "structures/test/complex.pdb"
+        return PDB_COMPLEX_UPLOAD.encode()
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.read_structure_file",
+        fake_read_structure_file,
+    )
+
+    response = client.get(
+        f"/enzymes/{enzyme_id}/structures/{structure.id}/file",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.content == PDB_COMPLEX_UPLOAD.encode()
+    assert response.headers["content-type"] == "chemical/x-pdb"
+    assert response.headers["content-disposition"] == 'attachment; filename="complex.pdb"'
+
+
 def test_enzyme_domain_records_require_authentication(client, db_session):
     enzyme_id = _enzyme_id(db_session)
 

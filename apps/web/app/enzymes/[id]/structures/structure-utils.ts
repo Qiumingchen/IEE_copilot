@@ -83,6 +83,12 @@ export function summarizeStructureUploadResult(structure: StructureRecord): stri
   return `Uploaded ${structure.complex_state} structure with ${chainLabel}, ${ligandLabel}, and ${metalLabel}.`;
 }
 
+export function buildStructureDownloadFileName(structure: StructureRecord): string {
+  const objectKey = structure.artifact?.object_key ?? "";
+  const fileName = objectKey.split("/").filter(Boolean).at(-1);
+  return fileName || `${structure.id}.pdb`;
+}
+
 export function getChainOptions(structures: StructureRecord[]): ChainOptionView[] {
   return structures.flatMap((structure) => {
     const chains = getRecordArray(structure.chain_summary, "chains");

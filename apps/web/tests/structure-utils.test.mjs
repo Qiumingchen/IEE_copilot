@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildStructureWarnings,
+  buildStructureDownloadFileName,
   getChainOptions,
   getDefaultStructureId,
   getDistanceMatrixRows,
@@ -288,6 +289,14 @@ test("summarizes uploaded structure parsing result", () => {
   assert.equal(
     summarizeStructureUploadResult(structure),
     "Uploaded enzyme_substrate_complex structure with 1 chain, 1 ligand, and 1 metal ion."
+  );
+});
+
+test("builds structure download file names from artifact keys", () => {
+  assert.equal(buildStructureDownloadFileName(structure), "complex.pdb");
+  assert.equal(
+    buildStructureDownloadFileName({ ...structure, artifact: { ...structure.artifact, object_key: "" } }),
+    "structure-1.pdb"
   );
 });
 

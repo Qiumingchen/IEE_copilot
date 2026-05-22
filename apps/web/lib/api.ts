@@ -324,6 +324,24 @@ export async function uploadStructureFile(
   return response.json() as Promise<StructureRecord>;
 }
 
+export async function downloadStructureFile(
+  enzymeId: string,
+  structureId: string,
+  token: string
+): Promise<Blob> {
+  const response = await fetch(`${API_BASE}/enzymes/${enzymeId}/structures/${structureId}/file`, {
+    headers: {
+      authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Structure download failed with status ${response.status}`);
+  }
+
+  return response.blob();
+}
+
 export async function createKineticRecord(
   enzymeId: string,
   token: string,
