@@ -426,6 +426,53 @@ def test_get_rosetta_artifact_content_returns_input_preparation_payload(client, 
     assert content_json["runner"]["mode"] == "fallback"
 
 
+def test_get_mutation_recommendation_artifact_content_returns_structure_context(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme_id,
+        job_type="mutation_recommendation",
+        status=JobStatus.FINISHED,
+        result_summary_json={
+            "artifact_type": "mutation_recommendations",
+            "candidate_count": 1,
+            "structure_id": "structure-selected",
+            "candidates": [
+                {
+                    "query_position": 10,
+                    "wildtype_residue": "L",
+                    "conservation_category": "variable",
+                    "priority_score": 1.8,
+                    "suggested_mutations": ["L10A"],
+                }
+            ],
+        },
+    )
+    db_session.add(job)
+    db_session.flush()
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        job_id=job.id,
+        artifact_type="mutation_recommendations",
+        bucket="iee-artifacts",
+        object_key=f"analysis-jobs/{job.id}/mutation-recommendations.json",
+        content_type="application/json",
+        size_bytes=128,
+    )
+    db_session.add(artifact)
+    db_session.commit()
+
+    response = client.get(
+        f"/enzymes/{enzyme_id}/analysis-artifacts/{artifact.id}/content",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    content_json = response.json()["content_json"]
+    assert content_json["structure_id"] == "structure-selected"
+    assert content_json["candidates"][0]["suggested_mutations"] == ["L10A"]
+
+
 def test_get_mutation_library_artifact_content_returns_library_payload(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

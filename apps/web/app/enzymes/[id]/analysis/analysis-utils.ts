@@ -342,6 +342,9 @@ export function formatAnalysisArtifactSource(
   if (typeof source.artifact_id === "string" && source.artifact_id.length > 0) {
     parts.push(source.artifact_id);
   }
+  if (typeof summary.structure_id === "string" && summary.structure_id.length > 0) {
+    parts.push(`structure ${summary.structure_id}`);
+  }
   return parts.join(" | ");
 }
 
@@ -788,6 +791,13 @@ export function getRosettaDdgRunViews(
 
 export function getArtifactRunnerLabel(content: Pick<AnalysisArtifactContentRecord, "content_json">): ArtifactRunnerLabel {
   return runnerLabelFromUnknown(content.content_json?.runner);
+}
+
+export function getAnalysisArtifactStructureId(
+  content: Pick<AnalysisArtifactContentRecord, "content_json">
+): string | null {
+  const structureId = content.content_json?.structure_id;
+  return typeof structureId === "string" && structureId.length > 0 ? structureId : null;
 }
 
 function runnerLabelFromUnknown(value: unknown): ArtifactRunnerLabel {

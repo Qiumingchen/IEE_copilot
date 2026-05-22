@@ -33,6 +33,7 @@ import {
   formatAnalysisArtifactSource,
   filterConservationSites,
   getArtifactRunnerLabel,
+  getAnalysisArtifactStructureId,
   getConservationArtifactOptions,
   getConservationSites,
   getHomologArtifactOptions,
@@ -1392,6 +1393,7 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
   const rosettaResults = getRosettaDdgResults(content);
   const mutationLibrary = getMutationLibrary(content);
   const runnerLabel = getArtifactRunnerLabel(content);
+  const structureId = getAnalysisArtifactStructureId(content);
 
   function downloadMsaFasta() {
     const fasta = buildMsaDownloadFasta(content);
@@ -1417,6 +1419,11 @@ function ArtifactContentPanel({ content }: { content: AnalysisArtifactContentRec
             {runnerLabel.text}
           </span>
           {runnerLabel.warning ? <span className="text-amber-700">{runnerLabel.warning}</span> : null}
+          {structureId ? (
+            <span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-slate-700">
+              structure {structureId}
+            </span>
+          ) : null}
           {msaRecords.length > 0 ? (
             <button
               className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-800"

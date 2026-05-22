@@ -678,6 +678,7 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
                         "property_delta": {"optimal_temperature_delta_degC": 5},
                     }
                 ],
+                "structure_id": "structure-selected",
             },
         )
         db.add(job)
@@ -695,6 +696,7 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
     assert job.status == JobStatus.FINISHED
     assert job.result_summary_json["message"] == "mutation recommendation completed"
     assert job.result_summary_json["artifact_type"] == "mutation_recommendations"
+    assert job.result_summary_json["structure_id"] == "structure-selected"
     assert [candidate["query_position"] for candidate in job.result_summary_json["candidates"]] == [10, 8]
     assert job.result_summary_json["candidates"][0]["suggested_mutations"] == ["L10A", "L10V", "L10S"]
     scored_suggestions = job.result_summary_json["candidates"][0]["scored_suggestions"]

@@ -326,6 +326,9 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
         "candidate_count": len(candidates),
         "candidates": candidates,
     }
+    structure_id = parameters.get("structure_id")
+    if isinstance(structure_id, str) and structure_id:
+        payload["structure_id"] = structure_id
     payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
 
     db.add(
@@ -350,6 +353,8 @@ def finish_mutation_recommendation_job(db: Session, job_id: str, bucket: str) ->
         "artifact_type": "mutation_recommendations",
         "candidates": candidates,
     }
+    if isinstance(structure_id, str) and structure_id:
+        job.result_summary_json["structure_id"] = structure_id
     db.commit()
     db.refresh(job)
     return job

@@ -675,6 +675,7 @@ def _artifact_content_from_summary(
         content_json = {
             "candidate_count": summary.get("candidate_count"),
             "candidates": summary.get("candidates", []),
+            "structure_id": summary.get("structure_id"),
         }
     elif artifact.artifact_type == "rosetta_ddg":
         content_json = {

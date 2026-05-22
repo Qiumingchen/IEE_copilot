@@ -25,6 +25,7 @@ import {
   getMsaRecords,
   getMutationLibrary,
   getRecommendationArtifactOptions,
+  getAnalysisArtifactStructureId,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
   getRosettaDdgRunViews,
@@ -560,6 +561,18 @@ test("formats fallback artifact runner labels", () => {
   assert.equal(label.warning, "MAFFT executable not configured; mock alignment used.");
 });
 
+test("extracts structure context from recommendation artifact content", () => {
+  assert.equal(
+    getAnalysisArtifactStructureId({
+      content_json: {
+        structure_id: "structure-selected"
+      }
+    }),
+    "structure-selected"
+  );
+  assert.equal(getAnalysisArtifactStructureId({ content_json: {} }), null);
+});
+
 test("formats artifact input source lineage from summaries", () => {
   assert.equal(
     formatAnalysisArtifactSource({
@@ -595,6 +608,18 @@ test("formats artifact input source lineage from summaries", () => {
       }
     }),
     "conservation_artifact | 20 sites | conservation-artifact-1"
+  );
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        conservation_source: {
+          type: "latest_conservation_artifact",
+          site_count: 20
+        },
+        structure_id: "structure-selected"
+      }
+    }),
+    "latest_conservation_artifact | 20 sites | structure structure-selected"
   );
   assert.equal(
     formatAnalysisArtifactSource({
