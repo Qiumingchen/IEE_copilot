@@ -12,6 +12,12 @@ export const curatedEvidenceCsvTemplate = [
   "mutation,,,,casein,50,7.0,thermal assay,,,,S2P,Improved thermostability,optimal_temperature_delta_degC,5,10.1000/example,,Example MTGase paper,Biocatalysis Reports,2024,S2P increased thermal half-life,curated_literature"
 ].join("\n");
 
+export const curatedEvidenceTemplateFileName = "curated-evidence-template.csv";
+
+export function buildCuratedEvidenceTemplateCsv(): string {
+  return `${curatedEvidenceCsvTemplate}\n`;
+}
+
 export function summarizeVisibilityRequest(request: VisibilityRequestDetailRecord): string {
   const experiment = request.experiment;
   const mutation = experiment.mutation_string || "WT";

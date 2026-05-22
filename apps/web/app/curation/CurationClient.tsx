@@ -16,8 +16,10 @@ import type {
   VisibilityRequestDetailRecord
 } from "../../lib/types";
 import {
+  buildCuratedEvidenceTemplateCsv,
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
+  curatedEvidenceTemplateFileName,
   formatImportedReference,
   formatPreviewReference,
   summarizeCuratedEvidenceImport,
@@ -26,6 +28,16 @@ import {
 } from "./curation-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
+
+function downloadCsv(fileName: string, csvText: string) {
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function CurationClient() {
   const router = useRouter();
@@ -206,6 +218,16 @@ export default function CurationClient() {
             type="button"
           >
             Use template
+          </button>
+          <button
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={isPreviewingImport || isImporting}
+            onClick={() =>
+              downloadCsv(curatedEvidenceTemplateFileName, buildCuratedEvidenceTemplateCsv())
+            }
+            type="button"
+          >
+            Download template
           </button>
           <button
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"

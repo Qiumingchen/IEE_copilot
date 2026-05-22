@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildCuratedEvidenceTemplateCsv,
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
+  curatedEvidenceTemplateFileName,
   formatImportedReference,
   formatPreviewReference,
   summarizeCuratedEvidencePreview,
@@ -111,6 +113,22 @@ test("curatedEvidenceCsvTemplate includes all supported evidence record types", 
   assert.equal(curatedEvidenceCsvTemplate.includes("property,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("kinetic,"), true);
   assert.equal(curatedEvidenceCsvTemplate.includes("mutation,"), true);
+});
+
+test("buildCuratedEvidenceTemplateCsv returns a downloadable CSV template", () => {
+  const csv = buildCuratedEvidenceTemplateCsv();
+  const [header, ...rows] = csv.trimEnd().split("\n");
+
+  assert.equal(curatedEvidenceTemplateFileName, "curated-evidence-template.csv");
+  assert.equal(
+    header,
+    "record_type,property_type,value_original,unit_original,substrate,assay_temperature,assay_pH,method,km,kcat,kcat_km,mutation_string,effect_summary,property_delta_key,property_delta_value,doi,pubmed_id,reference_title,journal,year,evidence_text,source"
+  );
+  assert.equal(rows.length, 3);
+  assert.equal(rows.some((row) => row.startsWith("property,")), true);
+  assert.equal(rows.some((row) => row.startsWith("kinetic,")), true);
+  assert.equal(rows.some((row) => row.startsWith("mutation,")), true);
+  assert.equal(csv.endsWith("\n"), true);
 });
 
 test("formatPreviewReference includes the reference match mode", () => {
