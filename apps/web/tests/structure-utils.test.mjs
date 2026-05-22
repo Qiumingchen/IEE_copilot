@@ -5,9 +5,12 @@ import {
   buildStructureWarnings,
   getChainOptions,
   getDefaultStructureId,
+  getDistanceMatrixRows,
   getLigandViews,
   getStructureProvenanceView,
+  getStructureReadiness,
   getStructureStats,
+  getStructureWorkflowActions,
   isStructureUploadFileName,
   structureUploadAccept,
   summarizeStructureUploadResult
@@ -124,7 +127,28 @@ const structure = {
         ligand_type: "metal_ion"
       }
     ],
-    distance_matrix: []
+    distance_matrix: [
+      {
+        ligand_code: "AQ1",
+        ligand_chain_id: "B",
+        ligand_residue_number: "501",
+        residue_chain_id: "A",
+        residue_number: "2",
+        insertion_code: "",
+        sequence_position: 2,
+        min_distance_angstrom: 0.6
+      },
+      {
+        ligand_code: "AQ1",
+        ligand_chain_id: "B",
+        ligand_residue_number: "501",
+        residue_chain_id: "A",
+        residue_number: "1",
+        insertion_code: "",
+        sequence_position: 1,
+        min_distance_angstrom: 5.0
+      }
+    ]
   }
 };
 
@@ -210,4 +234,64 @@ test("summarizes uploaded structure parsing result", () => {
     summarizeStructureUploadResult(structure),
     "Uploaded enzyme_substrate_complex structure with 1 chain, 1 ligand, and 1 metal ion."
   );
+});
+
+test("builds distance matrix rows for ligand contact review", () => {
+  assert.deepEqual(getDistanceMatrixRows(structure), [
+    {
+      ligand: "AQ1 B501",
+      residue: "A2",
+      sequence_position: 2,
+      distance_angstrom: "0.6"
+    },
+    {
+      ligand: "AQ1 B501",
+      residue: "A1",
+      sequence_position: 1,
+      distance_angstrom: "5.0"
+    }
+  ]);
+});
+
+test("summarizes structure readiness for ligand-aware analysis", () => {
+  assert.deepEqual(getStructureReadiness(structure), {
+    status: "ready",
+    title: "Ligand-aware structure ready",
+    description: "Parsed chains, residue mapping, ligands, and ligand distance matrix are available."
+  });
+
+  assert.deepEqual(getStructureReadiness({ ...structure, complex_state: "apo", ligand_summary: { ligand_count: 0 } }), {
+    status: "limited",
+    title: "Apo structure ready",
+    description: "Residue mapping is available, but ligand-aware contacts require an enzyme-substrate complex."
+  });
+});
+
+test("builds structure workflow actions for reserved and available analyses", () => {
+  assert.deepEqual(getStructureWorkflowActions(structure, "enzyme-1"), [
+    {
+      label: "Rosetta ddG",
+      status: "ready",
+      description: "Use this parsed structure as the structural context for mutation stability scoring.",
+      href: "/enzymes/enzyme-1/analysis"
+    },
+    {
+      label: "Ligand-aware recommendations",
+      status: "ready",
+      description: "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites.",
+      href: "/enzymes/enzyme-1/analysis"
+    },
+    {
+      label: "MD simulation",
+      status: "reserved",
+      description: "Workflow slot is reserved; automated MD execution will be added later.",
+      href: null
+    },
+    {
+      label: "MMPBSA",
+      status: "reserved",
+      description: "Complex structure detected; binding-energy workflow slot is reserved for later implementation.",
+      href: null
+    }
+  ]);
 });

@@ -41,6 +41,26 @@ export type StructureProvenanceView = {
   warning: string | null;
 };
 
+export type StructureReadinessView = {
+  status: "ready" | "limited" | "blocked";
+  title: string;
+  description: string;
+};
+
+export type StructureWorkflowActionView = {
+  label: string;
+  status: "ready" | "reserved" | "blocked";
+  description: string;
+  href: string | null;
+};
+
+export type DistanceMatrixRowView = {
+  ligand: string;
+  residue: string;
+  sequence_position: string | number;
+  distance_angstrom: string | number;
+};
+
 export const structureUploadAccept = ".pdb,.cif,chemical/x-pdb,chemical/x-cif,text/plain";
 
 export function isStructureUploadFileName(fileName: string): boolean {
@@ -129,6 +149,91 @@ export function getStructureProvenanceView(structure: StructureRecord): Structur
     source_url: provenanceUrl(provenance),
     warning: provenanceWarning(provenance)
   };
+}
+
+export function getDistanceMatrixRows(structure: StructureRecord): DistanceMatrixRowView[] {
+  const rows = getRecordArray(structure.ligand_summary, "distance_matrix");
+  return rows.map((row) => {
+    const ligandCode = String(valueOrDash(row.ligand_code));
+    const ligandChainId = String(valueOrDash(row.ligand_chain_id));
+    const ligandResidueNumber = String(valueOrDash(row.ligand_residue_number));
+    const residueChainId = String(valueOrDash(row.residue_chain_id));
+    const residueNumber = String(valueOrDash(row.residue_number));
+    const insertionCode = typeof row.insertion_code === "string" ? row.insertion_code : "";
+    const rawDistance = valueOrDash(row.min_distance_angstrom);
+    return {
+      ligand: `${ligandCode} ${ligandChainId}${ligandResidueNumber}`,
+      residue: `${residueChainId}${residueNumber}${insertionCode}`,
+      sequence_position: valueOrDash(row.sequence_position),
+      distance_angstrom: typeof rawDistance === "number" ? rawDistance.toFixed(1) : rawDistance
+    };
+  });
+}
+
+export function getStructureReadiness(structure: StructureRecord): StructureReadinessView {
+  const residueRows = getResidueRows(structure, null);
+  if (residueRows.length === 0) {
+    return {
+      status: "blocked",
+      title: "Structure mapping incomplete",
+      description: "Upload a PDB or CIF with protein coordinates so residues can be mapped to sequence positions."
+    };
+  }
+
+  const ligandCount = numberValue(structure.ligand_summary?.ligand_count);
+  const distanceRows = getDistanceMatrixRows(structure);
+  if (structure.complex_state === "enzyme_substrate_complex" && ligandCount > 0 && distanceRows.length > 0) {
+    return {
+      status: "ready",
+      title: "Ligand-aware structure ready",
+      description: "Parsed chains, residue mapping, ligands, and ligand distance matrix are available."
+    };
+  }
+
+  return {
+    status: "limited",
+    title: "Apo structure ready",
+    description: "Residue mapping is available, but ligand-aware contacts require an enzyme-substrate complex."
+  };
+}
+
+export function getStructureWorkflowActions(
+  structure: StructureRecord,
+  enzymeId: string
+): StructureWorkflowActionView[] {
+  const readiness = getStructureReadiness(structure);
+  const hasLigandDistanceMatrix = getDistanceMatrixRows(structure).length > 0;
+  return [
+    {
+      label: "Rosetta ddG",
+      status: readiness.status === "blocked" ? "blocked" : "ready",
+      description: "Use this parsed structure as the structural context for mutation stability scoring.",
+      href: readiness.status === "blocked" ? null : `/enzymes/${enzymeId}/analysis`
+    },
+    {
+      label: "Ligand-aware recommendations",
+      status: hasLigandDistanceMatrix ? "ready" : "blocked",
+      description: hasLigandDistanceMatrix
+        ? "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites."
+        : "Upload an enzyme-substrate complex to enable substrate-proximal mutation prioritization.",
+      href: hasLigandDistanceMatrix ? `/enzymes/${enzymeId}/analysis` : null
+    },
+    {
+      label: "MD simulation",
+      status: "reserved",
+      description: "Workflow slot is reserved; automated MD execution will be added later.",
+      href: null
+    },
+    {
+      label: "MMPBSA",
+      status: "reserved",
+      description:
+        structure.complex_state === "enzyme_substrate_complex"
+          ? "Complex structure detected; binding-energy workflow slot is reserved for later implementation."
+          : "Upload an enzyme-substrate complex before this reserved workflow can use binding context.",
+      href: null
+    }
+  ];
 }
 
 export function getResidueRows(structure: StructureRecord, selectedChainId: string | null) {

@@ -11,10 +11,13 @@ import {
   buildStructureWarnings,
   getChainOptions,
   getDefaultStructureId,
+  getDistanceMatrixRows,
   getLigandViews,
   getResidueRows,
+  getStructureReadiness,
   getStructureProvenanceView,
   getStructureStats,
+  getStructureWorkflowActions,
   isStructureUploadFileName,
   structureUploadAccept,
   summarizeStructureUploadResult
@@ -75,6 +78,9 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const provenance = selectedStructure ? getStructureProvenanceView(selectedStructure) : null;
   const warnings = selectedStructure ? buildStructureWarnings(selectedStructure) : [];
   const residueRows = selectedStructure ? getResidueRows(selectedStructure, selectedChain?.chain_id ?? null) : [];
+  const readiness = selectedStructure ? getStructureReadiness(selectedStructure) : null;
+  const workflowActions = selectedStructure ? getStructureWorkflowActions(selectedStructure, enzymeId) : [];
+  const distanceMatrixRows = selectedStructure ? getDistanceMatrixRows(selectedStructure) : [];
 
   useEffect(() => {
     setSelectedChainId(chainOptions[0]?.chain_id ?? null);
@@ -231,6 +237,8 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
             </section>
 
             {provenance ? <ProvenancePanel provenance={provenance} /> : null}
+            {readiness ? <ReadinessPanel readiness={readiness} /> : null}
+            <WorkflowActions actions={workflowActions} />
 
             <section className="rounded-md border border-slate-200 bg-white">
               <div className="border-b border-slate-200 px-4 py-3">
@@ -292,6 +300,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
             ) : null}
 
             <LigandTable ligands={ligandViews} />
+            <DistanceMatrixTable rows={distanceMatrixRows} />
             <ResidueMappingTable rows={residueRows} />
           </div>
         ) : (
@@ -301,6 +310,63 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
         )}
       </section>
     </main>
+  );
+}
+
+function ReadinessPanel({ readiness }: { readiness: ReturnType<typeof getStructureReadiness> }) {
+  const toneClass =
+    readiness.status === "ready"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : readiness.status === "limited"
+        ? "border-sky-200 bg-sky-50 text-sky-900"
+        : "border-amber-200 bg-amber-50 text-amber-900";
+
+  return (
+    <section className={`rounded-md border px-4 py-3 ${toneClass}`}>
+      <h2 className="text-sm font-semibold">{readiness.title}</h2>
+      <p className="mt-1 text-sm">{readiness.description}</p>
+    </section>
+  );
+}
+
+function WorkflowActions({ actions }: { actions: ReturnType<typeof getStructureWorkflowActions> }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Next analysis actions</h2>
+      </div>
+      <div className="grid gap-3 p-4 md:grid-cols-2">
+        {actions.map((action) => (
+          <div className="rounded-md border border-slate-200 p-3" key={action.label}>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-semibold text-slate-950">{action.label}</h3>
+              <StatusBadge status={action.status} />
+            </div>
+            <p className="mt-2 text-sm text-slate-600">{action.description}</p>
+            {action.href ? (
+              <Link className="mt-3 inline-flex text-sm font-medium text-slate-950 underline underline-offset-2" href={action.href}>
+                Open analysis
+              </Link>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StatusBadge({ status }: { status: "ready" | "reserved" | "blocked" }) {
+  const toneClass =
+    status === "ready"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : status === "reserved"
+        ? "border-slate-200 bg-slate-50 text-slate-600"
+        : "border-amber-200 bg-amber-50 text-amber-800";
+
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${toneClass}`}>
+      {status}
+    </span>
   );
 }
 
@@ -391,6 +457,49 @@ function LigandTable({ ligands }: { ligands: ReturnType<typeof getLigandViews> }
               <tr>
                 <td className="px-4 py-4 text-slate-500" colSpan={6}>
                   No non-metal ligand detected
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DistanceMatrixTable({ rows }: { rows: ReturnType<typeof getDistanceMatrixRows> }) {
+  return (
+    <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-base font-semibold text-slate-950">Ligand distance matrix</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Minimum atom distance between each detected ligand and mapped protein residues.
+        </p>
+      </div>
+      <div className="max-h-80 overflow-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Ligand</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Residue</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Sequence position</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Distance A</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-slate-700">
+            {rows.length > 0 ? (
+              rows.map((row) => (
+                <tr key={`${row.ligand}-${row.residue}-${row.sequence_position}`}>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-950">{row.ligand}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{row.residue}</td>
+                  <td className="px-4 py-3">{row.sequence_position}</td>
+                  <td className="px-4 py-3">{row.distance_angstrom}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-4 py-4 text-slate-500" colSpan={4}>
+                  No ligand distance matrix available
                 </td>
               </tr>
             )}
