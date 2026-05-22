@@ -5,8 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
+  buildPageBreadcrumbs,
   buildEnzymeNavigation,
   enzymeIdFromPath,
+  isNavigationItemActive,
   primaryNavigationItems,
   utilityNavigationItems
 } from "../lib/navigation";
@@ -23,6 +25,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     () => (enzymeId ? buildEnzymeNavigation(enzymeId) : []),
     [enzymeId]
   );
+  const breadcrumbs = useMemo(() => buildPageBreadcrumbs(pathname), [pathname]);
 
   useEffect(() => {
     setIsSignedIn(Boolean(window.localStorage.getItem(TOKEN_KEY)));
@@ -43,20 +46,30 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400"
-              onClick={() => router.back()}
-              type="button"
-            >
-              Back
-            </button>
+          <div className="grid min-w-0 gap-2">
             <Link className="min-w-0" href="/">
               <span className="block text-base font-semibold text-slate-950">IEE-Copilot</span>
               <span className="block truncate text-xs text-slate-500">
                 Industrial enzyme engineering
               </span>
             </Link>
+            <nav className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-slate-500" aria-label="Breadcrumb">
+              {breadcrumbs.map((item, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                return (
+                  <span className="flex min-w-0 items-center gap-1" key={`${item.href}-${index}`}>
+                    {index > 0 ? <span aria-hidden="true">/</span> : null}
+                    {isLast ? (
+                      <span className="max-w-48 truncate font-medium text-slate-800">{item.label}</span>
+                    ) : (
+                      <Link className="max-w-48 truncate hover:text-slate-950" href={item.href}>
+                        {item.label}
+                      </Link>
+                    )}
+                  </span>
+                );
+              })}
+            </nav>
           </div>
 
           <nav className="flex flex-wrap items-center gap-2 text-sm" aria-label="Utility navigation">
@@ -89,7 +102,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             {primaryNavigationItems.map((item) => (
               <Link
                 className={`rounded-md px-3 py-2 text-sm font-medium ${
-                  pathname === item.href
+                  isNavigationItemActive(pathname, item.href)
                     ? "bg-slate-950 text-white"
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
@@ -108,7 +121,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 {enzymeNavigationItems.map((item) => (
                   <Link
                     className={`rounded-md px-3 py-2 text-sm font-medium ${
-                      pathname === item.href
+                      isNavigationItemActive(pathname, item.href)
                         ? "bg-slate-900 text-white"
                         : "text-slate-700 hover:bg-slate-100"
                     }`}

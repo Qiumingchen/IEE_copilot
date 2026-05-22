@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getEnzymeRecordBundle } from "../../../../lib/api";
+import { getEnzymeRecordBundle, uploadStructureFile } from "../../../../lib/api";
 import type { EnzymeRecordBundle, StructureRecord } from "../../../../lib/types";
 import {
   buildStructureWarnings,
@@ -13,7 +14,10 @@ import {
   getLigandViews,
   getResidueRows,
   getStructureProvenanceView,
-  getStructureStats
+  getStructureStats,
+  isStructureUploadFileName,
+  structureUploadAccept,
+  summarizeStructureUploadResult
 } from "./structure-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -28,16 +32,20 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const [bundle, setBundle] = useState<EnzymeRecordBundle | null>(null);
   const [selectedStructureId, setSelectedStructureId] = useState<string | null>(null);
   const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [isUploadingStructure, setIsUploadingStructure] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function loadBundle(nextToken: string) {
+  async function loadBundle(nextToken: string, preferredStructureId?: string) {
     setError(null);
     setIsLoading(true);
     try {
       const nextBundle = await getEnzymeRecordBundle(enzymeId, nextToken);
       setBundle(nextBundle);
-      setSelectedStructureId((current) => current ?? getDefaultStructureId(nextBundle.structures));
+      setSelectedStructureId((current) => preferredStructureId ?? current ?? getDefaultStructureId(nextBundle.structures));
     } catch {
       setError("Unable to load structure analysis data. Please check the API service and your login.");
     } finally {
@@ -77,6 +85,43 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
     setSelectedChainId(null);
   }
 
+  function handleUploadFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setUploadNotice(null);
+    if (file && !isStructureUploadFileName(file.name)) {
+      setSelectedUploadFile(null);
+      setError("Only .pdb and .cif structure files are supported.");
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+      }
+      return;
+    }
+    setError(null);
+    setSelectedUploadFile(file);
+  }
+
+  async function handleStructureUpload() {
+    if (!token || !selectedUploadFile || isUploadingStructure) {
+      return;
+    }
+    setError(null);
+    setUploadNotice(null);
+    setIsUploadingStructure(true);
+    try {
+      const uploadedStructure = await uploadStructureFile(enzymeId, token, selectedUploadFile);
+      setUploadNotice(summarizeStructureUploadResult(uploadedStructure));
+      setSelectedUploadFile(null);
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+      }
+      await loadBundle(token, uploadedStructure.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to upload structure file.");
+    } finally {
+      setIsUploadingStructure(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -113,6 +158,37 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
         </p>
       ) : null}
       {isLoading ? <p className="mt-6 text-sm text-slate-600">Loading structures...</p> : null}
+
+      <section className="mt-6 rounded-md border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid min-w-64 flex-1 gap-1 text-sm font-medium text-slate-700">
+            Structure file
+            <input
+              accept={structureUploadAccept}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700"
+              onChange={handleUploadFileChange}
+              ref={uploadInputRef}
+              type="file"
+            />
+          </label>
+          <button
+            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={!selectedUploadFile || !token || isUploadingStructure}
+            onClick={handleStructureUpload}
+            type="button"
+          >
+            {isUploadingStructure ? "Uploading..." : "Upload structure"}
+          </button>
+        </div>
+        {selectedUploadFile ? (
+          <p className="mt-2 break-words text-xs text-slate-500">{selectedUploadFile.name}</p>
+        ) : null}
+        {uploadNotice ? (
+          <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            {uploadNotice}
+          </p>
+        ) : null}
+      </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <aside className="rounded-md border border-slate-200 bg-white">
@@ -220,7 +296,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
           </div>
         ) : (
           <section className="rounded-md border border-slate-200 bg-white p-6 text-sm text-slate-500">
-            Upload a PDB or CIF file from the enzyme record page to start structure analysis.
+            No structure record is available yet.
           </section>
         )}
       </section>

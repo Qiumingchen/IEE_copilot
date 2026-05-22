@@ -7,7 +7,10 @@ import {
   getDefaultStructureId,
   getLigandViews,
   getStructureProvenanceView,
-  getStructureStats
+  getStructureStats,
+  isStructureUploadFileName,
+  structureUploadAccept,
+  summarizeStructureUploadResult
 } from "../app/enzymes/[id]/structures/structure-utils.ts";
 
 const structure = {
@@ -192,4 +195,19 @@ test("prefers structures with residue mapping for the default selection", () => 
   };
 
   assert.equal(getDefaultStructureId([unmappedStructure, structure]), "structure-1");
+});
+
+test("validates supported structure upload file names", () => {
+  assert.equal(structureUploadAccept.includes(".pdb"), true);
+  assert.equal(structureUploadAccept.includes(".cif"), true);
+  assert.equal(isStructureUploadFileName("complex.PDB"), true);
+  assert.equal(isStructureUploadFileName("model.cif"), true);
+  assert.equal(isStructureUploadFileName("notes.txt"), false);
+});
+
+test("summarizes uploaded structure parsing result", () => {
+  assert.equal(
+    summarizeStructureUploadResult(structure),
+    "Uploaded enzyme_substrate_complex structure with 1 chain, 1 ligand, and 1 metal ion."
+  );
 });

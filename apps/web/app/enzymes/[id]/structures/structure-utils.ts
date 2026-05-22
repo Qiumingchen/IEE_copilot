@@ -41,6 +41,21 @@ export type StructureProvenanceView = {
   warning: string | null;
 };
 
+export const structureUploadAccept = ".pdb,.cif,chemical/x-pdb,chemical/x-cif,text/plain";
+
+export function isStructureUploadFileName(fileName: string): boolean {
+  const normalized = fileName.trim().toLowerCase();
+  return normalized.endsWith(".pdb") || normalized.endsWith(".cif");
+}
+
+export function summarizeStructureUploadResult(structure: StructureRecord): string {
+  const stats = getStructureStats(structure);
+  const chainLabel = pluralize(stats.chain_count, "chain");
+  const ligandLabel = pluralize(stats.ligand_count, "ligand");
+  const metalLabel = pluralize(stats.metal_count, "metal ion");
+  return `Uploaded ${structure.complex_state} structure with ${chainLabel}, ${ligandLabel}, and ${metalLabel}.`;
+}
+
 export function getChainOptions(structures: StructureRecord[]): ChainOptionView[] {
   return structures.flatMap((structure) => {
     const chains = getRecordArray(structure.chain_summary, "chains");
@@ -174,4 +189,8 @@ function valueOrDash(value: unknown): string | number {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" ? value : Number(value) || 0;
+}
+
+function pluralize(value: string | number, label: string): string {
+  return `${value} ${label}${value === 1 ? "" : "s"}`;
 }
