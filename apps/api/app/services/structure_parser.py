@@ -77,6 +77,7 @@ def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
     chains = _summarize_chains(protein_residues)
     ligand_summary, ligands = _summarize_ligands(atom_rows, protein_residues)
     complex_state = "enzyme_substrate_complex" if ligand_summary["ligand_count"] > 0 else "apo"
+    warnings = _build_structure_warnings(protein_residues, ligand_summary)
     return ParsedStructure(
         structure_type=structure_type,
         complex_state=complex_state,
@@ -85,7 +86,7 @@ def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
             "chain_count": len(chains),
             "chains": chains,
             "preview_atoms": _build_preview_atoms(protein_residues, ligand_summary),
-            "warnings": [],
+            "warnings": warnings,
         },
         ligand_summary=ligand_summary,
         ligands=ligands,
@@ -465,6 +466,24 @@ def _calculate_ligand_residue_distances(
         )
     )
     return distances
+
+
+def _build_structure_warnings(
+    protein_residues: list[dict[str, Any]],
+    ligand_summary: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    if not protein_residues:
+        warnings.append("No protein chain residues were detected in the uploaded structure.")
+    elif not any(residue.get("atoms") for residue in protein_residues):
+        warnings.append("Protein residues were detected, but none had parseable atom coordinates.")
+
+    ligand_count = ligand_summary.get("ligand_count", 0)
+    distance_matrix = ligand_summary.get("distance_matrix", [])
+    if ligand_count and not distance_matrix:
+        warnings.append("Ligands were detected, but no ligand-residue distance matrix could be calculated.")
+
+    return warnings
 
 
 def _public_ligand(ligand: dict[str, Any]) -> dict[str, Any]:

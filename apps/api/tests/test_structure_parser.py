@@ -22,6 +22,19 @@ END
 """
 
 
+PDB_COMPLEX_WITHOUT_COORDS = """\
+ATOM      1  CA  MET A   1
+HETATM    2  C1  AQ1 B 501
+END
+"""
+
+
+PDB_LIGAND_ONLY = """\
+HETATM    1  C1  AQ1 B 501      16.000  11.000   8.000  1.00 20.00           C
+END
+"""
+
+
 CIF_COMPLEX = """\
 data_demo
 loop_
@@ -153,6 +166,20 @@ def test_parse_pdb_classifies_without_hetero_ligands_as_apo():
 
     assert summary.complex_state == "apo"
     assert summary.ligand_summary["ligand_count"] == 0
+
+
+def test_parse_pdb_reports_structure_quality_warnings():
+    missing_coords = parse_structure_text(PDB_COMPLEX_WITHOUT_COORDS, file_name="missing-coords.pdb")
+    ligand_only = parse_structure_text(PDB_LIGAND_ONLY, file_name="ligand-only.pdb")
+
+    assert missing_coords.chain_summary["warnings"] == [
+        "Protein residues were detected, but none had parseable atom coordinates.",
+        "Ligands were detected, but no ligand-residue distance matrix could be calculated.",
+    ]
+    assert ligand_only.chain_summary["warnings"] == [
+        "No protein chain residues were detected in the uploaded structure.",
+        "Ligands were detected, but no ligand-residue distance matrix could be calculated.",
+    ]
 
 
 def test_parse_cif_atom_site_loop_extracts_chains_ligands_and_distances():
