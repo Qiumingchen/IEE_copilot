@@ -703,6 +703,14 @@ test("formats artifact input source lineage from summaries", () => {
     }),
     "recommendation_artifact | 4 candidates | recommendation-artifact-1 | target Thermostability"
   );
+  assert.equal(
+    formatAnalysisArtifactSource({
+      result_summary_json: {
+        target_property: "thermostability"
+      }
+    }),
+    "target Thermostability"
+  );
   assert.equal(formatAnalysisArtifactSource({ result_summary_json: null }), "-");
 });
 

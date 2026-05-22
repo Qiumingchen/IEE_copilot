@@ -335,22 +335,21 @@ export function formatAnalysisArtifactSource(
     sourceRecord(summary.msa_source) ??
     sourceRecord(summary.conservation_source) ??
     sourceRecord(summary.recommendation_source);
-  if (!source) {
-    return "-";
-  }
-
-  const parts = [String(source.type ?? "source")];
-  if (typeof source.sequence_count === "number") {
-    parts.push(`${source.sequence_count} seqs`);
-  }
-  if (typeof source.site_count === "number") {
-    parts.push(`${source.site_count} sites`);
-  }
-  if (typeof source.candidate_count === "number") {
-    parts.push(`${source.candidate_count} candidates`);
-  }
-  if (typeof source.artifact_id === "string" && source.artifact_id.length > 0) {
-    parts.push(source.artifact_id);
+  const parts: string[] = [];
+  if (source) {
+    parts.push(String(source.type ?? "source"));
+    if (typeof source.sequence_count === "number") {
+      parts.push(`${source.sequence_count} seqs`);
+    }
+    if (typeof source.site_count === "number") {
+      parts.push(`${source.site_count} sites`);
+    }
+    if (typeof source.candidate_count === "number") {
+      parts.push(`${source.candidate_count} candidates`);
+    }
+    if (typeof source.artifact_id === "string" && source.artifact_id.length > 0) {
+      parts.push(source.artifact_id);
+    }
   }
   if (typeof summary.structure_id === "string" && summary.structure_id.length > 0) {
     parts.push(`structure ${summary.structure_id}`);
@@ -359,7 +358,7 @@ export function formatAnalysisArtifactSource(
   if (targetProperty !== "-") {
     parts.push(`target ${targetProperty}`);
   }
-  return parts.join(" | ");
+  return parts.length > 0 ? parts.join(" | ") : "-";
 }
 
 export function formatRecommendationTargetProperty(value: unknown): string {
