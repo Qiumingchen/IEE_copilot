@@ -18,3 +18,8 @@ export function formatVisibilityStatus(
 ): string {
   return [visibility, curationStatus].filter(Boolean).join(" / ") || "-";
 }
+
+export function formatConditionEvidence(metadata: Record<string, unknown> | null | undefined): string {
+  const evidence = metadata?.evidence;
+  return typeof evidence === "string" && evidence.trim() ? evidence.trim() : "-";
+}

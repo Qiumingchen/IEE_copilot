@@ -17,7 +17,7 @@ import {
 } from "../../../lib/api";
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
 import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
-import { formatReferenceForTable, formatVisibilityStatus } from "./enzyme-detail-utils";
+import { formatConditionEvidence, formatReferenceForTable, formatVisibilityStatus } from "./enzyme-detail-utils";
 import { ReferenceCitation } from "./ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -977,7 +977,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
               title="Kinetics"
             />
             <RecordTable
-              columns={["Host", "Vector", "Level", "Soluble", "Condition", "Reference", "Status"]}
+              columns={["Host", "Vector", "Level", "Soluble", "Condition", "Reference", "Evidence", "Status"]}
               rows={bundle.expression.map((item) => [
                 textOrDash(item.expression_host),
                 textOrDash(item.vector),
@@ -995,6 +995,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                   )}
                   reference={item.reference ?? referencesById[item.reference_id ?? item.condition?.reference_id ?? ""]}
                 />,
+                formatConditionEvidence(item.condition?.metadata_json),
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Expression"

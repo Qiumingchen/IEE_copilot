@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  formatConditionEvidence,
   formatReferenceForTable,
   formatVisibilityStatus
 } from "../app/enzymes/[id]/enzyme-detail-utils.ts";
@@ -35,4 +36,17 @@ test("formatReferenceForTable falls back to id or dash", () => {
 test("formatVisibilityStatus combines visibility and curation status", () => {
   assert.equal(formatVisibilityStatus("public", "approved"), "public / approved");
   assert.equal(formatVisibilityStatus(undefined, undefined), "-");
+});
+
+test("formatConditionEvidence extracts curated evidence from condition metadata", () => {
+  assert.equal(
+    formatConditionEvidence({
+      source: "curated_literature",
+      evidence: "Soluble expression reported in Fig. 2"
+    }),
+    "Soluble expression reported in Fig. 2"
+  );
+  assert.equal(formatConditionEvidence({ evidence: "   " }), "-");
+  assert.equal(formatConditionEvidence({ evidence: 123 }), "-");
+  assert.equal(formatConditionEvidence(null), "-");
 });
