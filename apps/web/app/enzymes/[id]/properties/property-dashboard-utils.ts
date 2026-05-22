@@ -52,6 +52,14 @@ export type PropertyDistribution = {
   bins: PropertyDistributionBin[];
 };
 
+export type KineticSummaryItem = {
+  label: "Km" | "kcat" | "kcat/Km";
+  count: number;
+  min: number | null;
+  median: number | null;
+  max: number | null;
+};
+
 export function buildPropertyDistribution(
   records: Array<
     Pick<
@@ -82,6 +90,16 @@ export function buildPropertyDistribution(
     max,
     bins: buildBins(values, min, max, binCount)
   };
+}
+
+export function buildKineticSummary(
+  records: Array<Pick<KineticRecord, "km" | "kcat" | "kcat_km">>
+): KineticSummaryItem[] {
+  return [
+    kineticSummaryItem("Km", records.map((record) => record.km)),
+    kineticSummaryItem("kcat", records.map((record) => record.kcat)),
+    kineticSummaryItem("kcat/Km", records.map((record) => record.kcat_km))
+  ];
 }
 
 export function filterPropertyEvidenceRecords<T extends {
@@ -292,6 +310,23 @@ function numericValue(value: unknown): number | null {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function kineticSummaryItem(label: KineticSummaryItem["label"], rawValues: unknown[]): KineticSummaryItem {
+  const values = rawValues
+    .map(numericValue)
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  if (values.length === 0) {
+    return { label, count: 0, min: null, median: null, max: null };
+  }
+  return {
+    label,
+    count: values.length,
+    min: values[0],
+    median: medianValue(values),
+    max: values[values.length - 1]
+  };
 }
 
 function medianValue(values: number[]): number {

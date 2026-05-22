@@ -5,6 +5,7 @@ import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
   buildPropertyRankingCsv,
+  buildKineticSummary,
   buildPropertyDistribution,
   filterPropertyEvidenceRecords,
   formatKineticEvidence,
@@ -63,6 +64,33 @@ test("buildPropertyDistribution summarizes numeric values for charts", () => {
         { label: "58.8-60", count: 1 }
       ]
     }
+  );
+});
+
+test("buildKineticSummary summarizes Km, kcat, and catalytic efficiency", () => {
+  assert.deepEqual(
+    buildKineticSummary([
+      {
+        km: "2.1",
+        kcat: "31",
+        kcat_km: "14.8"
+      },
+      {
+        km: "1.5",
+        kcat: "40",
+        kcat_km: null
+      },
+      {
+        km: "not reported",
+        kcat: null,
+        kcat_km: "20"
+      }
+    ]),
+    [
+      { label: "Km", count: 2, min: 1.5, median: 1.8, max: 2.1 },
+      { label: "kcat", count: 2, min: 31, median: 35.5, max: 40 },
+      { label: "kcat/Km", count: 2, min: 14.8, median: 17.4, max: 20 }
+    ]
   );
 });
 

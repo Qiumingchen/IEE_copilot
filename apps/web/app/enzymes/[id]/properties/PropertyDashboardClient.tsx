@@ -20,6 +20,7 @@ import {
   buildPropertyEvidenceCsv,
   buildPropertyRankingCsv,
   buildPropertyDistribution,
+  buildKineticSummary,
   filterPropertyEvidenceRecords,
   formatAssayContext,
   formatRankingValue,
@@ -164,6 +165,10 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
   const propertyDistribution = useMemo(
     () => buildPropertyDistribution(currentPropertyRecords),
     [currentPropertyRecords]
+  );
+  const kineticSummary = useMemo(
+    () => buildKineticSummary(bundle?.kinetics ?? []),
+    [bundle?.kinetics]
   );
 
   return (
@@ -399,6 +404,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
             <h2 className="text-base font-semibold text-slate-950">Kinetic evidence</h2>
             <p className="mt-1 text-sm text-slate-500">{bundle?.kinetics.length ?? 0} kinetic records</p>
           </div>
+          <KineticSummaryPanel summary={kineticSummary} />
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
@@ -513,6 +519,33 @@ function PropertyDistributionPanel({
   );
 }
 
+function KineticSummaryPanel({ summary }: { summary: ReturnType<typeof buildKineticSummary> }) {
+  return (
+    <div className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-3">
+      {summary.map((item) => (
+        <div className="rounded-md border border-slate-200 p-3" key={item.label}>
+          <h3 className="text-sm font-semibold text-slate-950">{item.label}</h3>
+          <dl className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+            <KineticMetric label="Count" value={item.count} />
+            <KineticMetric label="Min" value={formatNullableNumber(item.min)} />
+            <KineticMetric label="Median" value={formatNullableNumber(item.median)} />
+            <KineticMetric label="Max" value={formatNullableNumber(item.max)} />
+          </dl>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function KineticMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div>
+      <dt className="font-medium uppercase text-slate-500">{label}</dt>
+      <dd className="mt-0.5 font-semibold text-slate-950">{value}</dd>
+    </div>
+  );
+}
+
 function DistributionMetric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-md border border-slate-200 p-3">
@@ -527,6 +560,10 @@ function formatDistributionValue(value: number | null, unit: string | null): str
     return "-";
   }
   return `${value}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatNullableNumber(value: number | null): string {
+  return value === null ? "-" : String(value);
 }
 
 function ReportedRanking({ ranking }: { ranking: PropertyRankingResponse | null }) {
