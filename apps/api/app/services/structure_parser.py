@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from math import dist
 from pathlib import Path
+import shlex
 from typing import Any
 
 
@@ -41,6 +42,8 @@ METAL_CODES = {
     "NI",
     "ZN",
 }
+
+CIF_MISSING_VALUES = {"?", "."}
 
 
 class StructureParseError(ValueError):
@@ -111,6 +114,14 @@ def _parse_pdb_rows(text: str) -> list[dict[str, Any]]:
 
 
 def _parse_cif_rows(text: str) -> list[dict[str, Any]]:
+    loop_rows = _parse_cif_atom_site_loop_rows(text)
+    if loop_rows:
+        return loop_rows
+
+    return _parse_positional_cif_rows(text)
+
+
+def _parse_positional_cif_rows(text: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -134,6 +145,121 @@ def _parse_cif_rows(text: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _parse_cif_atom_site_loop_rows(text: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != "loop_":
+            index += 1
+            continue
+
+        index += 1
+        columns: list[str] = []
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if not stripped.startswith("_"):
+                break
+            columns.append(stripped.split()[0])
+            index += 1
+
+        if not columns or not any(column.startswith("_atom_site.") for column in columns):
+            continue
+
+        column_indexes = {column: position for position, column in enumerate(columns)}
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if (
+                not stripped
+                or stripped == "#"
+                or stripped == "loop_"
+                or stripped.startswith("_")
+                or stripped.startswith("data_")
+            ):
+                break
+            parts = _split_cif_row(stripped)
+            if parts:
+                row = _cif_atom_site_row_from_columns(parts, column_indexes)
+                if row is not None:
+                    rows.append(row)
+            index += 1
+
+    return rows
+
+
+def _split_cif_row(row: str) -> list[str]:
+    try:
+        return shlex.split(row, posix=False)
+    except ValueError:
+        return row.split()
+
+
+def _cif_atom_site_row_from_columns(
+    parts: list[str],
+    column_indexes: dict[str, int],
+) -> dict[str, Any] | None:
+    record = _cif_value(parts, column_indexes, "_atom_site.group_PDB")
+    if record not in {"ATOM", "HETATM"}:
+        return None
+
+    residue_name = _cif_value(
+        parts,
+        column_indexes,
+        "_atom_site.label_comp_id",
+        "_atom_site.auth_comp_id",
+    )
+    if not residue_name:
+        return None
+
+    chain_id = _cif_value(
+        parts,
+        column_indexes,
+        "_atom_site.auth_asym_id",
+        "_atom_site.label_asym_id",
+        default="-",
+    )
+    residue_number = _cif_value(
+        parts,
+        column_indexes,
+        "_atom_site.auth_seq_id",
+        "_atom_site.label_seq_id",
+    )
+    if not residue_number:
+        return None
+
+    return {
+        "record": record,
+        "atom_name": _cif_value(
+            parts,
+            column_indexes,
+            "_atom_site.label_atom_id",
+            "_atom_site.auth_atom_id",
+        ),
+        "residue_name": residue_name.upper(),
+        "chain_id": chain_id,
+        "residue_number": residue_number,
+        "insertion_code": _cif_value(parts, column_indexes, "_atom_site.pdbx_PDB_ins_code"),
+        "element": _cif_value(parts, column_indexes, "_atom_site.type_symbol").upper(),
+        "coord": _parse_cif_coord_from_columns(parts, column_indexes),
+    }
+
+
+def _cif_value(
+    parts: list[str],
+    column_indexes: dict[str, int],
+    *column_names: str,
+    default: str = "",
+) -> str:
+    for column_name in column_names:
+        column_index = column_indexes.get(column_name)
+        if column_index is None or column_index >= len(parts):
+            continue
+        value = parts[column_index].strip("'\"")
+        if value not in CIF_MISSING_VALUES:
+            return value
+    return default
+
+
 def _parse_pdb_coord(line: str) -> tuple[float, float, float] | None:
     try:
         return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
@@ -148,6 +274,20 @@ def _parse_cif_coord(parts: list[str]) -> tuple[float, float, float] | None:
         except (IndexError, ValueError):
             continue
     return None
+
+
+def _parse_cif_coord_from_columns(
+    parts: list[str],
+    column_indexes: dict[str, int],
+) -> tuple[float, float, float] | None:
+    try:
+        return (
+            float(parts[column_indexes["_atom_site.Cartn_x"]]),
+            float(parts[column_indexes["_atom_site.Cartn_y"]]),
+            float(parts[column_indexes["_atom_site.Cartn_z"]]),
+        )
+    except (KeyError, IndexError, ValueError):
+        return None
 
 
 def _collect_protein_residues(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
