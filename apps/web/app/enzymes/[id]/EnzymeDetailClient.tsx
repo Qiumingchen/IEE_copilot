@@ -455,7 +455,7 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
               className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
               href={`/enzymes/${enzymeId}/upload`}
             >
-              用户上传信息
+              User uploads
             </Link>
             <button
               className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
