@@ -340,10 +340,13 @@ test("builds MSA artifact options for conservation selection", () => {
   ]);
 });
 
-test("builds mutation recommendation parameters from selected conservation source", () => {
-  assert.equal(buildMutationRecommendationJobParameters("latest", "artifact-conservation"), undefined);
-  assert.deepEqual(buildMutationRecommendationJobParameters("artifact", "artifact-conservation"), {
-    conservation_artifact_id: "artifact-conservation"
+test("builds mutation recommendation parameters from selected conservation and structure sources", () => {
+  assert.deepEqual(buildMutationRecommendationJobParameters("latest", "artifact-conservation", "structure-1"), {
+    structure_id: "structure-1"
+  });
+  assert.deepEqual(buildMutationRecommendationJobParameters("artifact", "artifact-conservation", "structure-1"), {
+    conservation_artifact_id: "artifact-conservation",
+    structure_id: "structure-1"
   });
 });
 

@@ -211,12 +211,17 @@ export function buildConservationJobParameters(
 
 export function buildMutationRecommendationJobParameters(
   inputMode: MutationRecommendationInputMode,
-  conservationArtifactId: string
+  conservationArtifactId: string,
+  structureId = ""
 ): Record<string, string> | undefined {
+  const parameters: Record<string, string> = {};
   if (inputMode === "artifact" && conservationArtifactId.trim()) {
-    return { conservation_artifact_id: conservationArtifactId.trim() };
+    parameters.conservation_artifact_id = conservationArtifactId.trim();
   }
-  return undefined;
+  if (structureId.trim()) {
+    parameters.structure_id = structureId.trim();
+  }
+  return Object.keys(parameters).length > 0 ? parameters : undefined;
 }
 
 export function buildRosettaDdgJobParameters(

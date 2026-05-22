@@ -1067,6 +1067,117 @@ def test_create_mutation_recommendation_job_uses_latest_conservation_artifact(
     ] == 3.2
 
 
+def test_create_mutation_recommendation_job_uses_selected_structure(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme_id,
+            sequence="ACDEFGHIKL",
+            mature_sequence="ACDEFGHIKL",
+            source="test",
+            checksum="selected-structure-recommendation-sequence",
+        )
+    )
+    selected_structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="enzyme_substrate_complex",
+        source="test",
+        ligand_summary={"distance_matrix": [{"sequence_position": 8, "min_distance_angstrom": 3.2}]},
+    )
+    ignored_structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="apo",
+        source="test",
+        ligand_summary={"distance_matrix": [{"sequence_position": 1, "min_distance_angstrom": 8.8}]},
+    )
+    db_session.add_all([selected_structure, ignored_structure])
+    db_session.commit()
+
+    class MutationRecommendationTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_mutation_recommendation",
+        MutationRecommendationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "mutation_recommendation",
+            "parameters_json": {"structure_id": selected_structure.id},
+        },
+    )
+
+    assert response.status_code == 201
+    summaries = response.json()["parameters_json"]["structure_summaries"]
+    assert [summary["id"] for summary in summaries] == [selected_structure.id]
+    assert summaries[0]["ligand_summary"]["distance_matrix"][0]["min_distance_angstrom"] == 3.2
+
+
+def test_create_mutation_recommendation_job_rejects_structure_from_other_enzyme(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    family_id = db_session.get(EnzymeEntry, enzyme_id).family_id
+    other_enzyme = EnzymeEntry(
+        family_id=family_id,
+        name="Other recommendation target",
+        organism="Other Streptomyces sp.",
+        source="test",
+    )
+    db_session.add(other_enzyme)
+    db_session.flush()
+    foreign_structure = StructureEntry(
+        enzyme_entry_id=other_enzyme.id,
+        structure_type="uploaded_pdb",
+        complex_state="enzyme_substrate_complex",
+        source="test",
+    )
+    db_session.add_all(
+        [
+            ProteinSequence(
+                enzyme_entry_id=enzyme_id,
+                sequence="ACDEFGHIKL",
+                mature_sequence="ACDEFGHIKL",
+                source="test",
+                checksum="foreign-structure-recommendation-sequence",
+            ),
+            foreign_structure,
+        ]
+    )
+    db_session.commit()
+
+    class MutationRecommendationTask:
+        @staticmethod
+        def delay(job_id):
+            raise AssertionError(f"invalid structure should not enqueue job {job_id}")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_mutation_recommendation",
+        MutationRecommendationTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "mutation_recommendation",
+            "parameters_json": {"structure_id": foreign_structure.id},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "structure_id does not belong to this enzyme" in response.json()["error"]["message"]
+
+
 def test_create_mutation_recommendation_job_uses_selected_conservation_artifact(
     client,
     db_session,

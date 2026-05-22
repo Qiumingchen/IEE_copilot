@@ -472,7 +472,8 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
         conservationArtifactOptions[conservationArtifactOptions.length - 1]?.id ?? "";
       return buildMutationRecommendationJobParameters(
         recommendationInputMode,
-        selectedConservationArtifactId || fallbackArtifactId
+        selectedConservationArtifactId || fallbackArtifactId,
+        selectedStructureId
       );
     }
     return undefined;
@@ -1126,7 +1127,7 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
           ) : null}
           <p className="mt-1 text-xs text-slate-500">{rosettaRuns.length} submitted jobs</p>
           <label className="mt-3 grid max-w-xl gap-1 text-xs font-medium text-slate-600">
-            Structure context for new ddG jobs
+            Structure context for recommendations and ddG jobs
             <select
               className="rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-950"
               onChange={(event) => setSelectedStructureId(event.target.value)}

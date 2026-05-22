@@ -475,12 +475,27 @@ def _mutation_records_for_scoring(db: Session, enzyme_id: str) -> list[dict]:
     ]
 
 
-def _structure_summaries_for_scoring(db: Session, enzyme_id: str) -> list[dict]:
-    structures = db.scalars(
-        select(StructureEntry)
-        .where(StructureEntry.enzyme_entry_id == enzyme_id)
-        .order_by(StructureEntry.created_at.desc())
-    ).all()
+def _validate_structure_context(db: Session, enzyme_id: str, structure_id: object) -> str | None:
+    if not isinstance(structure_id, str) or not structure_id.strip():
+        return None
+    structure = db.get(StructureEntry, structure_id.strip())
+    if structure is None or structure.enzyme_entry_id != enzyme_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="structure_id does not belong to this enzyme",
+        )
+    return structure.id
+
+
+def _structure_summaries_for_scoring(
+    db: Session,
+    enzyme_id: str,
+    structure_id: str | None = None,
+) -> list[dict]:
+    query = select(StructureEntry).where(StructureEntry.enzyme_entry_id == enzyme_id)
+    if structure_id:
+        query = query.where(StructureEntry.id == structure_id)
+    structures = db.scalars(query.order_by(StructureEntry.created_at.desc())).all()
     return [
         {
             "id": structure.id,
@@ -567,22 +582,19 @@ def _analysis_job_parameters(
         parameters["conservation_sites"] = conservation_sites
         parameters["mutation_records"] = _mutation_records_for_scoring(db, enzyme_id)
         parameters["rosetta_results"] = _rosetta_results_for_library(db, enzyme_id)
-        parameters["structure_summaries"] = _structure_summaries_for_scoring(db, enzyme_id)
+        structure_id = _validate_structure_context(db, enzyme_id, parameters.get("structure_id"))
+        if structure_id:
+            parameters["structure_id"] = structure_id
+        parameters["structure_summaries"] = _structure_summaries_for_scoring(db, enzyme_id, structure_id)
     if job_type == "rosetta_ddg":
         try:
             mutations = parse_mutation_string(str(parameters.get("mutation_string") or ""))
             validate_mutations_against_sequence(mutations, sequence)
         except MutationParseError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-        structure_id = parameters.get("structure_id")
-        if isinstance(structure_id, str) and structure_id.strip():
-            structure = db.get(StructureEntry, structure_id.strip())
-            if structure is None or structure.enzyme_entry_id != enzyme_id:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="structure_id does not belong to this enzyme",
-                )
-            parameters["structure_id"] = structure.id
+        structure_id = _validate_structure_context(db, enzyme_id, parameters.get("structure_id"))
+        if structure_id:
+            parameters["structure_id"] = structure_id
         parameters["mutation_string"] = normalize_mutation_string(mutations)
         parameters["parsed_mutations"] = [mutation.model_dump() for mutation in mutations]
     if job_type == "library_design":
