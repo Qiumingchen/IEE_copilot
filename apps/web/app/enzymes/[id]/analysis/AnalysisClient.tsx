@@ -22,6 +22,7 @@ import {
   buildMsaJobParameters,
   buildMsaDownloadFasta,
   buildMutationRecommendationJobParameters,
+  buildRosettaDdgJobParameters,
   buildLibraryDesignParameters,
   buildMutationLibraryWorkbookBytes,
   buildConservationDownloadJson,
@@ -69,6 +70,7 @@ const homologSearchModeOptions = [
 
 type AnalysisClientProps = {
   enzymeId: string;
+  initialStructureId?: string;
 };
 
 const analysisModules = [
@@ -108,7 +110,7 @@ const analysisModules = [
   actionLabel: string;
 }>;
 
-export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
+export default function AnalysisClient({ enzymeId, initialStructureId = "" }: AnalysisClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<AnalysisArtifactRecord[]>([]);
@@ -145,6 +147,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
   const [plateFormat, setPlateFormat] = useState(96);
   const [libraryInputMode, setLibraryInputMode] = useState<MutationLibraryInputMode>("latest");
   const [selectedRecommendationArtifactId, setSelectedRecommendationArtifactId] = useState("");
+  const [selectedStructureId, setSelectedStructureId] = useState(initialStructureId);
   const [runningRosettaMutation, setRunningRosettaMutation] = useState<string | null>(null);
   const [isRunningLibraryDesign, setIsRunningLibraryDesign] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
@@ -317,10 +320,12 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
     setNotice(null);
     setRunningRosettaMutation(mutationString);
     try {
-      const job = await createAnalysisJob(enzymeId, token, "rosetta_ddg", {
-        mutation_string: mutationString,
-        source: "hotspot_recommendation"
-      });
+      const job = await createAnalysisJob(
+        enzymeId,
+        token,
+        "rosetta_ddg",
+        buildRosettaDdgJobParameters(mutationString, selectedStructureId)
+      );
       setNotice(`${job.job_type} job queued for ${mutationString}: ${job.id}`);
       await loadArtifacts(token);
     } catch {
@@ -1103,6 +1108,15 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
             <p className="mt-1 break-words font-mono text-xs text-slate-500">{rosettaObjectKey}</p>
           ) : null}
           <p className="mt-1 text-xs text-slate-500">{rosettaRuns.length} submitted jobs</p>
+          <label className="mt-3 grid max-w-xl gap-1 text-xs font-medium text-slate-600">
+            Structure context for new ddG jobs
+            <input
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-950"
+              onChange={(event) => setSelectedStructureId(event.target.value)}
+              placeholder="Optional structure id"
+              value={selectedStructureId}
+            />
+          </label>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -1111,6 +1125,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Job</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Status</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Structure</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Mutation file</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">ddG kcal/mol</th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">Interpretation</th>
@@ -1126,6 +1141,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                     <td className="px-4 py-3 font-mono text-xs text-slate-950">{run.job_id}</td>
                     <td className="px-4 py-3"><StatusPill value={run.status} /></td>
                     <td className="px-4 py-3 font-mono text-slate-950">{run.mutation_string}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{run.structure_id}</td>
                     <td className="px-4 py-3 font-mono text-xs">{run.mutation_file}</td>
                     <td className="px-4 py-3">{run.ddg_kcal_per_mol}</td>
                     <td className="px-4 py-3">
@@ -1153,7 +1169,7 @@ export default function AnalysisClient({ enzymeId }: AnalysisClientProps) {
                 ))
               ) : (
                 <tr>
-                  <td className="px-4 py-4 text-slate-500" colSpan={9}>
+                  <td className="px-4 py-4 text-slate-500" colSpan={10}>
                     No Rosetta ddG job
                   </td>
                 </tr>

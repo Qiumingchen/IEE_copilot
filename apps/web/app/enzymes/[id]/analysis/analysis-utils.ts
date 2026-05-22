@@ -112,6 +112,7 @@ export type RosettaDdgRunView = {
   job_id: string;
   status: string;
   mutation_string: string;
+  structure_id: string;
   mutation_file: string;
   ddg_kcal_per_mol: number | string;
   interpretation: string;
@@ -206,6 +207,20 @@ export function buildMutationRecommendationJobParameters(
     return { conservation_artifact_id: conservationArtifactId.trim() };
   }
   return undefined;
+}
+
+export function buildRosettaDdgJobParameters(
+  mutationString: string,
+  structureId: string
+): Record<string, string> {
+  const parameters: Record<string, string> = {
+    mutation_string: mutationString,
+    source: "hotspot_recommendation"
+  };
+  if (structureId.trim()) {
+    parameters.structure_id = structureId.trim();
+  }
+  return parameters;
 }
 
 export function getHomologArtifactOptions(artifacts: AnalysisArtifactRecord[]): HomologArtifactOption[] {
@@ -720,10 +735,12 @@ export function getRosettaDdgRunViews(
       const parameters = job.parameters_json ?? {};
       const summary = job.result_summary_json ?? {};
       const mutationString = valueOrDash(summary.mutation_string ?? parameters.mutation_string);
+      const structureId = valueOrDash(summary.structure_id ?? parameters.structure_id);
       return {
         job_id: job.id,
         status: job.status,
         mutation_string: String(mutationString),
+        structure_id: String(structureId),
         mutation_file: String(valueOrDash(summary.mutation_file)),
         ddg_kcal_per_mol: valueOrDash(summary.ddg_kcal_per_mol),
         interpretation: String(valueOrDash(summary.interpretation)),

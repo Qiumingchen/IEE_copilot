@@ -251,12 +251,13 @@ export function getStructureWorkflowActions(
 ): StructureWorkflowActionView[] {
   const readiness = getStructureReadiness(structure);
   const hasLigandDistanceMatrix = getDistanceMatrixRows(structure).length > 0;
+  const structureAnalysisHref = `/enzymes/${enzymeId}/analysis?structure_id=${encodeURIComponent(structure.id)}`;
   return [
     {
       label: "Rosetta ddG",
       status: readiness.status === "blocked" ? "blocked" : "ready",
       description: "Use this parsed structure as the structural context for mutation stability scoring.",
-      href: readiness.status === "blocked" ? null : `/enzymes/${enzymeId}/analysis`
+      href: readiness.status === "blocked" ? null : structureAnalysisHref
     },
     {
       label: "Ligand-aware recommendations",
@@ -264,7 +265,7 @@ export function getStructureWorkflowActions(
       description: hasLigandDistanceMatrix
         ? "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites."
         : "Upload an enzyme-substrate complex to enable substrate-proximal mutation prioritization.",
-      href: hasLigandDistanceMatrix ? `/enzymes/${enzymeId}/analysis` : null
+      href: hasLigandDistanceMatrix ? structureAnalysisHref : null
     },
     {
       label: "MD simulation",

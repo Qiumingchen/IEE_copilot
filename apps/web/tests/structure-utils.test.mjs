@@ -328,13 +328,13 @@ test("builds structure workflow actions for reserved and available analyses", ()
       label: "Rosetta ddG",
       status: "ready",
       description: "Use this parsed structure as the structural context for mutation stability scoring.",
-      href: "/enzymes/enzyme-1/analysis"
+      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1"
     },
     {
       label: "Ligand-aware recommendations",
       status: "ready",
       description: "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites.",
-      href: "/enzymes/enzyme-1/analysis"
+      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1"
     },
     {
       label: "MD simulation",

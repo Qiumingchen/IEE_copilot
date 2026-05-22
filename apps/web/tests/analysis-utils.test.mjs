@@ -8,6 +8,7 @@ import {
   buildMsaJobParameters,
   buildMutationRecommendationJobParameters,
   buildMsaDownloadFasta,
+  buildRosettaDdgJobParameters,
   buildMutationLibraryWorkbookBytes,
   buildLibraryDesignParameters,
   buildConservationDownloadJson,
@@ -492,6 +493,19 @@ test("extracts rosetta ddg results from artifact content", () => {
   ]);
 });
 
+test("builds Rosetta ddG parameters with selected structure context", () => {
+  assert.deepEqual(buildRosettaDdgJobParameters("L10A", "structure-1"), {
+    mutation_string: "L10A",
+    source: "hotspot_recommendation",
+    structure_id: "structure-1"
+  });
+
+  assert.deepEqual(buildRosettaDdgJobParameters("L10A", ""), {
+    mutation_string: "L10A",
+    source: "hotspot_recommendation"
+  });
+});
+
 test("formats fallback artifact runner labels", () => {
   const label = getArtifactRunnerLabel({
     content_json: {
@@ -652,7 +666,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       enzyme_entry_id: "enzyme-1",
       job_type: "rosetta_ddg",
       status: "failed",
-      parameters_json: { mutation_string: "G2A" },
+      parameters_json: { mutation_string: "G2A", structure_id: "structure-failed" },
       result_summary_json: null,
       error_message: "expected G at position 2 but found C",
       created_at: "2026-05-19T10:00:00",
@@ -669,6 +683,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
         mutation_file: "L 10 A",
         ddg_kcal_per_mol: -0.6,
         interpretation: "stabilizing",
+        structure_id: "structure-finished",
         runner: {
           provider: "rosetta",
           mode: "fallback"
@@ -696,6 +711,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       job_id: "job-failed",
       status: "failed",
       mutation_string: "G2A",
+      structure_id: "structure-failed",
       mutation_file: "-",
       ddg_kcal_per_mol: "-",
       interpretation: "-",
@@ -709,6 +725,7 @@ test("builds rosetta ddg run views with status and error messages", () => {
       job_id: "job-finished",
       status: "finished",
       mutation_string: "L10A",
+      structure_id: "structure-finished",
       mutation_file: "L 10 A",
       ddg_kcal_per_mol: -0.6,
       interpretation: "stabilizing",
