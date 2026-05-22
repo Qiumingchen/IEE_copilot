@@ -112,6 +112,46 @@ export function buildPropertyEvidenceCsv(
   return [header.join(","), ...rows].join("\n");
 }
 
+export function buildPropertyRankingCsv(ranking: {
+  groups: PropertyRankingGroupRecord[];
+  items: PropertyRankingItemRecord[];
+  ranking_mode: string;
+}): string {
+  const header = [
+    "group_context",
+    "rank",
+    "enzyme_name",
+    "organism",
+    "value",
+    "substrate",
+    "assay_temperature",
+    "assay_pH",
+    "method",
+    "reference_id"
+  ];
+  const sourceRows =
+    ranking.ranking_mode === "condition_grouped"
+      ? ranking.groups.flatMap((group) =>
+          group.items.map((item) => ({ groupContext: summarizeRankingGroup(group), item }))
+        )
+      : ranking.items.map((item) => ({ groupContext: "", item }));
+  const rows = sourceRows.map(({ groupContext, item }) =>
+    [
+      groupContext,
+      item.rank,
+      item.enzyme_name,
+      item.organism,
+      formatRankingValue(item),
+      item.substrate,
+      item.assay_temperature,
+      item.assay_pH,
+      item.method,
+      item.reference_id
+    ].map(formatCsvCell).join(",")
+  );
+  return [header.join(","), ...rows].join("\n");
+}
+
 export function formatRankingValue(
   item: Pick<
     PropertyRankingItemRecord,

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
+  buildPropertyRankingCsv,
   filterPropertyEvidenceRecords,
   formatKineticEvidence,
   formatPropertyEvidence,
@@ -105,6 +106,41 @@ test("buildPropertyEvidenceCsv exports citation and assay fields", () => {
     [
       "property_type,value_original,unit_original,value_standardized,unit_standardized,substrate,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
       'optimal_temperature,58,degC,58,degC,casein,37,7.0,activity assay,"10.1000/mtgase · MTGase, thermal evidence · Biocatalysis Reports · 2024 · curated_literature",Table 1,public,approved'
+    ].join("\n")
+  );
+});
+
+test("buildPropertyRankingCsv exports reported ranking rows", () => {
+  const csv = buildPropertyRankingCsv({
+    property_type: "specific_activity",
+    ranking_mode: "reported_value",
+    comparison_warnings: [],
+    groups: [],
+    items: [
+      {
+        rank: 1,
+        property_record_id: "prop-1",
+        enzyme_entry_id: "enzyme-1",
+        enzyme_name: "MTGase A",
+        organism: "Streptomyces mobaraensis",
+        value_original: "120",
+        unit_original: "U/mg",
+        value_standardized: "120",
+        unit_standardized: "U/mg",
+        substrate: "casein",
+        assay_temperature: "37",
+        assay_pH: "7.0",
+        method: "activity assay",
+        reference_id: "ref-1"
+      }
+    ]
+  });
+
+  assert.equal(
+    csv,
+    [
+      "group_context,rank,enzyme_name,organism,value,substrate,assay_temperature,assay_pH,method,reference_id",
+      ",1,MTGase A,Streptomyces mobaraensis,120 U/mg,casein,37,7.0,activity assay,ref-1"
     ].join("\n")
   );
 });

@@ -18,6 +18,7 @@ import type {
 import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
+  buildPropertyRankingCsv,
   filterPropertyEvidenceRecords,
   formatAssayContext,
   formatRankingValue,
@@ -127,6 +128,16 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
     );
   }
 
+  function handleDownloadPropertyRankingCsv() {
+    if (!ranking) {
+      return;
+    }
+    downloadCsv(
+      `property-ranking-${enzymeId}-${selectedPropertyType}-${rankingMode}.csv`,
+      buildPropertyRankingCsv(ranking)
+    );
+  }
+
   const propertyRecordsWithFallbackReferences = useMemo(
     () =>
       (bundle?.properties ?? []).map((record) => ({
@@ -233,14 +244,24 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                   {isLoadingRanking ? "Loading ranking..." : `${ranking?.items.length ?? 0} ranked records`}
                 </p>
               </div>
-              <button
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
-                disabled={!token || isLoadingRanking}
-                onClick={() => token && void loadRanking(token, selectedPropertyType, rankingMode)}
-                type="button"
-              >
-                Refresh
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
+                  disabled={!ranking || (ranking.items.length === 0 && ranking.groups.length === 0)}
+                  onClick={handleDownloadPropertyRankingCsv}
+                  type="button"
+                >
+                  Download CSV
+                </button>
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
+                  disabled={!token || isLoadingRanking}
+                  onClick={() => token && void loadRanking(token, selectedPropertyType, rankingMode)}
+                  type="button"
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
             {ranking?.comparison_warnings.length ? (
               <div className="mt-3 grid gap-2">
