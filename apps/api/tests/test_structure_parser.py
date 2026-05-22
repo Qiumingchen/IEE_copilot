@@ -34,6 +34,38 @@ def test_parse_pdb_extracts_chains_ligands_metals_and_complex_state():
     assert summary.ligand_summary["ligands"][0]["ligand_code"] == "AQ1"
     assert summary.ligand_summary["ligands"][0]["chain_id"] == "B"
     assert summary.ligand_summary["metal_ions"][0]["ligand_code"] == "ZN"
+    assert summary.chain_summary["preview_atoms"] == [
+        {
+            "kind": "protein",
+            "chain_id": "A",
+            "residue_number": "1",
+            "sequence_position": 1,
+            "label": "M1",
+            "x": 12.56,
+            "y": 13.407,
+            "z": 9.142,
+        },
+        {
+            "kind": "protein",
+            "chain_id": "A",
+            "residue_number": "2",
+            "sequence_position": 2,
+            "label": "G2",
+            "x": 15.56,
+            "y": 11.407,
+            "z": 8.142,
+        },
+        {
+            "kind": "ligand",
+            "chain_id": "B",
+            "residue_number": "501",
+            "sequence_position": None,
+            "label": "AQ1",
+            "x": 16.1,
+            "y": 11.1,
+            "z": 8.1,
+        },
+    ]
 
 
 def test_parse_pdb_maps_pdb_residues_to_sequence_positions():

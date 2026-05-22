@@ -15,6 +15,7 @@ import {
   getDistanceMatrixRows,
   getLigandViews,
   getResidueRows,
+  getStructurePreviewAtoms,
   getStructureQualityChecks,
   getStructureReadiness,
   getStructureProvenanceView,
@@ -85,6 +86,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
   const qualityChecks = selectedStructure ? getStructureQualityChecks(selectedStructure) : [];
   const workflowActions = selectedStructure ? getStructureWorkflowActions(selectedStructure, enzymeId) : [];
   const distanceMatrixRows = selectedStructure ? getDistanceMatrixRows(selectedStructure) : [];
+  const previewAtoms = selectedStructure ? getStructurePreviewAtoms(selectedStructure) : [];
 
   useEffect(() => {
     setSelectedChainId(chainOptions[0]?.chain_id ?? null);
@@ -286,16 +288,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
                 </div>
               </div>
               <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-                <div className="relative min-h-72 overflow-hidden rounded-md border border-slate-200 bg-slate-950">
-                  <div className="absolute inset-0 grid place-items-center">
-                    <div className="h-36 w-36 rotate-45 rounded-md border border-cyan-300/70 bg-cyan-300/10 shadow-[0_0_60px_rgba(103,232,249,0.28)]" />
-                    <div className="absolute h-20 w-20 rounded-full border border-emerald-300/80 bg-emerald-300/10 shadow-[0_0_40px_rgba(110,231,183,0.22)]" />
-                    <div className="absolute h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_24px_rgba(252,211,77,0.9)]" />
-                  </div>
-                  <div className="absolute bottom-3 left-3 right-3 rounded bg-slate-900/80 px-3 py-2 text-xs text-slate-200">
-                    Coordinate-aware 3D viewer slot. Parsed chains and ligand contacts are shown below.
-                  </div>
-                </div>
+                <CoordinatePreview atoms={previewAtoms} />
                 <div className="grid content-start gap-3">
                   <label className="grid gap-1 text-sm font-medium text-slate-700">
                     Chain
@@ -417,6 +410,82 @@ function WorkflowActions({ actions }: { actions: ReturnType<typeof getStructureW
         ))}
       </div>
     </section>
+  );
+}
+
+function CoordinatePreview({ atoms }: { atoms: ReturnType<typeof getStructurePreviewAtoms> }) {
+  const width = 640;
+  const height = 360;
+  if (atoms.length === 0) {
+    return (
+      <div className="grid min-h-72 place-items-center rounded-md border border-slate-200 bg-slate-950 px-4 text-center text-sm text-slate-300">
+        No coordinate preview is available for this structure.
+      </div>
+    );
+  }
+
+  const minX = Math.min(...atoms.map((atom) => atom.x));
+  const maxX = Math.max(...atoms.map((atom) => atom.x));
+  const minY = Math.min(...atoms.map((atom) => atom.y));
+  const maxY = Math.max(...atoms.map((atom) => atom.y));
+  const minZ = Math.min(...atoms.map((atom) => atom.z));
+  const maxZ = Math.max(...atoms.map((atom) => atom.z));
+  const spanX = Math.max(maxX - minX, 1);
+  const spanY = Math.max(maxY - minY, 1);
+  const spanZ = Math.max(maxZ - minZ, 1);
+  const projectedAtoms = atoms.map((atom) => {
+    const normalizedX = (atom.x - minX) / spanX;
+    const normalizedY = (atom.y - minY) / spanY;
+    const normalizedZ = (atom.z - minZ) / spanZ;
+    return {
+      ...atom,
+      px: 48 + normalizedX * (width - 96) + (normalizedZ - 0.5) * 42,
+      py: 44 + (1 - normalizedY) * (height - 88) - (normalizedZ - 0.5) * 26,
+      radius: atom.kind === "ligand" ? 7 : 4 + normalizedZ * 2
+    };
+  });
+  const proteinLine = projectedAtoms
+    .filter((atom) => atom.kind === "protein")
+    .map((atom) => `${atom.px},${atom.py}`)
+    .join(" ");
+
+  return (
+    <div className="relative min-h-72 overflow-hidden rounded-md border border-slate-200 bg-slate-950">
+      <svg
+        aria-label="Coordinate preview"
+        className="h-full min-h-72 w-full"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        <rect fill="#020617" height={height} width={width} />
+        <g opacity="0.22">
+          <path d="M48 312H592M48 48V312M48 312L88 286M592 312L552 286" stroke="#94a3b8" strokeWidth="1" />
+        </g>
+        {proteinLine ? (
+          <polyline fill="none" points={proteinLine} stroke="#67e8f9" strokeLinecap="round" strokeWidth="2" />
+        ) : null}
+        {projectedAtoms.map((atom) => (
+          <g key={`${atom.kind}-${atom.chain_id}-${atom.residue_number}-${atom.label}`}>
+            <circle
+              cx={atom.px}
+              cy={atom.py}
+              fill={atom.kind === "ligand" ? "#fbbf24" : "#5eead4"}
+              opacity={atom.kind === "ligand" ? "0.95" : "0.78"}
+              r={atom.radius}
+            />
+            {atom.kind === "ligand" ? (
+              <text fill="#fde68a" fontSize="12" x={atom.px + 10} y={atom.py - 8}>
+                {atom.label}
+              </text>
+            ) : null}
+          </g>
+        ))}
+      </svg>
+      <div className="absolute bottom-3 left-3 right-3 rounded bg-slate-900/80 px-3 py-2 text-xs text-slate-200">
+        Coordinate projection from parsed PDB/CIF atoms. Ligands are highlighted in amber.
+      </div>
+    </div>
   );
 }
 

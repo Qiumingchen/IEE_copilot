@@ -81,6 +81,7 @@ def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
             "format": extension.lstrip("."),
             "chain_count": len(chains),
             "chains": chains,
+            "preview_atoms": _build_preview_atoms(protein_residues, ligand_summary),
             "warnings": [],
         },
         ligand_summary=ligand_summary,
@@ -163,9 +164,12 @@ def _collect_protein_residues(rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 "residue_name": row["residue_name"],
                 "one_letter": AMINO_ACIDS[row["residue_name"]],
                 "atoms": [],
+                "representative_coord": None,
             }
         if row["coord"] is not None:
             residues_by_key[key]["atoms"].append(row["coord"])
+            if row["atom_name"] == "CA":
+                residues_by_key[key]["representative_coord"] = row["coord"]
 
     sequence_positions: dict[str, int] = {}
     residues: list[dict[str, Any]] = []
@@ -324,7 +328,74 @@ def _calculate_ligand_residue_distances(
 
 
 def _public_ligand(ligand: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in ligand.items() if key != "atoms"}
+    public_ligand = {key: value for key, value in ligand.items() if key != "atoms"}
+    center = _centroid(ligand.get("atoms", []))
+    if center is not None:
+        public_ligand["coord_center"] = center
+    return public_ligand
+
+
+def _build_preview_atoms(
+    protein_residues: list[dict[str, Any]],
+    ligand_summary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    preview_atoms: list[dict[str, Any]] = []
+    for residue in protein_residues:
+        center = residue.get("representative_coord") or _centroid(residue.get("atoms", []))
+        if center is None:
+            continue
+        preview_atoms.append(
+            {
+                "kind": "protein",
+                "chain_id": residue["chain_id"],
+                "residue_number": residue["residue_number"],
+                "sequence_position": residue["sequence_position"],
+                "label": f"{residue['one_letter']}{residue['sequence_position']}",
+                "x": center[0],
+                "y": center[1],
+                "z": center[2],
+            }
+        )
+
+    for ligand in ligand_summary.get("ligands", []):
+        center = ligand.get("coord_center")
+        if not _is_coord(center):
+            continue
+        preview_atoms.append(
+            {
+                "kind": "ligand",
+                "chain_id": ligand["chain_id"],
+                "residue_number": ligand["residue_number"],
+                "sequence_position": None,
+                "label": ligand["ligand_code"],
+                "x": center[0],
+                "y": center[1],
+                "z": center[2],
+            }
+        )
+    return preview_atoms[:500]
+
+
+def _centroid(coords: list[Any]) -> tuple[float, float, float] | None:
+    valid_coords = [
+        coord for coord in coords
+        if isinstance(coord, tuple) and len(coord) == 3
+    ]
+    if not valid_coords:
+        return None
+    return (
+        round(sum(coord[0] for coord in valid_coords) / len(valid_coords), 3),
+        round(sum(coord[1] for coord in valid_coords) / len(valid_coords), 3),
+        round(sum(coord[2] for coord in valid_coords) / len(valid_coords), 3),
+    )
+
+
+def _is_coord(value: Any) -> bool:
+    return (
+        isinstance(value, tuple)
+        and len(value) == 3
+        and all(isinstance(component, float) for component in value)
+    )
 
 
 def _ligand_sort_key(item: dict[str, Any]) -> tuple[str, str]:

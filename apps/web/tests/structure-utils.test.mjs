@@ -9,6 +9,7 @@ import {
   getDistanceMatrixRows,
   getLigandViews,
   getStructureQualityChecks,
+  getStructurePreviewAtoms,
   getStructureProvenanceView,
   getStructureReadiness,
   getStructureStats,
@@ -44,6 +45,28 @@ const structure = {
       source_url: "mock://alphafold/AF-P99998-F1.pdb"
     },
     warnings: ["missing residue around A3"],
+    preview_atoms: [
+      {
+        kind: "protein",
+        chain_id: "A",
+        residue_number: "1",
+        sequence_position: 1,
+        label: "M1",
+        x: 12.56,
+        y: 13.407,
+        z: 9.142
+      },
+      {
+        kind: "ligand",
+        chain_id: "B",
+        residue_number: "501",
+        sequence_position: null,
+        label: "AQ1",
+        x: 16.1,
+        y: 11.1,
+        z: 8.1
+      }
+    ],
     chains: [
       {
         chain_id: "A",
@@ -298,6 +321,32 @@ test("builds structure download file names from artifact keys", () => {
     buildStructureDownloadFileName({ ...structure, artifact: { ...structure.artifact, object_key: "" } }),
     "structure-1.pdb"
   );
+});
+
+test("extracts structure preview atoms from parsed coordinate summaries", () => {
+  assert.deepEqual(getStructurePreviewAtoms(structure), [
+    {
+      kind: "protein",
+      chain_id: "A",
+      residue_number: "1",
+      sequence_position: 1,
+      label: "M1",
+      x: 12.56,
+      y: 13.407,
+      z: 9.142
+    },
+    {
+      kind: "ligand",
+      chain_id: "B",
+      residue_number: "501",
+      sequence_position: "-",
+      label: "AQ1",
+      x: 16.1,
+      y: 11.1,
+      z: 8.1
+    }
+  ]);
+  assert.deepEqual(getStructurePreviewAtoms({ ...structure, chain_summary: {} }), []);
 });
 
 test("builds distance matrix rows for ligand contact review", () => {

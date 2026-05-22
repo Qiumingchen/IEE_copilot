@@ -62,6 +62,17 @@ export type DistanceMatrixRowView = {
   distance_angstrom: string | number;
 };
 
+export type StructurePreviewAtomView = {
+  kind: string;
+  chain_id: string;
+  residue_number: string;
+  sequence_position: string | number;
+  label: string;
+  x: number;
+  y: number;
+  z: number;
+};
+
 export type StructureQualityCheckView = {
   label: string;
   status: "pass" | "warn" | "fail";
@@ -87,6 +98,33 @@ export function buildStructureDownloadFileName(structure: StructureRecord): stri
   const objectKey = structure.artifact?.object_key ?? "";
   const fileName = objectKey.split("/").filter(Boolean).at(-1);
   return fileName || `${structure.id}.pdb`;
+}
+
+export function getStructurePreviewAtoms(structure: StructureRecord): StructurePreviewAtomView[] {
+  const previewAtoms = structure.chain_summary?.preview_atoms;
+  if (!Array.isArray(previewAtoms)) {
+    return [];
+  }
+  return previewAtoms.filter(isRecord).flatMap((atom) => {
+    const x = numberOrNull(atom.x);
+    const y = numberOrNull(atom.y);
+    const z = numberOrNull(atom.z);
+    if (x === null || y === null || z === null) {
+      return [];
+    }
+    return [
+      {
+        kind: String(valueOrDash(atom.kind)),
+        chain_id: String(valueOrDash(atom.chain_id)),
+        residue_number: String(valueOrDash(atom.residue_number)),
+        sequence_position: valueOrDash(atom.sequence_position),
+        label: String(valueOrDash(atom.label)),
+        x,
+        y,
+        z
+      }
+    ];
+  });
 }
 
 export function getChainOptions(structures: StructureRecord[]): ChainOptionView[] {
@@ -358,6 +396,10 @@ function valueOrDash(value: unknown): string | number {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" ? value : Number(value) || 0;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function pluralize(value: string | number, label: string): string {
