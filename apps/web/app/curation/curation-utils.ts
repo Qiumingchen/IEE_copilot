@@ -14,8 +14,18 @@ export const curatedEvidenceCsvTemplate = [
 
 export const curatedEvidenceTemplateFileName = "curated-evidence-template.csv";
 
+export const curatedEvidenceCsvUploadAccept = ".csv,text/csv";
+
 export function buildCuratedEvidenceTemplateCsv(): string {
   return `${curatedEvidenceCsvTemplate}\n`;
+}
+
+export function isCuratedEvidenceCsvFileName(fileName: string): boolean {
+  return fileName.trim().toLowerCase().endsWith(".csv");
+}
+
+export function summarizeCuratedEvidenceFileLoad(fileName: string): string {
+  return `Loaded ${fileName} into CSV text.`;
 }
 
 export function summarizeVisibilityRequest(request: VisibilityRequestDetailRecord): string {

@@ -5,9 +5,12 @@ import {
   buildCuratedEvidenceTemplateCsv,
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
+  curatedEvidenceCsvUploadAccept,
   curatedEvidenceTemplateFileName,
   formatImportedReference,
   formatPreviewReference,
+  isCuratedEvidenceCsvFileName,
+  summarizeCuratedEvidenceFileLoad,
   summarizeCuratedEvidencePreview,
   summarizeCuratedEvidenceImport,
   summarizeVisibilityRequest
@@ -129,6 +132,21 @@ test("buildCuratedEvidenceTemplateCsv returns a downloadable CSV template", () =
   assert.equal(rows.some((row) => row.startsWith("kinetic,")), true);
   assert.equal(rows.some((row) => row.startsWith("mutation,")), true);
   assert.equal(csv.endsWith("\n"), true);
+});
+
+test("isCuratedEvidenceCsvFileName accepts csv files only", () => {
+  assert.equal(curatedEvidenceCsvUploadAccept, ".csv,text/csv");
+  assert.equal(isCuratedEvidenceCsvFileName("curated-evidence.csv"), true);
+  assert.equal(isCuratedEvidenceCsvFileName("Curated-Evidence.CSV"), true);
+  assert.equal(isCuratedEvidenceCsvFileName("curated-evidence.tsv"), false);
+  assert.equal(isCuratedEvidenceCsvFileName("curated-evidence.csv.txt"), false);
+});
+
+test("summarizeCuratedEvidenceFileLoad reports the loaded CSV file name", () => {
+  assert.equal(
+    summarizeCuratedEvidenceFileLoad("curated-evidence.csv"),
+    "Loaded curated-evidence.csv into CSV text."
+  );
 });
 
 test("formatPreviewReference includes the reference match mode", () => {

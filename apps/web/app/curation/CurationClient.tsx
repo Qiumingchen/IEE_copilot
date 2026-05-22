@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import type { ChangeEvent } from "react";
 import { useEffect, useState } from "react";
 
 import {
@@ -18,10 +19,13 @@ import type {
 import {
   buildCuratedEvidenceTemplateCsv,
   canSubmitRejection,
+  curatedEvidenceCsvUploadAccept,
   curatedEvidenceCsvTemplate,
   curatedEvidenceTemplateFileName,
   formatImportedReference,
   formatPreviewReference,
+  isCuratedEvidenceCsvFileName,
+  summarizeCuratedEvidenceFileLoad,
   summarizeCuratedEvidenceImport,
   summarizeCuratedEvidencePreview,
   summarizeVisibilityRequest
@@ -54,6 +58,7 @@ export default function CurationClient() {
   const [importPreview, setImportPreview] = useState<CuratedEvidencePreviewResponse | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
+  const [isReadingImportFile, setIsReadingImportFile] = useState(false);
 
   async function loadRequests(nextToken: string) {
     setError(null);
@@ -162,6 +167,38 @@ export default function CurationClient() {
     }
   }
 
+  function handleCuratedCsvFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (!isCuratedEvidenceCsvFileName(file.name)) {
+      setError("Please upload a .csv file.");
+      event.target.value = "";
+      return;
+    }
+
+    setIsReadingImportFile(true);
+    setError(null);
+    setSuccessMessage(null);
+    setImportPreview(null);
+    setImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImportCsvText(typeof reader.result === "string" ? reader.result : "");
+      setSuccessMessage(summarizeCuratedEvidenceFileLoad(file.name));
+      setIsReadingImportFile(false);
+      event.target.value = "";
+    };
+    reader.onerror = () => {
+      setError("Unable to read CSV file.");
+      setIsReadingImportFile(false);
+      event.target.value = "";
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -229,6 +266,22 @@ export default function CurationClient() {
           >
             Download template
           </button>
+          <label
+            className={`rounded-md border border-slate-300 px-4 py-2 text-sm font-medium ${
+              isPreviewingImport || isImporting || isReadingImportFile
+                ? "cursor-not-allowed text-slate-400"
+                : "cursor-pointer text-slate-800"
+            }`}
+          >
+            {isReadingImportFile ? "Reading CSV..." : "Upload CSV"}
+            <input
+              accept={curatedEvidenceCsvUploadAccept}
+              className="sr-only"
+              disabled={isPreviewingImport || isImporting || isReadingImportFile}
+              onChange={handleCuratedCsvFileChange}
+              type="file"
+            />
+          </label>
           <button
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
             disabled={!token || isPreviewingImport || isImporting}
