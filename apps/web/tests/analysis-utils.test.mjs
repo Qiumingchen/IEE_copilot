@@ -7,6 +7,7 @@ import {
   buildHomologFasta,
   buildMsaJobParameters,
   buildMutationRecommendationJobParameters,
+  buildMutationRecommendationCsv,
   buildMsaDownloadFasta,
   buildRosettaDdgJobParameters,
   buildMutationLibraryWorkbookBytes,
@@ -471,6 +472,61 @@ test("extracts mutation recommendation candidates from artifact content", () => 
       rationale: "variable site"
     }
   ]);
+});
+
+test("builds mutation recommendation CSV with scored suggestions and risks", () => {
+  const csv = buildMutationRecommendationCsv([
+    {
+      query_position: 10,
+      wildtype_residue: "L",
+      conservation_category: "variable",
+      priority_score: 1.8,
+      suggested_mutations: ["L10A", "L10V"],
+      scored_suggestions: [
+        {
+          mutation_string: "L10A",
+          total_score: 3.2,
+          components: [
+            {
+              name: "rosetta_stability",
+              value: 0.4,
+              weight: 2,
+              contribution: 0.8,
+              rationale: "stabilizing prediction"
+            },
+            {
+              name: "reported_benefit",
+              value: 0.5,
+              weight: 1.2,
+              contribution: 0.6,
+              rationale: "reported beneficial mutations"
+            }
+          ],
+          risk_summary: ["medium_solubility_risk"],
+          parsed_mutations: [{ wildtype: "L", position: 10, mutant: "A" }]
+        }
+      ],
+      rationale: "variable site"
+    },
+    {
+      query_position: 12,
+      wildtype_residue: "F",
+      conservation_category: "moderately_conserved",
+      priority_score: 1.1,
+      suggested_mutations: ["F12A"],
+      scored_suggestions: [],
+      rationale: "fallback only"
+    }
+  ]);
+
+  assert.equal(
+    csv,
+    [
+      "query_position,wildtype_residue,conservation_category,priority_score,mutation_string,total_score,components,risk_summary,rationale",
+      "10,L,variable,1.8,L10A,3.2,rosetta_stability: value 0.4 x weight 2 = 0.8; reported_benefit: value 0.5 x weight 1.2 = 0.6,medium_solubility_risk,variable site",
+      "12,F,moderately_conserved,1.1,F12A,,,,fallback only"
+    ].join("\n")
+  );
 });
 
 test("extracts rosetta ddg results from artifact content", () => {

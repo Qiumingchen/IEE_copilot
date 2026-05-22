@@ -509,6 +509,47 @@ export function buildConservationDownloadJson(
   );
 }
 
+export function buildMutationRecommendationCsv(
+  candidates: MutationRecommendationCandidateView[]
+): string {
+  const rows = [
+    [
+      "query_position",
+      "wildtype_residue",
+      "conservation_category",
+      "priority_score",
+      "mutation_string",
+      "total_score",
+      "components",
+      "risk_summary",
+      "rationale"
+    ],
+    ...candidates.flatMap((candidate) => {
+      const suggestions = candidate.scored_suggestions.length > 0
+        ? candidate.scored_suggestions
+        : candidate.suggested_mutations.map((mutation) => ({
+            mutation_string: mutation,
+            total_score: "",
+            components: [],
+            risk_summary: [],
+            parsed_mutations: []
+          }));
+      return suggestions.map((suggestion) => [
+        String(candidate.query_position),
+        candidate.wildtype_residue,
+        candidate.conservation_category,
+        String(candidate.priority_score),
+        suggestion.mutation_string,
+        String(suggestion.total_score),
+        formatScoreComponentsForCsv(suggestion.components),
+        suggestion.risk_summary.join("; "),
+        candidate.rationale
+      ]);
+    })
+  ];
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
 export function getHomologSequences(content: AnalysisArtifactContentRecord): HomologSequenceView[] {
   const rawHomologs = content.content_json?.homologs;
   if (!Array.isArray(rawHomologs)) {
@@ -744,6 +785,14 @@ function getMemberScores(value: unknown): Array<{ mutation_string: string; total
 function formatMemberScores(memberScores: Array<{ mutation_string: string; total_score: number | string }>): string {
   return memberScores
     .map((memberScore) => `${memberScore.mutation_string}: ${memberScore.total_score}`)
+    .join("; ");
+}
+
+function formatScoreComponentsForCsv(components: MutationScoreComponentView[]): string {
+  return components
+    .map((component) =>
+      `${component.name}: value ${component.value} x weight ${component.weight} = ${component.contribution}`
+    )
     .join("; ");
 }
 
