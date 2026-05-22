@@ -73,6 +73,15 @@ const homologSearchModeOptions = [
   { value: "metadata_search", label: "Fast UniProt metadata" },
   { value: "sequence_similarity", label: "Sequence similarity" }
 ];
+const recommendationTargetPropertyOptions = [
+  { value: "thermostability", label: "Thermostability" },
+  { value: "specific_activity", label: "Specific activity" },
+  { value: "optimal_temperature", label: "Optimal temperature" },
+  { value: "optimal_pH", label: "Optimal pH" },
+  { value: "soluble_expression", label: "Soluble expression" },
+  { value: "product_selectivity", label: "Product selectivity" },
+  { value: "substrate_specificity", label: "Substrate specificity" }
+];
 
 type AnalysisClientProps = {
   enzymeId: string;
@@ -140,6 +149,7 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
   const [selectedMsaArtifactId, setSelectedMsaArtifactId] = useState("");
   const [recommendationInputMode, setRecommendationInputMode] =
     useState<MutationRecommendationInputMode>("latest");
+  const [recommendationTargetProperty, setRecommendationTargetProperty] = useState("thermostability");
   const [selectedConservationArtifactId, setSelectedConservationArtifactId] = useState("");
   const [conservationSites, setConservationSites] = useState<ConservationSiteView[]>([]);
   const [conservationFilter, setConservationFilter] = useState<ConservationCategoryFilter>("all");
@@ -490,7 +500,8 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
       return buildMutationRecommendationJobParameters(
         recommendationInputMode,
         selectedConservationArtifactId || fallbackArtifactId,
-        selectedStructureId
+        selectedStructureId,
+        recommendationTargetProperty
       );
     }
     return undefined;
@@ -776,6 +787,20 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
               ) : null}
               {item.jobType === "mutation_recommendation" ? (
                 <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                  <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                    Target property
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-normal normal-case text-slate-800"
+                      onChange={(event) => setRecommendationTargetProperty(event.target.value)}
+                      value={recommendationTargetProperty}
+                    >
+                      {recommendationTargetPropertyOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
                     Input source
                     <select

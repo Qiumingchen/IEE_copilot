@@ -218,7 +218,8 @@ export function buildConservationJobParameters(
 export function buildMutationRecommendationJobParameters(
   inputMode: MutationRecommendationInputMode,
   conservationArtifactId: string,
-  structureId = ""
+  structureId = "",
+  targetProperty = ""
 ): Record<string, string> | undefined {
   const parameters: Record<string, string> = {};
   if (inputMode === "artifact" && conservationArtifactId.trim()) {
@@ -226,6 +227,9 @@ export function buildMutationRecommendationJobParameters(
   }
   if (structureId.trim()) {
     parameters.structure_id = structureId.trim();
+  }
+  if (targetProperty.trim()) {
+    parameters.target_property = targetProperty.trim();
   }
   return Object.keys(parameters).length > 0 ? parameters : undefined;
 }
