@@ -215,12 +215,13 @@ export function formatPropertyEvidence(
 }
 
 export function formatKineticEvidence(
-  record: Pick<KineticRecord, "reference_id" | "reference" | "visibility" | "curation_status">,
+  record: Pick<KineticRecord, "reference_id" | "reference" | "evidence_text" | "visibility" | "curation_status">,
   referencesById: Record<string, LiteratureReferenceRecord> = {}
 ): string {
   const reference = record.reference ?? (record.reference_id ? referencesById[record.reference_id] : null);
   const parts = [
     reference ? formatReferenceLabel(reference) : record.reference_id,
+    record.evidence_text,
     `${record.visibility} / ${record.curation_status}`
   ];
 

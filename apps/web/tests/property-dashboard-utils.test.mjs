@@ -229,6 +229,19 @@ test("formatKineticEvidence prefers embedded reference metadata", () => {
   );
 });
 
+test("formatKineticEvidence includes kinetic evidence text", () => {
+  assert.equal(
+    formatKineticEvidence({
+      reference_id: null,
+      reference: null,
+      evidence_text: "Table 2 reports Km and kcat for CBZ-Gln-Gly.",
+      visibility: "public",
+      curation_status: "approved"
+    }),
+    "Table 2 reports Km and kcat for CBZ-Gln-Gly. · public / approved"
+  );
+});
+
 test("summarizeRankingGroup exposes assay context and item count", () => {
   assert.equal(
     summarizeRankingGroup({

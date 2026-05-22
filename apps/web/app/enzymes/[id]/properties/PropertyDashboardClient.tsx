@@ -399,6 +399,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                   <th className="px-4 py-3">Substrate</th>
                   <th className="px-4 py-3">Km / kcat / kcat/Km</th>
                   <th className="px-4 py-3">Reference</th>
+                  <th className="px-4 py-3">Evidence</th>
                   <th className="px-4 py-3">Status</th>
                 </tr>
               </thead>
@@ -422,6 +423,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                         </span>
                       </div>
                     </td>
+                    <td className="min-w-64 px-4 py-3 text-slate-600">{record.evidence_text ?? "-"}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {record.visibility} / {record.curation_status}
                     </td>
@@ -429,7 +431,7 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
                 ))}
                 {(bundle?.kinetics.length ?? 0) === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-sm text-slate-500" colSpan={4}>
+                    <td className="px-4 py-6 text-sm text-slate-500" colSpan={5}>
                       No kinetic evidence rows are available yet.
                     </td>
                   </tr>
