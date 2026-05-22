@@ -19,6 +19,15 @@ export type MutationDeltaSummaryItem = {
   }>;
 };
 
+export const commonMutationPropertyDeltaKeys = [
+  "",
+  "optimal_temperature_delta_degC",
+  "specific_activity_fold_change",
+  "optimal_pH_delta",
+  "soluble_expression_fold_change",
+  "product_selectivity_delta"
+];
+
 export function buildMutationPositionSummary(
   records: Array<Pick<MutationRecord, "mutation_string" | "mutation_positions">>
 ): MutationPositionSummary[] {
@@ -76,6 +85,24 @@ export function buildMutationDeltaSummary(
       top_mutations: [...rows].sort((left, right) => right.value - left.value).slice(0, 5)
     }))
     .sort((left, right) => left.property.localeCompare(right.property));
+}
+
+export function buildMutationPropertyDeltaOptions(
+  records: Array<Pick<MutationRecord, "property_delta">>
+): string[] {
+  const observed = new Set<string>();
+  for (const record of records) {
+    for (const key of Object.keys(record.property_delta ?? {})) {
+      if (key.trim()) {
+        observed.add(key);
+      }
+    }
+  }
+  const extras = Array.from(observed)
+    .filter((key) => !commonMutationPropertyDeltaKeys.includes(key))
+    .sort((left, right) => left.localeCompare(right));
+
+  return [...commonMutationPropertyDeltaKeys, ...extras];
 }
 
 export type MutationEvidenceFilters = {

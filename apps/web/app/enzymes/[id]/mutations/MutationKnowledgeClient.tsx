@@ -14,6 +14,7 @@ import type {
 import {
   buildMutationPositionSummary,
   buildMutationDeltaSummary,
+  buildMutationPropertyDeltaOptions,
   buildMutationEvidenceCsv,
   filterMutationEvidenceRecords,
   formatMutationPositions,
@@ -26,15 +27,6 @@ const TOKEN_KEY = "iee-copilot-token";
 type MutationKnowledgeClientProps = {
   enzymeId: string;
 };
-
-const commonPropertyDeltaKeys = [
-  "",
-  "optimal_temperature_delta_degC",
-  "specific_activity_fold_change",
-  "optimal_pH_delta",
-  "soluble_expression_fold_change",
-  "product_selectivity_delta"
-];
 
 function emptyFilters(): MutationQueryFilters {
   return {
@@ -91,6 +83,10 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
   }, [mutationsWithFallbackReferences]);
   const positionSummary = useMemo(() => buildMutationPositionSummary(filteredMutations), [filteredMutations]);
   const deltaSummary = useMemo(() => buildMutationDeltaSummary(filteredMutations), [filteredMutations]);
+  const propertyDeltaOptions = useMemo(
+    () => buildMutationPropertyDeltaOptions(mutationsWithFallbackReferences),
+    [mutationsWithFallbackReferences]
+  );
   const maxPositionCount = Math.max(1, ...positionSummary.map((item) => item.count));
 
   useEffect(() => {
@@ -195,7 +191,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
                 }
                 value={filters.property_delta_key ?? ""}
               >
-                {commonPropertyDeltaKeys.map((key) => (
+                {propertyDeltaOptions.map((key) => (
                   <option key={key || "any"} value={key}>
                     {key || "Any property"}
                   </option>

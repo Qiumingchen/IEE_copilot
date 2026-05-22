@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildMutationPositionSummary,
   buildMutationDeltaSummary,
+  buildMutationPropertyDeltaOptions,
   buildMutationEvidenceCsv,
   filterMutationEvidenceRecords,
   formatMutationEvidence,
@@ -88,6 +89,35 @@ test("buildMutationDeltaSummary groups numeric property deltas by effect directi
           { mutation_string: "D3Y", value: 0.8, effect_summary: "Lower activity" }
         ]
       }
+    ]
+  );
+});
+
+test("buildMutationPropertyDeltaOptions keeps common keys first and appends observed keys", () => {
+  assert.deepEqual(
+    buildMutationPropertyDeltaOptions([
+      {
+        property_delta: {
+          product_selectivity_delta: 0.3,
+          thermostability_half_life_fold_change: 2.4
+        }
+      },
+      {
+        property_delta: {
+          catalytic_efficiency_fold_change: 1.7,
+          optimal_temperature_delta_degC: 5
+        }
+      }
+    ]),
+    [
+      "",
+      "optimal_temperature_delta_degC",
+      "specific_activity_fold_change",
+      "optimal_pH_delta",
+      "soluble_expression_fold_change",
+      "product_selectivity_delta",
+      "catalytic_efficiency_fold_change",
+      "thermostability_half_life_fold_change"
     ]
   );
 });
