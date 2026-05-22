@@ -267,6 +267,7 @@ class ExpressionRecordResponse(BaseModel):
     condition_id: str | None = None
     condition: ExperimentConditionResponse | None = None
     reference_id: str | None = None
+    reference: LiteratureReferenceResponse | None = None
     visibility: Visibility
     curation_status: CurationStatus
 

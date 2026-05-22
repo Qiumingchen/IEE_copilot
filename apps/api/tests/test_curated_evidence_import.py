@@ -194,6 +194,20 @@ def test_curator_can_import_curated_expression_evidence(client, db_session):
         "evidence": "Soluble expression reported in Fig. 2",
     }
 
+    list_response = client.get(f"/enzymes/{seeded_enzyme.id}/expression", headers=headers)
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["reference"] == {
+        "id": reference.id,
+        "title": "MTGase expression paper",
+        "authors": None,
+        "journal": "Protein Expression Reports",
+        "year": 2024,
+        "doi": "10.1000/expression",
+        "pubmed_id": None,
+        "source": "curated_literature",
+        "provenance": {"provider": "curated_literature", "mode": "curated"},
+    }
+
 
 def test_list_enzyme_references_returns_deduplicated_curated_literature(client, db_session):
     email = "curated-references@example.com"

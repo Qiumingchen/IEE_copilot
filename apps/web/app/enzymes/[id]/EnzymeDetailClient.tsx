@@ -988,7 +988,13 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                       .filter(Boolean)
                       .join(" / ")
                   : "-",
-                formatReferenceForTable(item.reference_id ?? item.condition?.reference_id, referencesById),
+                <ReferenceCitation
+                  fallback={formatReferenceForTable(
+                    item.reference_id ?? item.condition?.reference_id,
+                    referencesById
+                  )}
+                  reference={item.reference ?? referencesById[item.reference_id ?? item.condition?.reference_id ?? ""]}
+                />,
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Expression"

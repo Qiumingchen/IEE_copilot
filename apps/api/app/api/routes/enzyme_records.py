@@ -175,7 +175,7 @@ def _optional_literature_reference_response(
 
 def _references_by_id_for_records(
     db: Session,
-    records: list[PropertyRecord] | list[KineticRecord] | list[MutationRecord],
+    records: list[PropertyRecord] | list[KineticRecord] | list[MutationRecord] | list[ExpressionRecord],
 ) -> dict[str, LiteratureReference]:
     reference_ids = {record.reference_id for record in records if record.reference_id}
     if not reference_ids:
@@ -716,6 +716,7 @@ def _condition_response(condition: ExperimentCondition | None) -> ExperimentCond
 def _expression_response(
     expression: ExpressionRecord,
     condition: ExperimentCondition | None,
+    reference: LiteratureReference | None = None,
 ) -> ExpressionRecordResponse:
     return ExpressionRecordResponse(
         id=expression.id,
@@ -730,6 +731,7 @@ def _expression_response(
         condition_id=expression.condition_id,
         condition=_condition_response(condition),
         reference_id=expression.reference_id,
+        reference=_optional_literature_reference_response(reference),
         visibility=expression.visibility,
         curation_status=expression.curation_status,
     )
@@ -1401,8 +1403,13 @@ def list_expression(
             )
         )
     }
+    references_by_id = _references_by_id_for_records(db, expressions)
     return [
-        _expression_response(expression, conditions_by_id.get(expression.condition_id))
+        _expression_response(
+            expression,
+            conditions_by_id.get(expression.condition_id),
+            references_by_id.get(expression.reference_id or ""),
+        )
         for expression in expressions
     ]
 
@@ -1449,7 +1456,8 @@ def create_expression(
     db.refresh(expression)
     if condition is not None:
         db.refresh(condition)
-    return _expression_response(expression, condition)
+    reference = db.get(LiteratureReference, expression.reference_id) if expression.reference_id else None
+    return _expression_response(expression, condition, reference)
 
 
 def _preview_experiment_import(

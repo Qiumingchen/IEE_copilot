@@ -266,6 +266,7 @@ export type ExpressionRecord = {
   condition_id: string | null;
   condition: ExperimentCondition | null;
   reference_id: string | null;
+  reference: LiteratureReferenceRecord | null;
   visibility: string;
   curation_status: string;
 };
