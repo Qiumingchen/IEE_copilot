@@ -62,6 +62,13 @@ export type DistanceMatrixRowView = {
   distance_angstrom: string | number;
 };
 
+export type ResidueMappingRowView = {
+  sequence_position: string | number;
+  pdb_residue: string;
+  residue_name: string;
+  one_letter: string;
+};
+
 export type StructurePreviewAtomView = {
   kind: string;
   chain_id: string;
@@ -275,6 +282,18 @@ export function buildDistanceMatrixCsv(rows: DistanceMatrixRowView[]): string {
   ].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
 }
 
+export function buildResidueMappingCsv(rows: ResidueMappingRowView[]): string {
+  return [
+    ["sequence_position", "pdb_residue", "residue_name", "one_letter"],
+    ...rows.map((row) => [
+      String(row.sequence_position),
+      row.pdb_residue,
+      row.residue_name,
+      row.one_letter
+    ])
+  ].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
 export function getStructureReadiness(structure: StructureRecord): StructureReadinessView {
   const residueRows = getResidueRows(structure, null);
   if (residueRows.length === 0) {
@@ -350,7 +369,10 @@ export function getStructureWorkflowActions(
   ];
 }
 
-export function getResidueRows(structure: StructureRecord, selectedChainId: string | null) {
+export function getResidueRows(
+  structure: StructureRecord,
+  selectedChainId: string | null
+): ResidueMappingRowView[] {
   const chains = getRecordArray(structure.chain_summary, "chains");
   const selectedChain = chains.find((chain) => String(chain.chain_id) === selectedChainId) ?? chains[0];
   if (!selectedChain) {

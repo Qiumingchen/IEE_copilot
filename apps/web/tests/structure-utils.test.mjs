@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildDistanceMatrixCsv,
+  buildResidueMappingCsv,
   buildStructureWarnings,
   buildStructureDownloadFileName,
   getChainOptions,
@@ -388,6 +389,30 @@ test("builds ligand distance matrix CSV for export", () => {
     [
       "ligand,residue,sequence_position,distance_angstrom",
       "\"AQ1, quoted\",\"A\"\"2\",2,0.6"
+    ].join("\n")
+  );
+});
+
+test("builds residue mapping CSV for export", () => {
+  assert.equal(
+    buildResidueMappingCsv([
+      {
+        sequence_position: 1,
+        pdb_residue: "1",
+        residue_name: "MET",
+        one_letter: "M"
+      },
+      {
+        sequence_position: 2,
+        pdb_residue: "2A",
+        residue_name: "GLY, quoted",
+        one_letter: "G"
+      }
+    ]),
+    [
+      "sequence_position,pdb_residue,residue_name,one_letter",
+      "1,1,MET,M",
+      "2,2A,\"GLY, quoted\",G"
     ].join("\n")
   );
 });
