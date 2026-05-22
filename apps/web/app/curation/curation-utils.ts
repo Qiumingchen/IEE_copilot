@@ -41,6 +41,10 @@ export function buildCuratedEvidenceReviewLinks(enzymeId: string): { label: stri
   ];
 }
 
+export function formatPreviewWarnings(warnings: string[]): string[] {
+  return warnings.map((warning) => warning.trim()).filter(Boolean);
+}
+
 export function summarizeVisibilityRequest(request: VisibilityRequestDetailRecord): string {
   const experiment = request.experiment;
   const mutation = experiment.mutation_string || "WT";

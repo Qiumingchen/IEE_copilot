@@ -9,6 +9,7 @@ import {
   curatedEvidenceCsvUploadAccept,
   curatedEvidenceTemplateFileName,
   formatImportedReference,
+  formatPreviewWarnings,
   formatPreviewReference,
   isCuratedEvidenceCsvFileName,
   summarizeCuratedEvidenceFileLoad,
@@ -162,6 +163,13 @@ test("buildCuratedEvidenceReviewLinks points imported evidence back to enzyme vi
     { label: "Review mutations", href: "/enzymes/enzyme%2Fwith%20space/mutations" }
   ]);
   assert.deepEqual(buildCuratedEvidenceReviewLinks("   "), []);
+});
+
+test("formatPreviewWarnings removes empty curated evidence warnings", () => {
+  assert.deepEqual(
+    formatPreviewWarnings(["row 2: no reference identifier supplied", " ", "row 4: reference will be created"]),
+    ["row 2: no reference identifier supplied", "row 4: reference will be created"]
+  );
 });
 
 test("formatPreviewReference includes the reference match mode", () => {

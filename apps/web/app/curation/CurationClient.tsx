@@ -24,6 +24,7 @@ import {
   curatedEvidenceCsvTemplate,
   curatedEvidenceTemplateFileName,
   formatImportedReference,
+  formatPreviewWarnings,
   formatPreviewReference,
   isCuratedEvidenceCsvFileName,
   summarizeCuratedEvidenceFileLoad,
@@ -61,6 +62,7 @@ export default function CurationClient() {
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
   const [isReadingImportFile, setIsReadingImportFile] = useState(false);
   const reviewLinks = buildCuratedEvidenceReviewLinks(importEnzymeId);
+  const previewWarnings = importPreview ? formatPreviewWarnings(importPreview.warnings) : [];
 
   async function loadRequests(nextToken: string) {
     setError(null);
@@ -376,6 +378,18 @@ export default function CurationClient() {
 
         {importPreview ? (
           <div className="mt-5 border-t border-slate-200 pt-4">
+            {previewWarnings.length ? (
+              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <h4 className="text-sm font-semibold text-amber-900">Preview warnings</h4>
+                <ul className="mt-2 grid gap-2 text-sm text-amber-900">
+                  {previewWarnings.map((warning) => (
+                    <li className="break-words" key={warning}>
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-slate-950">Preview</h3>
