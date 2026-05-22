@@ -10,6 +10,7 @@ import type { EnzymeRecordBundle, StructureRecord } from "../../../../lib/types"
 import {
   buildDistanceMatrixCsv,
   buildResidueMappingCsv,
+  buildStructureReportJson,
   buildStructureWarnings,
   buildStructureDownloadFileName,
   getChainOptions,
@@ -183,6 +184,23 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
     URL.revokeObjectURL(url);
   }
 
+  function downloadStructureReportJson() {
+    if (!selectedStructure) {
+      return;
+    }
+    const blob = new Blob([
+      buildStructureReportJson(selectedStructure, enzymeId, {
+        selectedChainId: selectedChain?.chain_id ?? null
+      })
+    ], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `structure-report-${selectedStructure.id}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -290,6 +308,16 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
               <MetricCard label="Metals" value={stats.metal_count} />
               <MetricCard label="State" value={stats.complex_state} />
             </section>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+                onClick={downloadStructureReportJson}
+                type="button"
+              >
+                Structure report
+              </button>
+            </div>
 
             {provenance ? <ProvenancePanel provenance={provenance} /> : null}
             {readiness ? <ReadinessPanel readiness={readiness} /> : null}

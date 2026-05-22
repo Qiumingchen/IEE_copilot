@@ -294,6 +294,43 @@ export function buildResidueMappingCsv(rows: ResidueMappingRowView[]): string {
   ].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
 }
 
+export function buildStructureReportJson(
+  structure: StructureRecord,
+  enzymeId: string,
+  options: {
+    generatedAt?: string;
+    selectedChainId?: string | null;
+  } = {}
+): string {
+  return JSON.stringify(
+    {
+      enzyme_entry_id: enzymeId,
+      generated_at: options.generatedAt ?? new Date().toISOString(),
+      selected_chain_id: options.selectedChainId ?? null,
+      structure: {
+        id: structure.id,
+        structure_type: structure.structure_type,
+        complex_state: structure.complex_state,
+        pdb_id: structure.pdb_id,
+        source: structure.source,
+        artifact_id: structure.artifact_id,
+        artifact: structure.artifact
+      },
+      stats: getStructureStats(structure),
+      provenance: getStructureProvenanceView(structure),
+      quality_checks: getStructureQualityChecks(structure),
+      readiness: getStructureReadiness(structure),
+      warnings: buildStructureWarnings(structure),
+      ligands: getLigandViews(structure),
+      distance_matrix: getDistanceMatrixRows(structure),
+      residue_mapping: getResidueRows(structure, options.selectedChainId ?? null),
+      preview_atoms: getStructurePreviewAtoms(structure)
+    },
+    null,
+    2
+  );
+}
+
 export function getStructureReadiness(structure: StructureRecord): StructureReadinessView {
   const residueRows = getResidueRows(structure, null);
   if (residueRows.length === 0) {

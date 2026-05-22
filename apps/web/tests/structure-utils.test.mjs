@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildDistanceMatrixCsv,
   buildResidueMappingCsv,
+  buildStructureReportJson,
   buildStructureWarnings,
   buildStructureDownloadFileName,
   getChainOptions,
@@ -415,6 +416,31 @@ test("builds residue mapping CSV for export", () => {
       "2,2A,\"GLY, quoted\",G"
     ].join("\n")
   );
+});
+
+test("builds structure analysis report JSON for export", () => {
+  const payload = JSON.parse(buildStructureReportJson(
+    structure,
+    "enzyme-1",
+    {
+      generatedAt: "2026-05-22T08:00:00.000Z",
+      selectedChainId: "A"
+    }
+  ));
+
+  assert.equal(payload.enzyme_entry_id, "enzyme-1");
+  assert.equal(payload.structure.id, "structure-1");
+  assert.equal(payload.generated_at, "2026-05-22T08:00:00.000Z");
+  assert.equal(payload.selected_chain_id, "A");
+  assert.equal(payload.stats.ligand_count, 1);
+  assert.equal(payload.provenance.label, "alphafold_mock fallback");
+  assert.equal(payload.quality_checks.length, 4);
+  assert.equal(payload.readiness.status, "ready");
+  assert.equal(payload.warnings[0], "missing residue around A3");
+  assert.equal(payload.ligands[0].ligand_code, "AQ1");
+  assert.equal(payload.distance_matrix[0].distance_angstrom, "0.6");
+  assert.equal(payload.residue_mapping[0].one_letter, "M");
+  assert.equal(payload.preview_atoms[1].kind, "ligand");
 });
 
 test("summarizes structure readiness for ligand-aware analysis", () => {
