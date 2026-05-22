@@ -13,6 +13,7 @@ import type {
 } from "../../../../lib/types";
 import {
   buildMutationPositionSummary,
+  buildMutationDeltaSummary,
   buildMutationEvidenceCsv,
   filterMutationEvidenceRecords,
   formatMutationPositions,
@@ -89,6 +90,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
     return Array.from(sources).sort((left, right) => left.localeCompare(right));
   }, [mutationsWithFallbackReferences]);
   const positionSummary = useMemo(() => buildMutationPositionSummary(filteredMutations), [filteredMutations]);
+  const deltaSummary = useMemo(() => buildMutationDeltaSummary(filteredMutations), [filteredMutations]);
   const maxPositionCount = Math.max(1, ...positionSummary.map((item) => item.count));
 
   useEffect(() => {
@@ -322,6 +324,8 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
             )}
           </section>
 
+          <MutationDeltaSummaryPanel summary={deltaSummary} />
+
           <section className="rounded-md border border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -352,6 +356,55 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
         </div>
       </section>
     </main>
+  );
+}
+
+function MutationDeltaSummaryPanel({
+  summary
+}: {
+  summary: ReturnType<typeof buildMutationDeltaSummary>;
+}) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-4">
+        <h2 className="text-base font-semibold text-slate-950">Mutation effect summary</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Numeric property deltas grouped by reported effect direction.
+        </p>
+      </div>
+      {summary.length > 0 ? (
+        <div className="grid gap-4 p-4 xl:grid-cols-2">
+          {summary.map((item) => (
+            <article className="rounded-md border border-slate-200 p-4" key={item.property}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="break-words text-sm font-semibold text-slate-950">{item.property}</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.improved} improved · {item.worsened} worsened · {item.neutral} neutral
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-2">
+                {item.top_mutations.map((mutation) => (
+                  <div
+                    className="grid gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm sm:grid-cols-[8rem_5rem_1fr]"
+                    key={`${item.property}-${mutation.mutation_string}-${mutation.value}`}
+                  >
+                    <span className="font-mono font-semibold text-slate-950">{mutation.mutation_string}</span>
+                    <span className="font-medium text-slate-700">{mutation.value}</span>
+                    <span className="min-w-0 text-slate-600">{mutation.effect_summary ?? "-"}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="px-4 py-10 text-sm text-slate-500">
+          No numeric mutation effect deltas are available for the current filters.
+        </div>
+      )}
+    </section>
   );
 }
 

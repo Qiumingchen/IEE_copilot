@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildMutationPositionSummary,
+  buildMutationDeltaSummary,
   buildMutationEvidenceCsv,
   filterMutationEvidenceRecords,
   formatMutationEvidence,
@@ -35,6 +36,60 @@ test("buildMutationPositionSummary counts records per mutated site", () => {
     { position: 2, count: 2, mutations: ["S2P", "S2P/D3Y"] },
     { position: 3, count: 1, mutations: ["S2P/D3Y"] }
   ]);
+});
+
+test("buildMutationDeltaSummary groups numeric property deltas by effect direction", () => {
+  assert.deepEqual(
+    buildMutationDeltaSummary([
+      {
+        mutation_string: "S2P",
+        effect_summary: "Improved thermostability",
+        property_delta: {
+          optimal_temperature_delta_degC: 5,
+          specific_activity_fold_change: 1.2
+        }
+      },
+      {
+        mutation_string: "D3Y",
+        effect_summary: "Lower activity",
+        property_delta: {
+          optimal_temperature_delta_degC: -2,
+          specific_activity_fold_change: 0.8
+        }
+      },
+      {
+        mutation_string: "G4A",
+        effect_summary: null,
+        property_delta: {
+          optimal_temperature_delta_degC: 0,
+          note: "qualitative only"
+        }
+      }
+    ]),
+    [
+      {
+        property: "optimal_temperature_delta_degC",
+        improved: 1,
+        worsened: 1,
+        neutral: 1,
+        top_mutations: [
+          { mutation_string: "S2P", value: 5, effect_summary: "Improved thermostability" },
+          { mutation_string: "G4A", value: 0, effect_summary: null },
+          { mutation_string: "D3Y", value: -2, effect_summary: "Lower activity" }
+        ]
+      },
+      {
+        property: "specific_activity_fold_change",
+        improved: 1,
+        worsened: 1,
+        neutral: 0,
+        top_mutations: [
+          { mutation_string: "S2P", value: 1.2, effect_summary: "Improved thermostability" },
+          { mutation_string: "D3Y", value: 0.8, effect_summary: "Lower activity" }
+        ]
+      }
+    ]
+  );
 });
 
 test("formatPropertyDelta renders key value pairs", () => {

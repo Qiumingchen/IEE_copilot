@@ -7,6 +7,18 @@ export type MutationPositionSummary = {
   mutations: string[];
 };
 
+export type MutationDeltaSummaryItem = {
+  property: string;
+  improved: number;
+  worsened: number;
+  neutral: number;
+  top_mutations: Array<{
+    mutation_string: string;
+    value: number;
+    effect_summary: string | null;
+  }>;
+};
+
 export function buildMutationPositionSummary(
   records: Array<Pick<MutationRecord, "mutation_string" | "mutation_positions">>
 ): MutationPositionSummary[] {
@@ -29,6 +41,41 @@ export function buildMutationPositionSummary(
       mutations: Array.from(mutations).sort((left, right) => left.localeCompare(right))
     }))
     .sort((left, right) => left.position - right.position);
+}
+
+export function buildMutationDeltaSummary(
+  records: Array<Pick<MutationRecord, "mutation_string" | "effect_summary" | "property_delta">>
+): MutationDeltaSummaryItem[] {
+  const byProperty = new Map<
+    string,
+    Array<{ mutation_string: string; value: number; effect_summary: string | null }>
+  >();
+
+  for (const record of records) {
+    for (const [property, rawValue] of Object.entries(record.property_delta ?? {})) {
+      const value = numericValue(rawValue);
+      if (value === null) {
+        continue;
+      }
+      const rows = byProperty.get(property) ?? [];
+      rows.push({
+        mutation_string: record.mutation_string,
+        value,
+        effect_summary: record.effect_summary
+      });
+      byProperty.set(property, rows);
+    }
+  }
+
+  return Array.from(byProperty.entries())
+    .map(([property, rows]) => ({
+      property,
+      improved: rows.filter((row) => row.value > improvementBaseline(property)).length,
+      worsened: rows.filter((row) => row.value < improvementBaseline(property)).length,
+      neutral: rows.filter((row) => row.value === improvementBaseline(property)).length,
+      top_mutations: [...rows].sort((left, right) => right.value - left.value).slice(0, 5)
+    }))
+    .sort((left, right) => left.property.localeCompare(right.property));
 }
 
 export type MutationEvidenceFilters = {
@@ -142,4 +189,19 @@ export function formatMutationPositions(record: Pick<MutationRecord, "mutation_p
 function formatCsvCell(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function improvementBaseline(property: string): number {
+  return property.endsWith("_fold_change") ? 1 : 0;
 }
