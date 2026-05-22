@@ -324,6 +324,15 @@ test("builds structure download file names from artifact keys", () => {
     buildStructureDownloadFileName({ ...structure, artifact: { ...structure.artifact, object_key: "" } }),
     "structure-1.pdb"
   );
+  assert.equal(
+    buildStructureDownloadFileName({
+      ...structure,
+      id: "structure-cif",
+      structure_type: "uploaded_cif",
+      artifact: null
+    }),
+    "structure-cif.cif"
+  );
 });
 
 test("extracts structure preview atoms from parsed coordinate summaries", () => {

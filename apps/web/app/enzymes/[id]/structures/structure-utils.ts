@@ -104,7 +104,8 @@ export function summarizeStructureUploadResult(structure: StructureRecord): stri
 export function buildStructureDownloadFileName(structure: StructureRecord): string {
   const objectKey = structure.artifact?.object_key ?? "";
   const fileName = objectKey.split("/").filter(Boolean).at(-1);
-  return fileName || `${structure.id}.pdb`;
+  const extension = structure.structure_type === "uploaded_cif" ? "cif" : "pdb";
+  return fileName || `${structure.id}.${extension}`;
 }
 
 export function getStructurePreviewAtoms(structure: StructureRecord): StructurePreviewAtomView[] {
