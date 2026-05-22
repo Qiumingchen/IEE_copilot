@@ -38,6 +38,52 @@ export type PropertyEvidenceFilters = {
   referenceSource?: string;
 };
 
+export type PropertyDistributionBin = {
+  label: string;
+  count: number;
+};
+
+export type PropertyDistribution = {
+  count: number;
+  unit: string | null;
+  min: number | null;
+  median: number | null;
+  max: number | null;
+  bins: PropertyDistributionBin[];
+};
+
+export function buildPropertyDistribution(
+  records: Array<
+    Pick<
+      PropertyRecord,
+      "value_original" | "unit_original" | "value_standardized" | "unit_standardized"
+    >
+  >,
+  binCount = 4
+): PropertyDistribution {
+  const values = records
+    .map((record) => numericValue(record.value_standardized ?? record.value_original))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  const unit = records.find((record) => record.unit_standardized || record.unit_original);
+  const displayUnit = unit?.unit_standardized ?? unit?.unit_original ?? null;
+  if (values.length === 0) {
+    return { count: 0, unit: displayUnit, min: null, median: null, max: null, bins: [] };
+  }
+
+  const min = values[0];
+  const max = values[values.length - 1];
+  const median = medianValue(values);
+  return {
+    count: values.length,
+    unit: displayUnit,
+    min,
+    median,
+    max,
+    bins: buildBins(values, min, max, binCount)
+  };
+}
+
 export function filterPropertyEvidenceRecords<T extends {
   curation_status?: string | null;
   property_type?: string | null;
@@ -235,4 +281,49 @@ export function formatReferenceLabel(reference: LiteratureReferenceRecord): stri
 function formatCsvCell(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function medianValue(values: number[]): number {
+  const middle = Math.floor(values.length / 2);
+  if (values.length % 2 === 1) {
+    return values[middle];
+  }
+  return roundForDisplay((values[middle - 1] + values[middle]) / 2);
+}
+
+function buildBins(values: number[], min: number, max: number, binCount: number): PropertyDistributionBin[] {
+  const safeBinCount = Math.max(1, binCount);
+  if (min === max) {
+    return [{ label: formatNumber(min), count: values.length }];
+  }
+  const width = (max - min) / safeBinCount;
+  return Array.from({ length: safeBinCount }, (_, index) => {
+    const start = min + width * index;
+    const end = index === safeBinCount - 1 ? max : min + width * (index + 1);
+    return {
+      label: `${formatNumber(start)}-${formatNumber(end)}`,
+      count: values.filter((value) =>
+        index === safeBinCount - 1 ? value >= start && value <= end : value >= start && value < end
+      ).length
+    };
+  });
+}
+
+function roundForDisplay(value: number): number {
+  return Number(value.toFixed(1));
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(roundForDisplay(value));
 }

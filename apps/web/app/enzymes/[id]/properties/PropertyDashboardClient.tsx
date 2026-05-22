@@ -19,6 +19,7 @@ import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
   buildPropertyRankingCsv,
+  buildPropertyDistribution,
   filterPropertyEvidenceRecords,
   formatAssayContext,
   formatRankingValue,
@@ -160,6 +161,10 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
       selectedPropertyType
     ]
   );
+  const propertyDistribution = useMemo(
+    () => buildPropertyDistribution(currentPropertyRecords),
+    [currentPropertyRecords]
+  );
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
@@ -286,6 +291,8 @@ export default function PropertyDashboardClient({ enzymeId }: PropertyDashboardC
           )}
         </section>
       </section>
+
+      <PropertyDistributionPanel distribution={propertyDistribution} propertyType={selectedPropertyType} />
 
       <section className="mt-6 grid gap-4 xl:grid-cols-2">
         <section className="min-w-0 rounded-md border border-slate-200 bg-white">
@@ -453,6 +460,73 @@ function downloadCsv(fileName: string, csvText: string) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function PropertyDistributionPanel({
+  distribution,
+  propertyType
+}: {
+  distribution: ReturnType<typeof buildPropertyDistribution>;
+  propertyType: string;
+}) {
+  const maxBinCount = Math.max(...distribution.bins.map((bin) => bin.count), 1);
+  return (
+    <section className="mt-6 rounded-md border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-4">
+        <h2 className="text-base font-semibold text-slate-950">{propertyType} distribution</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Numeric local evidence summarized from standardized values when available.
+        </p>
+      </div>
+      {distribution.count > 0 ? (
+        <div className="grid gap-4 p-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          <dl className="grid grid-cols-2 gap-3 text-sm">
+            <DistributionMetric label="Count" value={distribution.count} />
+            <DistributionMetric label="Unit" value={distribution.unit ?? "-"} />
+            <DistributionMetric label="Min" value={formatDistributionValue(distribution.min, distribution.unit)} />
+            <DistributionMetric label="Median" value={formatDistributionValue(distribution.median, distribution.unit)} />
+            <DistributionMetric label="Max" value={formatDistributionValue(distribution.max, distribution.unit)} />
+          </dl>
+          <div className="grid content-start gap-3">
+            {distribution.bins.map((bin) => (
+              <div className="grid gap-1" key={bin.label}>
+                <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                  <span>{bin.label}</span>
+                  <span>{bin.count}</span>
+                </div>
+                <div className="h-3 overflow-hidden rounded bg-slate-100">
+                  <div
+                    className="h-full rounded bg-cyan-600"
+                    style={{ width: `${Math.max(4, (bin.count / maxBinCount) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="px-4 py-6 text-sm text-slate-500">
+          No numeric local evidence is available for this property yet.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DistributionMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <dt className="text-xs font-medium uppercase text-slate-500">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</dd>
+    </div>
+  );
+}
+
+function formatDistributionValue(value: number | null, unit: string | null): string {
+  if (value === null) {
+    return "-";
+  }
+  return `${value}${unit ? ` ${unit}` : ""}`;
 }
 
 function ReportedRanking({ ranking }: { ranking: PropertyRankingResponse | null }) {

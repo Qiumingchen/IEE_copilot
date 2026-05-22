@@ -5,6 +5,7 @@ import {
   buildPropertyOptions,
   buildPropertyEvidenceCsv,
   buildPropertyRankingCsv,
+  buildPropertyDistribution,
   filterPropertyEvidenceRecords,
   formatKineticEvidence,
   formatPropertyEvidence,
@@ -25,6 +26,44 @@ test("buildPropertyOptions keeps common properties first and appends observed pr
     "specific_activity"
   ]);
   assert.equal(options.includes("product_selectivity"), true);
+});
+
+test("buildPropertyDistribution summarizes numeric values for charts", () => {
+  assert.deepEqual(
+    buildPropertyDistribution([
+      {
+        value_original: "328.15",
+        unit_original: "K",
+        value_standardized: "55",
+        unit_standardized: "degC"
+      },
+      {
+        value_original: "60",
+        unit_original: "degC",
+        value_standardized: "60",
+        unit_standardized: "degC"
+      },
+      {
+        value_original: "about 70",
+        unit_original: "degC",
+        value_standardized: null,
+        unit_standardized: null
+      }
+    ]),
+    {
+      count: 2,
+      unit: "degC",
+      min: 55,
+      median: 57.5,
+      max: 60,
+      bins: [
+        { label: "55-56.3", count: 1 },
+        { label: "56.3-57.5", count: 0 },
+        { label: "57.5-58.8", count: 0 },
+        { label: "58.8-60", count: 1 }
+      ]
+    }
+  );
 });
 
 test("formatRankingValue prefers standardized values while preserving reported values", () => {
