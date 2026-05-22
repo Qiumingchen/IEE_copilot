@@ -12,6 +12,7 @@ export type EnzymeSummary = {
 
 export type SearchResponse = {
   enzyme: EnzymeSummary;
+  matches: EnzymeSummary[];
   job_id: string;
   cache_status: string;
   query_kind: string;

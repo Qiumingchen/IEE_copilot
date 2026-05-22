@@ -15,6 +15,7 @@ export function buildEnzymeNavigation(enzymeId: string): NavigationItem[] {
   const encodedId = encodeURIComponent(enzymeId);
   return [
     { label: "Overview", href: `/enzymes/${encodedId}` },
+    { label: "User uploads", href: `/enzymes/${encodedId}/upload` },
     { label: "Structures", href: `/enzymes/${encodedId}/structures` },
     { label: "Properties", href: `/enzymes/${encodedId}/properties` },
     { label: "Mutations", href: `/enzymes/${encodedId}/mutations` },

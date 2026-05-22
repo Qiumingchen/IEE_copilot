@@ -584,6 +584,56 @@ def _upsert_search_cache(
     record.updated_at = now
 
 
+def _search_result_matches(
+    db: Session,
+    *,
+    primary_enzyme: EnzymeEntry,
+    query: str,
+    limit: int = 12,
+) -> list[EnzymeEntry]:
+    query_terms = [term for term in query.lower().replace("_", " ").split() if term]
+    candidates = list(
+        db.scalars(
+            select(EnzymeEntry)
+            .where(EnzymeEntry.family_id == primary_enzyme.family_id)
+            .order_by(EnzymeEntry.updated_at.desc(), EnzymeEntry.created_at.desc())
+            .limit(100)
+        )
+    )
+
+    def score(candidate: EnzymeEntry) -> tuple[int, int]:
+        if candidate.id == primary_enzyme.id:
+            return (10_000, 0)
+        haystack = " ".join(
+            [
+                candidate.name or "",
+                candidate.organism or "",
+                candidate.ec_number or "",
+                candidate.uniprot_id or "",
+                candidate.pdb_id or "",
+                candidate.source or "",
+            ]
+        ).lower()
+        term_score = sum(1 for term in query_terms if term in haystack)
+        exact_score = 5 if query.lower() in haystack else 0
+        return (exact_score + term_score, 1)
+
+    ranked = sorted(candidates, key=score, reverse=True)
+    matches: list[EnzymeEntry] = []
+    seen: set[str] = set()
+    for candidate in [primary_enzyme, *ranked]:
+        if candidate.id in seen:
+            continue
+        candidate_score, _ = score(candidate)
+        if candidate.id != primary_enzyme.id and candidate_score <= 0:
+            continue
+        matches.append(candidate)
+        seen.add(candidate.id)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
 @router.post("/search", response_model=EnzymeSearchResponse)
 def search_enzymes(
     request: EnzymeSearchRequest,
@@ -762,9 +812,11 @@ def search_enzymes(
     db.refresh(enzyme)
     db.refresh(job)
     run_placeholder_analysis.delay(job.id)
+    matches = _search_result_matches(db, primary_enzyme=enzyme, query=request.query)
 
     return EnzymeSearchResponse(
         enzyme=enzyme,
+        matches=matches,
         job_id=job.id,
         cache_status=cache_status,
         query_kind=resolved.kind.value,

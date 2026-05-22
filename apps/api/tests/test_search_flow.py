@@ -229,6 +229,74 @@ def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
     assert enqueued_job_ids == [body["job_id"]]
 
 
+def test_enzyme_search_returns_clickable_source_matches(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    db_session.add_all(
+        [
+            EnzymeEntry(
+                family_id=family.id,
+                name="Microbial transglutaminase A",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                uniprot_id="P81453",
+                source="uniprot",
+                last_refreshed_at=datetime.utcnow(),
+            ),
+            EnzymeEntry(
+                family_id=family.id,
+                name="Microbial transglutaminase B",
+                organism="Streptomyces lydicus",
+                ec_number="2.3.2.13",
+                uniprot_id="Q00001",
+                source="curated_literature",
+                last_refreshed_at=datetime.utcnow(),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "match-list-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Match List Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "match-list-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    matches = response.json()["matches"]
+    assert len(matches) >= 2
+    assert matches[0]["id"] == response.json()["enzyme"]["id"]
+    assert {match["source"] for match in matches} >= {"uniprot", "curated_literature"}
+
+
 def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch):
     enqueued_job_ids = []
 

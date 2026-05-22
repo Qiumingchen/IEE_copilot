@@ -32,6 +32,7 @@ test("enzyme navigation links detail, structures, properties, mutations, analysi
     buildEnzymeNavigation("enzyme-123").map((item) => [item.label, item.href]),
     [
       ["Overview", "/enzymes/enzyme-123"],
+      ["User uploads", "/enzymes/enzyme-123/upload"],
       ["Structures", "/enzymes/enzyme-123/structures"],
       ["Properties", "/enzymes/enzyme-123/properties"],
       ["Mutations", "/enzymes/enzyme-123/mutations"],

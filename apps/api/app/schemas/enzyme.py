@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import EnzymeModule
 
@@ -24,6 +24,7 @@ class EnzymeSummary(BaseModel):
 
 class EnzymeSearchResponse(BaseModel):
     enzyme: EnzymeSummary
+    matches: list[EnzymeSummary] = Field(default_factory=list)
     job_id: str
     cache_status: str
     query_kind: str

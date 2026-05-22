@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { formatSearchMatchSubtitle, searchResultMatches } from "../app/search/search-utils.ts";
+
+const enzyme = {
+  id: "enzyme-1",
+  family_id: "family-1",
+  name: "Microbial transglutaminase",
+  organism: "Streptomyces mobaraensis",
+  ec_number: "2.3.2.13",
+  uniprot_id: "P81453",
+  pdb_id: null,
+  alphafold_id: null,
+  source: "uniprot"
+};
+
+test("searchResultMatches falls back to the primary enzyme and deduplicates matches", () => {
+  assert.deepEqual(searchResultMatches({ enzyme, matches: [], job_id: "job-1", cache_status: "hit", query_kind: "keyword", module: "MICROBIAL_TRANSGLUTAMINASE_MATURE" }), [enzyme]);
+
+  assert.deepEqual(
+    searchResultMatches({
+      enzyme,
+      matches: [enzyme, enzyme, { ...enzyme, id: "enzyme-2", source: "curated_literature" }],
+      job_id: "job-1",
+      cache_status: "hit",
+      query_kind: "keyword",
+      module: "MICROBIAL_TRANSGLUTAMINASE_MATURE"
+    }).map((match) => match.id),
+    ["enzyme-1", "enzyme-2"]
+  );
+});
+
+test("formatSearchMatchSubtitle combines organism identifiers and source details", () => {
+  assert.equal(
+    formatSearchMatchSubtitle(enzyme),
+    "Streptomyces mobaraensis · EC 2.3.2.13 · P81453"
+  );
+  assert.equal(
+    formatSearchMatchSubtitle({ ...enzyme, organism: null, ec_number: null, uniprot_id: null }),
+    "Source details not reported"
+  );
+});
