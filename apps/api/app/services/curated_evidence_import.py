@@ -358,6 +358,7 @@ def _create_kinetic(
             assay_pH=_value(row, "assay_pH") or None,
             method=_value(row, "method") or None,
             reference_id=reference.id if reference else None,
+            evidence_text=_value(row, "evidence_text") or None,
             visibility=Visibility.PUBLIC,
             curation_status=CurationStatus.APPROVED,
         )

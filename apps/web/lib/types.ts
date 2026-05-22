@@ -225,6 +225,7 @@ export type KineticRecord = {
   method: string | null;
   reference_id: string | null;
   reference: LiteratureReferenceRecord | null;
+  evidence_text: string | null;
   visibility: string;
   curation_status: string;
 };

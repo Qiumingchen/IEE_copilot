@@ -322,6 +322,7 @@ class KineticRecord(Base):
     assay_pH: Mapped[str | None] = mapped_column(String(80))
     method: Mapped[str | None] = mapped_column(Text)
     reference_id: Mapped[str | None] = mapped_column(ForeignKey("literature_reference.id"))
+    evidence_text: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[Visibility] = mapped_column(Enum(Visibility), default=Visibility.PUBLIC)
     curation_status: Mapped[CurationStatus] = mapped_column(
         Enum(CurationStatus), default=CurationStatus.UNREVIEWED

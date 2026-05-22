@@ -1371,6 +1371,7 @@ def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, mo
     assert kinetics[0].substrate == "CBZ-Gln-Gly"
     assert kinetics[0].km == "2.1"
     assert kinetics[0].kcat == "31.0"
+    assert kinetics[0].evidence_text == "Mock SABIO-RK-style kinetic parameter record"
     assert len(mutations) == 1
     assert mutations[0].mutation_string == "S2P"
     assert mutations[0].property_delta == {"optimal_temperature_delta_degC": 5}

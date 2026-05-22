@@ -393,7 +393,8 @@ def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
                 unit_original=parameter.unit_original,
                 assay_temperature=parameter.assay_temperature,
                 assay_pH=parameter.assay_pH,
-                method=f"{parameter.source}: {parameter.evidence}" if parameter.evidence else parameter.source,
+                method=parameter.source,
+                evidence_text=parameter.evidence,
             )
         )
 

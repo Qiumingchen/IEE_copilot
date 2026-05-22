@@ -815,6 +815,7 @@ def _kinetic_response(
         assay_pH=record.assay_pH,
         method=record.method,
         reference_id=record.reference_id,
+        evidence_text=record.evidence_text,
         visibility=record.visibility,
         curation_status=record.curation_status,
         reference=_optional_literature_reference_response(reference),

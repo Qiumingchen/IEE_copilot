@@ -961,7 +961,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
               title="Properties"
             />
             <RecordTable
-              columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay", "Reference", "Status"]}
+              columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay", "Reference", "Evidence", "Status"]}
               rows={bundle.kinetics.map((item) => [
                 textOrDash(item.substrate),
                 textOrDash(item.km),
@@ -972,6 +972,7 @@ export default function EnzymeDetailClient({ enzymeId }: EnzymeDetailClientProps
                   fallback={formatReferenceForTable(item.reference_id, referencesById)}
                   reference={item.reference ?? referencesById[item.reference_id ?? ""]}
                 />,
+                textOrDash(item.evidence_text),
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
               title="Kinetics"

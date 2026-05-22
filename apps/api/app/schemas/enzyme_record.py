@@ -210,6 +210,7 @@ class KineticRecordCreate(BaseModel):
     assay_pH: str | None = None
     method: str | None = None
     reference_id: str | None = None
+    evidence_text: str | None = None
     visibility: Visibility = Visibility.PUBLIC
     curation_status: CurationStatus = CurationStatus.UNREVIEWED
 

@@ -117,6 +117,11 @@ def test_curator_can_import_curated_property_kinetic_and_mutation_evidence(
     kinetic = db_session.scalar(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme_id))
     assert kinetic.reference_id == reference.id
     assert kinetic.substrate == "CBZ-Gln-Gly"
+    assert kinetic.evidence_text == "Km 2.1 mM and kcat 31 s-1"
+
+    list_kinetics_response = client.get(f"/enzymes/{enzyme_id}/kinetics", headers=headers)
+    assert list_kinetics_response.status_code == 200
+    assert list_kinetics_response.json()[0]["evidence_text"] == "Km 2.1 mM and kcat 31 s-1"
 
     mutation = db_session.scalar(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme_id))
     assert mutation.mutation_string == "S2P"
