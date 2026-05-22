@@ -46,11 +46,17 @@ def build_property_ranking(
     property_type: str,
     ranking_mode: str = "reported_value",
 ) -> PropertyRankingResult:
+    matching_records = [record for record in records if record.property_type == property_type]
     rankable_records = [
-        record for record in records if record.property_type == property_type and _ranking_value(record) is not None
+        record for record in matching_records if _ranking_value(record) is not None
     ]
     if ranking_mode == "condition_grouped":
-        return _build_condition_grouped_ranking(rankable_records, enzymes_by_id, property_type)
+        return _build_condition_grouped_ranking(
+            rankable_records,
+            enzymes_by_id,
+            property_type,
+            _data_quality_warnings(property_type, matching_records, rankable_records),
+        )
     return PropertyRankingResult(
         property_type=property_type,
         ranking_mode="reported_value",
@@ -59,6 +65,7 @@ def build_property_ranking(
         comparison_warnings=[
             "reported_value_ranking preserves original assay conditions",
             "cross-condition comparisons should be interpreted cautiously",
+            *_data_quality_warnings(property_type, matching_records, rankable_records),
         ],
     )
 
@@ -67,6 +74,7 @@ def _build_condition_grouped_ranking(
     records: list[PropertyRecord],
     enzymes_by_id: dict[str, EnzymeEntry],
     property_type: str,
+    data_quality_warnings: list[str],
 ) -> PropertyRankingResult:
     grouped: dict[tuple[Any, ...], list[PropertyRecord]] = defaultdict(list)
     for record in records:
@@ -84,7 +92,10 @@ def _build_condition_grouped_ranking(
         ranking_mode="condition_grouped",
         items=[],
         groups=groups,
-        comparison_warnings=["condition_grouped ranking does not compare records across groups"],
+        comparison_warnings=[
+            "condition_grouped ranking does not compare records across groups",
+            *data_quality_warnings,
+        ],
     )
 
 
@@ -127,6 +138,32 @@ def _ranking_value(record: PropertyRecord) -> Decimal | None:
         return Decimal(raw_value)
     except (InvalidOperation, TypeError):
         return None
+
+
+def _data_quality_warnings(
+    property_type: str,
+    matching_records: list[PropertyRecord],
+    rankable_records: list[PropertyRecord],
+) -> list[str]:
+    warnings: list[str] = []
+    excluded_count = len(matching_records) - len(rankable_records)
+    if excluded_count:
+        warnings.append(
+            f"{excluded_count} {property_type} {_plural(excluded_count, 'record was', 'records were')} excluded because "
+            f"{_plural(excluded_count, 'its value is', 'their values are')} not numeric"
+        )
+
+    original_value_count = sum(1 for record in rankable_records if not record.value_standardized)
+    if original_value_count:
+        warnings.append(
+            f"{original_value_count} ranked {_plural(original_value_count, 'record uses', 'records use')} original "
+            "reported values because standardization is unavailable"
+        )
+    return warnings
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
 
 
 def _condition_tuple(record: PropertyRecord) -> tuple[Any, ...]:

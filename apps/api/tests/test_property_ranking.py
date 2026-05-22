@@ -123,6 +123,47 @@ def test_property_ranking_groups_same_conditions(client, db_session):
     assert body["comparison_warnings"] == ["condition_grouped ranking does not compare records across groups"]
 
 
+def test_property_ranking_warns_about_unranked_and_unstandardized_records(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_a = _enzyme_id(db_session, "UGT A")
+    enzyme_b = _enzyme_id(db_session, "UGT B")
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme_a,
+                property_type="specific_activity",
+                value_original="120",
+                unit_original="U/mg",
+                value_standardized=None,
+                unit_standardized=None,
+                standardization_status="failed",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=enzyme_b,
+                property_type="specific_activity",
+                value_original="about 80",
+                unit_original="U/mg",
+                value_standardized=None,
+                unit_standardized=None,
+                standardization_status="failed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        f"/enzymes/{enzyme_a}/property-rankings?property_type=specific_activity",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["value_original"] == "120"
+    assert "1 specific_activity record was excluded because its value is not numeric" in body["comparison_warnings"]
+    assert "1 ranked record uses original reported values because standardization is unavailable" in body["comparison_warnings"]
+
+
 def test_create_property_auto_standardizes_convertible_units(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session, "UGT A")
