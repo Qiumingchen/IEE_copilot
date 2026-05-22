@@ -263,6 +263,18 @@ export function getDistanceMatrixRows(structure: StructureRecord): DistanceMatri
   });
 }
 
+export function buildDistanceMatrixCsv(rows: DistanceMatrixRowView[]): string {
+  return [
+    ["ligand", "residue", "sequence_position", "distance_angstrom"],
+    ...rows.map((row) => [
+      String(row.ligand),
+      String(row.residue),
+      String(row.sequence_position),
+      String(row.distance_angstrom)
+    ])
+  ].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
 export function getStructureReadiness(structure: StructureRecord): StructureReadinessView {
   const residueRows = getResidueRows(structure, null);
   if (residueRows.length === 0) {
@@ -400,6 +412,13 @@ function numberValue(value: unknown): number {
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function escapeCsvCell(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+  return value;
 }
 
 function pluralize(value: string | number, label: string): string {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildDistanceMatrixCsv,
   buildStructureWarnings,
   buildStructureDownloadFileName,
   getChainOptions,
@@ -364,6 +365,31 @@ test("builds distance matrix rows for ligand contact review", () => {
       distance_angstrom: "5.0"
     }
   ]);
+});
+
+test("builds ligand distance matrix CSV for export", () => {
+  assert.equal(
+    buildDistanceMatrixCsv(getDistanceMatrixRows(structure)),
+    [
+      "ligand,residue,sequence_position,distance_angstrom",
+      "AQ1 B501,A2,2,0.6",
+      "AQ1 B501,A1,1,5.0"
+    ].join("\n")
+  );
+  assert.equal(
+    buildDistanceMatrixCsv([
+      {
+        ligand: "AQ1, quoted",
+        residue: "A\"2",
+        sequence_position: 2,
+        distance_angstrom: "0.6"
+      }
+    ]),
+    [
+      "ligand,residue,sequence_position,distance_angstrom",
+      "\"AQ1, quoted\",\"A\"\"2\",2,0.6"
+    ].join("\n")
+  );
 });
 
 test("summarizes structure readiness for ligand-aware analysis", () => {

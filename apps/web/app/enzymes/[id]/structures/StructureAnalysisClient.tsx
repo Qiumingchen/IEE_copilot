@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadStructureFile, getEnzymeRecordBundle, uploadStructureFile } from "../../../../lib/api";
 import type { EnzymeRecordBundle, StructureRecord } from "../../../../lib/types";
 import {
+  buildDistanceMatrixCsv,
   buildStructureWarnings,
   buildStructureDownloadFileName,
   getChainOptions,
@@ -153,6 +154,19 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
     } finally {
       setDownloadingStructureId(null);
     }
+  }
+
+  function downloadDistanceMatrixCsv() {
+    if (!selectedStructure || distanceMatrixRows.length === 0) {
+      return;
+    }
+    const blob = new Blob([buildDistanceMatrixCsv(distanceMatrixRows)], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ligand-distance-matrix-${selectedStructure.id}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -331,7 +345,7 @@ export default function StructureAnalysisClient({ enzymeId }: StructureAnalysisC
             ) : null}
 
             <LigandTable ligands={ligandViews} />
-            <DistanceMatrixTable rows={distanceMatrixRows} />
+            <DistanceMatrixTable onDownloadCsv={downloadDistanceMatrixCsv} rows={distanceMatrixRows} />
             <ResidueMappingTable rows={residueRows} />
           </div>
         ) : (
@@ -601,14 +615,30 @@ function LigandTable({ ligands }: { ligands: ReturnType<typeof getLigandViews> }
   );
 }
 
-function DistanceMatrixTable({ rows }: { rows: ReturnType<typeof getDistanceMatrixRows> }) {
+function DistanceMatrixTable({
+  onDownloadCsv,
+  rows
+}: {
+  onDownloadCsv: () => void;
+  rows: ReturnType<typeof getDistanceMatrixRows>;
+}) {
   return (
     <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 px-4 py-3">
-        <h2 className="text-base font-semibold text-slate-950">Ligand distance matrix</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Minimum atom distance between each detected ligand and mapped protein residues.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950">Ligand distance matrix</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Minimum atom distance between each detected ligand and mapped protein residues.
+          </p>
+        </div>
+        <button
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+          disabled={rows.length === 0}
+          onClick={onDownloadCsv}
+          type="button"
+        >
+          CSV
+        </button>
       </div>
       <div className="max-h-80 overflow-auto">
         <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
