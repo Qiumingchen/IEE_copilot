@@ -574,6 +574,15 @@ def _analysis_job_parameters(
             validate_mutations_against_sequence(mutations, sequence)
         except MutationParseError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        structure_id = parameters.get("structure_id")
+        if isinstance(structure_id, str) and structure_id.strip():
+            structure = db.get(StructureEntry, structure_id.strip())
+            if structure is None or structure.enzyme_entry_id != enzyme_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="structure_id does not belong to this enzyme",
+                )
+            parameters["structure_id"] = structure.id
         parameters["mutation_string"] = normalize_mutation_string(mutations)
         parameters["parsed_mutations"] = [mutation.model_dump() for mutation in mutations]
     if job_type == "library_design":

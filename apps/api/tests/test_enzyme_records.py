@@ -1169,6 +1169,12 @@ def test_create_mutation_recommendation_job_uses_selected_conservation_artifact(
 def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="apo",
+        source="test",
+    )
     db_session.add(
         ProteinSequence(
             enzyme_entry_id=enzyme_id,
@@ -1178,6 +1184,7 @@ def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, 
             checksum="rosetta-ddg-sequence",
         )
     )
+    db_session.add(structure)
     db_session.commit()
     enqueued_job_ids = []
 
@@ -1199,7 +1206,7 @@ def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, 
             "job_type": "rosetta_ddg",
             "parameters_json": {
                 "mutation_string": "L10A",
-                "structure_id": "structure-1",
+                "structure_id": structure.id,
             },
         },
     )
@@ -1208,9 +1215,68 @@ def test_create_rosetta_ddg_job_accepts_mutation_parameters(client, db_session, 
     body = response.json()
     assert body["job_type"] == "rosetta_ddg"
     assert body["parameters_json"]["mutation_string"] == "L10A"
-    assert body["parameters_json"]["structure_id"] == "structure-1"
+    assert body["parameters_json"]["structure_id"] == structure.id
     assert body["parameters_json"]["requested_from"] == "enzyme_analysis_page"
     assert enqueued_job_ids == [body["id"]]
+
+
+def test_create_rosetta_ddg_job_rejects_structure_from_other_enzyme(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    family_id = db_session.get(EnzymeEntry, enzyme_id).family_id
+    other_enzyme = EnzymeEntry(
+        family_id=family_id,
+        name="Other UGT example",
+        organism="Other Streptomyces sp.",
+        source="test",
+    )
+    db_session.add(other_enzyme)
+    db_session.flush()
+    foreign_structure = StructureEntry(
+        enzyme_entry_id=other_enzyme.id,
+        structure_type="uploaded_pdb",
+        complex_state="apo",
+        source="test",
+    )
+    db_session.add_all(
+        [
+            ProteinSequence(
+                enzyme_entry_id=enzyme_id,
+                sequence="ACDEFGHIKL",
+                mature_sequence="ACDEFGHIKL",
+                source="test",
+                checksum="rosetta-ddg-foreign-structure-sequence",
+            ),
+            foreign_structure,
+        ]
+    )
+    db_session.commit()
+
+    class RosettaTask:
+        @staticmethod
+        def delay(job_id):
+            raise AssertionError(f"invalid structure should not enqueue job {job_id}")
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.run_rosetta_ddg",
+        RosettaTask,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/analysis-jobs",
+        headers=headers,
+        json={
+            "job_type": "rosetta_ddg",
+            "parameters_json": {
+                "mutation_string": "L10A",
+                "structure_id": foreign_structure.id,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "structure_id does not belong to this enzyme" in response.json()["error"]["message"]
 
 
 def test_create_rosetta_ddg_job_rejects_wildtype_mismatch(client, db_session, monkeypatch):
