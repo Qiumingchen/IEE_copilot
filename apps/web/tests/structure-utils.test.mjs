@@ -328,25 +328,29 @@ test("builds structure workflow actions for reserved and available analyses", ()
       label: "Rosetta ddG",
       status: "ready",
       description: "Use this parsed structure as the structural context for mutation stability scoring.",
-      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1"
+      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1&focus=rosetta_ddg",
+      cta_label: "Open Rosetta ddG"
     },
     {
       label: "Ligand-aware recommendations",
       status: "ready",
       description: "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites.",
-      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1"
+      href: "/enzymes/enzyme-1/analysis?structure_id=structure-1&focus=mutation_recommendation",
+      cta_label: "Open recommendations"
     },
     {
       label: "MD simulation",
       status: "reserved",
       description: "Workflow slot is reserved; automated MD execution will be added later.",
-      href: null
+      href: null,
+      cta_label: null
     },
     {
       label: "MMPBSA",
       status: "reserved",
       description: "Complex structure detected; binding-energy workflow slot is reserved for later implementation.",
-      href: null
+      href: null,
+      cta_label: null
     }
   ]);
 });

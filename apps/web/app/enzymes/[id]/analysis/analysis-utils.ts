@@ -52,6 +52,8 @@ export type MutationRecommendationInputMode = "latest" | "artifact";
 
 export type MutationLibraryInputMode = "latest" | "artifact";
 
+export type AnalysisFocus = "mutation_recommendation" | "rosetta_ddg";
+
 export type HomologArtifactOption = {
   id: string;
   label: string;
@@ -183,6 +185,10 @@ export function buildLibraryDesignParameters(
     parameters.recommendation_artifact_id = recommendationArtifactId.trim();
   }
   return parameters;
+}
+
+export function normalizeAnalysisFocus(value: unknown): AnalysisFocus | null {
+  return value === "mutation_recommendation" || value === "rosetta_ddg" ? value : null;
 }
 
 export function buildMsaJobParameters(

@@ -62,7 +62,8 @@ import type {
   MutationLibraryView,
   MutationRecommendationCandidateView,
   ScoredMutationSuggestionView,
-  RosettaDdgRunView
+  RosettaDdgRunView,
+  AnalysisFocus
 } from "./analysis-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -74,6 +75,7 @@ const homologSearchModeOptions = [
 
 type AnalysisClientProps = {
   enzymeId: string;
+  initialFocus?: AnalysisFocus | null;
   initialStructureId?: string;
 };
 
@@ -114,7 +116,7 @@ const analysisModules = [
   actionLabel: string;
 }>;
 
-export default function AnalysisClient({ enzymeId, initialStructureId = "" }: AnalysisClientProps) {
+export default function AnalysisClient({ enzymeId, initialFocus = null, initialStructureId = "" }: AnalysisClientProps) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<AnalysisArtifactRecord[]>([]);
@@ -555,6 +557,7 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
   const conservationArtifactOptions = getConservationArtifactOptions(artifacts);
   const recommendationArtifactOptions = getRecommendationArtifactOptions(artifacts);
   const structureContext = getStructureContextOptions(structures, selectedStructureId);
+  const hasStructureWorkflowFocus = Boolean(initialFocus && structureContext.selectedStructureId);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -586,6 +589,13 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
           {notice}
         </p>
       ) : null}
+      {hasStructureWorkflowFocus ? (
+        <p className="mt-4 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          Structure workflow selected {structureContext.selectedStructureId}. Use the highlighted module below to run {
+            initialFocus === "rosetta_ddg" ? "Rosetta ddG from scored mutations" : "structure-aware hotspot recommendations"
+          }.
+        </p>
+      ) : null}
 
       {isLoading ? <p className="mt-6 text-sm text-slate-600">Loading analysis artifacts...</p> : null}
 
@@ -608,8 +618,13 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
             item.jobType === "mutation_recommendation" &&
             recommendationInputMode === "artifact" &&
             conservationArtifactOptions.length === 0;
+          const isFocusedModule =
+            initialFocus === "mutation_recommendation" && item.jobType === "mutation_recommendation";
+          const cardClassName = isFocusedModule
+            ? "rounded-md border border-sky-300 bg-sky-50 p-4"
+            : "rounded-md border border-slate-200 bg-white p-4";
           return (
-            <article className="rounded-md border border-slate-200 bg-white p-4" key={item.artifactType}>
+            <article className={cardClassName} key={item.artifactType}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-base font-semibold text-slate-950">{item.title}</h2>
@@ -894,7 +909,11 @@ export default function AnalysisClient({ enzymeId, initialStructureId = "" }: An
 
       {selectedContent ? <ArtifactContentPanel content={selectedContent} /> : null}
 
-      <section className="mt-8 overflow-hidden rounded-md border border-slate-200 bg-white">
+      <section
+        className={`mt-8 overflow-hidden rounded-md border bg-white ${
+          initialFocus === "rosetta_ddg" ? "border-sky-300 ring-1 ring-sky-200" : "border-slate-200"
+        }`}
+      >
         <div className="border-b border-slate-200 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

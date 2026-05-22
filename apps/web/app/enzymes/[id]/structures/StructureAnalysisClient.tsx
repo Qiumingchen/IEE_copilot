@@ -375,7 +375,7 @@ function WorkflowActions({ actions }: { actions: ReturnType<typeof getStructureW
             <p className="mt-2 text-sm text-slate-600">{action.description}</p>
             {action.href ? (
               <Link className="mt-3 inline-flex text-sm font-medium text-slate-950 underline underline-offset-2" href={action.href}>
-                Open analysis
+                {action.cta_label ?? "Open analysis"}
               </Link>
             ) : null}
           </div>

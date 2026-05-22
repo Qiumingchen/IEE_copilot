@@ -26,6 +26,7 @@ import {
   getMutationLibrary,
   getRecommendationArtifactOptions,
   getAnalysisArtifactStructureId,
+  normalizeAnalysisFocus,
   getMutationRecommendationCandidates,
   getRosettaDdgResults,
   getRosettaDdgRunViews,
@@ -58,6 +59,13 @@ const conservationContent = {
     ]
   }
 };
+
+test("normalizes structure workflow analysis focus values", () => {
+  assert.equal(normalizeAnalysisFocus("mutation_recommendation"), "mutation_recommendation");
+  assert.equal(normalizeAnalysisFocus("rosetta_ddg"), "rosetta_ddg");
+  assert.equal(normalizeAnalysisFocus("homolog_collection"), null);
+  assert.equal(normalizeAnalysisFocus(undefined), null);
+});
 
 test("filters conservation sites by selected category", () => {
   const sites = getConservationSites(conservationContent);

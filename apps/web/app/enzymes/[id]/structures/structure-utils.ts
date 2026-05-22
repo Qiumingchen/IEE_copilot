@@ -52,6 +52,7 @@ export type StructureWorkflowActionView = {
   status: "ready" | "reserved" | "blocked";
   description: string;
   href: string | null;
+  cta_label: string | null;
 };
 
 export type DistanceMatrixRowView = {
@@ -251,13 +252,16 @@ export function getStructureWorkflowActions(
 ): StructureWorkflowActionView[] {
   const readiness = getStructureReadiness(structure);
   const hasLigandDistanceMatrix = getDistanceMatrixRows(structure).length > 0;
-  const structureAnalysisHref = `/enzymes/${enzymeId}/analysis?structure_id=${encodeURIComponent(structure.id)}`;
+  const structureId = encodeURIComponent(structure.id);
   return [
     {
       label: "Rosetta ddG",
       status: readiness.status === "blocked" ? "blocked" : "ready",
       description: "Use this parsed structure as the structural context for mutation stability scoring.",
-      href: readiness.status === "blocked" ? null : structureAnalysisHref
+      href: readiness.status === "blocked"
+        ? null
+        : `/enzymes/${enzymeId}/analysis?structure_id=${structureId}&focus=rosetta_ddg`,
+      cta_label: readiness.status === "blocked" ? null : "Open Rosetta ddG"
     },
     {
       label: "Ligand-aware recommendations",
@@ -265,13 +269,17 @@ export function getStructureWorkflowActions(
       description: hasLigandDistanceMatrix
         ? "Use ligand contacts and residue mapping to prioritize substrate-proximal mutation sites."
         : "Upload an enzyme-substrate complex to enable substrate-proximal mutation prioritization.",
-      href: hasLigandDistanceMatrix ? structureAnalysisHref : null
+      href: hasLigandDistanceMatrix
+        ? `/enzymes/${enzymeId}/analysis?structure_id=${structureId}&focus=mutation_recommendation`
+        : null,
+      cta_label: hasLigandDistanceMatrix ? "Open recommendations" : null
     },
     {
       label: "MD simulation",
       status: "reserved",
       description: "Workflow slot is reserved; automated MD execution will be added later.",
-      href: null
+      href: null,
+      cta_label: null
     },
     {
       label: "MMPBSA",
@@ -280,7 +288,8 @@ export function getStructureWorkflowActions(
         structure.complex_state === "enzyme_substrate_complex"
           ? "Complex structure detected; binding-energy workflow slot is reserved for later implementation."
           : "Upload an enzyme-substrate complex before this reserved workflow can use binding context.",
-      href: null
+      href: null,
+      cta_label: null
     }
   ];
 }
