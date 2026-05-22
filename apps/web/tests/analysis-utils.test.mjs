@@ -17,6 +17,7 @@ import {
   buildAnalysisArtifactLineageJson,
   buildAnalysisRunManifestJson,
   filterConservationSites,
+  formatRecommendationTargetProperty,
   getConservationSites,
   getConservationArtifactOptions,
   getArtifactRunnerLabel,
@@ -696,12 +697,20 @@ test("formats artifact input source lineage from summaries", () => {
           type: "recommendation_artifact",
           artifact_id: "recommendation-artifact-1",
           candidate_count: 4
-        }
+        },
+        target_property: "thermostability"
       }
     }),
-    "recommendation_artifact | 4 candidates | recommendation-artifact-1"
+    "recommendation_artifact | 4 candidates | recommendation-artifact-1 | target Thermostability"
   );
   assert.equal(formatAnalysisArtifactSource({ result_summary_json: null }), "-");
+});
+
+test("formats mutation recommendation target property labels", () => {
+  assert.equal(formatRecommendationTargetProperty("thermostability"), "Thermostability");
+  assert.equal(formatRecommendationTargetProperty("specific_activity"), "Specific activity");
+  assert.equal(formatRecommendationTargetProperty("custom_solubility"), "Custom solubility");
+  assert.equal(formatRecommendationTargetProperty(null), "-");
 });
 
 test("builds artifact lineage json for export", () => {

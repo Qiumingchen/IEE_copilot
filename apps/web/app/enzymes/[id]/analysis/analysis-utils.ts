@@ -355,7 +355,32 @@ export function formatAnalysisArtifactSource(
   if (typeof summary.structure_id === "string" && summary.structure_id.length > 0) {
     parts.push(`structure ${summary.structure_id}`);
   }
+  const targetProperty = formatRecommendationTargetProperty(summary.target_property);
+  if (targetProperty !== "-") {
+    parts.push(`target ${targetProperty}`);
+  }
   return parts.join(" | ");
+}
+
+export function formatRecommendationTargetProperty(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "-";
+  }
+  const normalized = value.trim();
+  const labels: Record<string, string> = {
+    thermostability: "Thermostability",
+    specific_activity: "Specific activity",
+    optimal_temperature: "Optimal temperature",
+    optimal_pH: "Optimal pH",
+    soluble_expression: "Soluble expression",
+    product_selectivity: "Product selectivity",
+    substrate_specificity: "Substrate specificity"
+  };
+  if (labels[normalized]) {
+    return labels[normalized];
+  }
+  const words = normalized.replace(/[_-]+/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export function buildAnalysisArtifactLineageJson(artifact: AnalysisArtifactRecord): string {

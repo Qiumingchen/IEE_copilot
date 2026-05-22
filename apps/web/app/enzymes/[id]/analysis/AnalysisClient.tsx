@@ -32,6 +32,7 @@ import {
   buildAnalysisArtifactLineageJson,
   buildAnalysisRunManifestJson,
   formatAnalysisArtifactSource,
+  formatRecommendationTargetProperty,
   filterConservationSites,
   getArtifactRunnerLabel,
   getAnalysisArtifactStructureId,
@@ -156,6 +157,7 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
   const [conservationObjectKey, setConservationObjectKey] = useState<string | null>(null);
   const [recommendationCandidates, setRecommendationCandidates] = useState<MutationRecommendationCandidateView[]>([]);
   const [recommendationObjectKey, setRecommendationObjectKey] = useState<string | null>(null);
+  const [latestRecommendationTarget, setLatestRecommendationTarget] = useState("-");
   const [rosettaRuns, setRosettaRuns] = useState<RosettaDdgRunView[]>([]);
   const [rosettaObjectKey, setRosettaObjectKey] = useState<string | null>(null);
   const [mutationLibrary, setMutationLibrary] = useState<MutationLibraryView | null>(null);
@@ -268,6 +270,7 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
     if (!latestRecommendationArtifact) {
       setRecommendationCandidates([]);
       setRecommendationObjectKey(null);
+      setLatestRecommendationTarget("-");
       return;
     }
 
@@ -275,9 +278,17 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
       const content = await getAnalysisArtifactContent(enzymeId, latestRecommendationArtifact.id, nextToken);
       setRecommendationCandidates(getMutationRecommendationCandidates(content));
       setRecommendationObjectKey(content.object_key);
+      setLatestRecommendationTarget(
+        formatRecommendationTargetProperty(
+          content.content_json?.target_property ?? latestRecommendationArtifact.result_summary_json?.target_property
+        )
+      );
     } catch {
       setRecommendationCandidates([]);
       setRecommendationObjectKey(latestRecommendationArtifact.object_key);
+      setLatestRecommendationTarget(
+        formatRecommendationTargetProperty(latestRecommendationArtifact.result_summary_json?.target_property)
+      );
     }
   }
 
@@ -1130,7 +1141,10 @@ export default function AnalysisClient({ enzymeId, initialFocus = null, initialS
               {recommendationObjectKey ? (
                 <p className="mt-1 break-words font-mono text-xs text-slate-500">{recommendationObjectKey}</p>
               ) : null}
-              <p className="mt-1 text-xs text-slate-500">{recommendationCandidates.length} candidate sites</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {recommendationCandidates.length} candidate sites
+                {latestRecommendationTarget !== "-" ? ` | Target: ${latestRecommendationTarget}` : ""}
+              </p>
             </div>
             <button
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:text-slate-400"
