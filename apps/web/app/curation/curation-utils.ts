@@ -28,6 +28,19 @@ export function summarizeCuratedEvidenceFileLoad(fileName: string): string {
   return `Loaded ${fileName} into CSV text.`;
 }
 
+export function buildCuratedEvidenceReviewLinks(enzymeId: string): { label: string; href: string }[] {
+  const trimmedId = enzymeId.trim();
+  if (!trimmedId) {
+    return [];
+  }
+  const pathId = encodeURIComponent(trimmedId);
+  return [
+    { label: "Open enzyme record", href: `/enzymes/${pathId}` },
+    { label: "Review properties", href: `/enzymes/${pathId}/properties` },
+    { label: "Review mutations", href: `/enzymes/${pathId}/mutations` }
+  ];
+}
+
 export function summarizeVisibilityRequest(request: VisibilityRequestDetailRecord): string {
   const experiment = request.experiment;
   const mutation = experiment.mutation_string || "WT";

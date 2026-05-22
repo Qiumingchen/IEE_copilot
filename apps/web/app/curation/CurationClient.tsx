@@ -17,6 +17,7 @@ import type {
   VisibilityRequestDetailRecord
 } from "../../lib/types";
 import {
+  buildCuratedEvidenceReviewLinks,
   buildCuratedEvidenceTemplateCsv,
   canSubmitRejection,
   curatedEvidenceCsvUploadAccept,
@@ -59,6 +60,7 @@ export default function CurationClient() {
   const [isImporting, setIsImporting] = useState(false);
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
   const [isReadingImportFile, setIsReadingImportFile] = useState(false);
+  const reviewLinks = buildCuratedEvidenceReviewLinks(importEnzymeId);
 
   async function loadRequests(nextToken: string) {
     setError(null);
@@ -336,7 +338,28 @@ export default function CurationClient() {
 
         {importResult ? (
           <div className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-            <h3 className="text-sm font-semibold text-emerald-900">Imported references</h3>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-emerald-900">Import complete</h3>
+                <p className="mt-1 text-sm text-emerald-900">
+                  {summarizeCuratedEvidenceImport(importResult)}
+                </p>
+              </div>
+              {reviewLinks.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {reviewLinks.map((link) => (
+                    <a
+                      className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-900"
+                      href={link.href}
+                      key={link.href}
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <h4 className="mt-4 text-sm font-semibold text-emerald-900">Imported references</h4>
             {importResult.references.length ? (
               <ul className="mt-2 grid gap-2 text-sm text-emerald-900">
                 {importResult.references.map((reference) => (

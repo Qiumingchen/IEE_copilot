@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildCuratedEvidenceTemplateCsv,
+  buildCuratedEvidenceReviewLinks,
   canSubmitRejection,
   curatedEvidenceCsvTemplate,
   curatedEvidenceCsvUploadAccept,
@@ -147,6 +148,20 @@ test("summarizeCuratedEvidenceFileLoad reports the loaded CSV file name", () => 
     summarizeCuratedEvidenceFileLoad("curated-evidence.csv"),
     "Loaded curated-evidence.csv into CSV text."
   );
+});
+
+test("buildCuratedEvidenceReviewLinks points imported evidence back to enzyme views", () => {
+  assert.deepEqual(buildCuratedEvidenceReviewLinks(" enzyme-1 "), [
+    { label: "Open enzyme record", href: "/enzymes/enzyme-1" },
+    { label: "Review properties", href: "/enzymes/enzyme-1/properties" },
+    { label: "Review mutations", href: "/enzymes/enzyme-1/mutations" }
+  ]);
+  assert.deepEqual(buildCuratedEvidenceReviewLinks("enzyme/with space"), [
+    { label: "Open enzyme record", href: "/enzymes/enzyme%2Fwith%20space" },
+    { label: "Review properties", href: "/enzymes/enzyme%2Fwith%20space/properties" },
+    { label: "Review mutations", href: "/enzymes/enzyme%2Fwith%20space/mutations" }
+  ]);
+  assert.deepEqual(buildCuratedEvidenceReviewLinks("   "), []);
 });
 
 test("formatPreviewReference includes the reference match mode", () => {
