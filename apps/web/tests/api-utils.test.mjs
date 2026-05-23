@@ -16,6 +16,7 @@ test("discoverEnzymeFromPdb submits the selected enzyme module", async () => {
     return new Response(
       JSON.stringify({
         file_name: "query.pdb",
+        module: "ANTHRAQUINONE_GLYCOSYLTRANSFERASE",
         metadata: {},
         structure_type: "pdb",
         complex_state: "apo",

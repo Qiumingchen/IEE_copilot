@@ -1129,6 +1129,7 @@ async def discover_enzyme_from_pdb(
     metadata = _extract_pdb_metadata(text, file_name=file_name)
     return PdbDiscoveryResponse(
         file_name=file_name,
+        module=module,
         metadata=metadata,
         structure_type=parsed.structure_type,
         complex_state=parsed.complex_state,

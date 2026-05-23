@@ -8,6 +8,7 @@ import { ApiRequestError, discoverEnzymeFromPdb, searchEnzyme, uploadStructureFi
 import type { PdbDiscoveryHit, PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
 import {
   buildStructureAnalysisHref,
+  formatEnzymeModuleLabel,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
@@ -256,6 +257,9 @@ export default function SearchPage() {
             </div>
             <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
               {pdbDiscovery.complex_state}
+            </span>
+            <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+              {formatEnzymeModuleLabel(pdbDiscovery.module)}
             </span>
           </div>
 

@@ -30,6 +30,16 @@ export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
     .join(" | ") || "Source details not reported";
 }
 
+export function formatEnzymeModuleLabel(module: string): string {
+  if (module === "MICROBIAL_TRANSGLUTAMINASE_MATURE") {
+    return "Mature microbial transglutaminase";
+  }
+  if (module === "ANTHRAQUINONE_GLYCOSYLTRANSFERASE") {
+    return "Anthraquinone glycosyltransferase";
+  }
+  return module;
+}
+
 export function formatPdbDiscoveryHitSubtitle(hit: PdbDiscoveryHit): string {
   const hasSequenceMetrics = hit.evidence.includes("sequence_similarity");
   return [

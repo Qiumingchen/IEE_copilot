@@ -62,6 +62,7 @@ class PdbDiscoveryHit(BaseModel):
 
 class PdbDiscoveryResponse(BaseModel):
     file_name: str
+    module: EnzymeModule
     metadata: PdbDiscoveryMetadata
     structure_type: str
     complex_state: str

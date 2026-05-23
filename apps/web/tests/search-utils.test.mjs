@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildStructureAnalysisHref,
+  formatEnzymeModuleLabel,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
@@ -57,6 +58,12 @@ test("formatSearchMatchSubtitle combines organism identifiers and source details
     formatSearchMatchSubtitle({ ...enzyme, organism: null, ec_number: null, uniprot_id: null }),
     "Source details not reported"
   );
+});
+
+test("formatEnzymeModuleLabel renders known enzyme modules", () => {
+  assert.equal(formatEnzymeModuleLabel("MICROBIAL_TRANSGLUTAMINASE_MATURE"), "Mature microbial transglutaminase");
+  assert.equal(formatEnzymeModuleLabel("ANTHRAQUINONE_GLYCOSYLTRANSFERASE"), "Anthraquinone glycosyltransferase");
+  assert.equal(formatEnzymeModuleLabel("CUSTOM_MODULE"), "CUSTOM_MODULE");
 });
 
 test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hits", () => {

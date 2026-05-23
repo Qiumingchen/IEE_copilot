@@ -360,6 +360,7 @@ def test_pdb_discovery_respects_requested_enzyme_module(client, db_session):
 
     assert response.status_code == 200
     body = response.json()
+    assert body["module"] == EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE.value
     assert [hit["enzyme"]["id"] for hit in body["hits"]] == [aqgt_enzyme.id]
 
 

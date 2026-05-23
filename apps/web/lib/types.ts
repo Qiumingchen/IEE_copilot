@@ -46,6 +46,7 @@ export type PdbDiscoveryHit = {
 
 export type PdbDiscoveryResponse = {
   file_name: string;
+  module: string;
   metadata: PdbDiscoveryMetadata;
   structure_type: string;
   complex_state: string;
