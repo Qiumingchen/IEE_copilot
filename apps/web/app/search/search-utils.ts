@@ -48,6 +48,9 @@ export function formatPdbDiscoveryMatchReason(hit: PdbDiscoveryHit): string {
   if (hit.evidence.includes("alphafold_id")) {
     return "Exact AlphaFold ID match";
   }
+  if (hit.evidence.includes("uniprot_id")) {
+    return "Exact UniProt ID match";
+  }
   if (hit.evidence.includes("sequence_similarity")) {
     return "Sequence similarity match";
   }

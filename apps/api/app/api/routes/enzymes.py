@@ -5,7 +5,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
@@ -768,11 +768,12 @@ def _identifier_pdb_discovery_hits(
                 add_hit(enzyme, "alphafold_id")
 
     if metadata.uniprot_id:
+        uniprot_id = metadata.uniprot_id.upper()
         enzymes = db.scalars(
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
             .where(EnzymeFamily.module == module)
-            .where(EnzymeEntry.uniprot_id == metadata.uniprot_id)
+            .where(func.upper(EnzymeEntry.uniprot_id) == uniprot_id)
         ).all()
         for enzyme in enzymes:
             add_hit(enzyme, "uniprot_id")
@@ -788,7 +789,7 @@ def _identifier_pdb_discovery_hits(
             if not isinstance(identifiers, dict):
                 continue
             structure_uniprot_id = identifiers.get("uniprot_id")
-            if structure_uniprot_id == metadata.uniprot_id:
+            if isinstance(structure_uniprot_id, str) and structure_uniprot_id.upper() == uniprot_id:
                 add_hit(enzyme, "uniprot_id")
 
     return list(hits_by_enzyme_id.values())

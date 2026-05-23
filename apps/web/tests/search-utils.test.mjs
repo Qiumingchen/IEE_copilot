@@ -89,6 +89,18 @@ test("formatPdbDiscoveryMatchReason explains exact identifier and sequence match
   assert.equal(
     formatPdbDiscoveryMatchReason({
       enzyme,
+      identity: 1,
+      coverage: 1,
+      aligned_length: 407,
+      evidence: ["uniprot_id", "local_database"],
+      confidence: "exact"
+    }),
+    "Exact UniProt ID match"
+  );
+
+  assert.equal(
+    formatPdbDiscoveryMatchReason({
+      enzyme,
       identity: 0.875,
       coverage: 0.75,
       aligned_length: 120,

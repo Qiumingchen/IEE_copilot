@@ -20,6 +20,24 @@ END
 """
 
 
+PDB_WITH_UNIPROT_REFERENCE = """\
+HEADER    TRANSFERASE                              01-JAN-26   8ABC
+TITLE     TEST MICROBIAL TRANSGLUTAMINASE STRUCTURE
+COMPND    MOL_ID: 1; MOLECULE: MICROBIAL TRANSGLUTAMINASE; CHAIN: A;
+SOURCE    MOL_ID: 1; ORGANISM_SCIENTIFIC: STREPTOMYCES MOBARAENSIS;
+DBREF  8ABC A    1   407  UNP    P81453   TGAS_STRMB       1    407
+ATOM      1  CA  ALA A   1      11.104  13.207   9.342  1.00 20.00           C
+ATOM      2  CA  GLU A   2      12.560  13.407   9.142  1.00 20.00           C
+ATOM      3  CA  ALA A   3      13.560  13.407   9.142  1.00 20.00           C
+ATOM      4  CA  LYS A   4      14.560  13.407   9.142  1.00 20.00           C
+ATOM      5  CA  LEU A   5      15.560  13.407   9.142  1.00 20.00           C
+ATOM      6  CA  LEU A   6      16.560  13.407   9.142  1.00 20.00           C
+ATOM      7  CA  ASN A   7      17.560  13.407   9.142  1.00 20.00           C
+ATOM      8  CA  ASP A   8      18.560  13.407   9.142  1.00 20.00           C
+END
+"""
+
+
 def _register_and_login(client) -> str:
     client.post(
         "/auth/register",
@@ -180,6 +198,39 @@ def test_pdb_discovery_groups_upload_with_local_enzyme_by_alphafold_id(client, d
     assert body["hits"][0]["enzyme"]["id"] == enzyme.id
     assert body["hits"][0]["confidence"] == "exact"
     assert body["hits"][0]["evidence"] == ["alphafold_id", "local_database"]
+
+
+def test_pdb_discovery_matches_uniprot_id_case_insensitively(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="UniProt-backed mTGase",
+        organism="Streptomyces mobaraensis",
+        uniprot_id="p81453",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("rcsb-with-uniprot.pdb", PDB_WITH_UNIPROT_REFERENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["uniprot_id"] == "P81453"
+    assert body["hits"][0]["enzyme"]["id"] == enzyme.id
+    assert body["hits"][0]["confidence"] == "exact"
+    assert body["hits"][0]["evidence"] == ["uniprot_id", "local_database"]
 
 
 def test_pdb_discovery_matches_alphafold_file_name_to_accession_style_local_id(client, db_session):
