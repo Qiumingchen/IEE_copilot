@@ -18,6 +18,9 @@ class EnzymeSummary(BaseModel):
     pdb_id: str | None = None
     alphafold_id: str | None = None
     source: str
+    uniprot_reviewed: bool = False
+    optimal_temperature: float | None = None
+    specific_activity: float | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -62,7 +65,6 @@ class PdbDiscoveryHit(BaseModel):
 
 class PdbDiscoveryResponse(BaseModel):
     file_name: str
-    module: EnzymeModule
     metadata: PdbDiscoveryMetadata
     structure_type: str
     complex_state: str

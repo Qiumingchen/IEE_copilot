@@ -1,5 +1,7 @@
 import type { EnzymeSummary, PdbDiscoveryHit, SearchResponse } from "../../lib/types";
 
+export type EnzymeSortMode = "default" | "reviewed" | "temperature" | "activity";
+
 export type ApiErrorLike = {
   status?: number;
   detail?: string | null;
@@ -30,14 +32,29 @@ export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
     .join(" | ") || "Source details not reported";
 }
 
-export function formatEnzymeModuleLabel(module: string): string {
-  if (module === "MICROBIAL_TRANSGLUTAMINASE_MATURE") {
-    return "Mature microbial transglutaminase";
+export function sortSearchMatches(matches: EnzymeSummary[], sortMode: EnzymeSortMode): EnzymeSummary[] {
+  return [...matches].sort((left, right) => compareEnzymeSummaries(left, right, sortMode));
+}
+
+export function sortPdbDiscoveryHits(hits: PdbDiscoveryHit[], sortMode: EnzymeSortMode): PdbDiscoveryHit[] {
+  return [...hits].sort((left, right) => compareEnzymeSummaries(left.enzyme, right.enzyme, sortMode));
+}
+
+function compareEnzymeSummaries(left: EnzymeSummary, right: EnzymeSummary, sortMode: EnzymeSortMode): number {
+  if (sortMode === "reviewed") {
+    return Number(right.uniprot_reviewed) - Number(left.uniprot_reviewed);
   }
-  if (module === "ANTHRAQUINONE_GLYCOSYLTRANSFERASE") {
-    return "Anthraquinone glycosyltransferase";
+  if (sortMode === "temperature") {
+    return metricValue(right.optimal_temperature) - metricValue(left.optimal_temperature);
   }
-  return module;
+  if (sortMode === "activity") {
+    return metricValue(right.specific_activity) - metricValue(left.specific_activity);
+  }
+  return 0;
+}
+
+function metricValue(value: number | null | undefined): number {
+  return value ?? Number.NEGATIVE_INFINITY;
 }
 
 export function formatPdbDiscoveryHitSubtitle(hit: PdbDiscoveryHit): string {

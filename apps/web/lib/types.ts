@@ -8,6 +8,9 @@ export type EnzymeSummary = {
   pdb_id: string | null;
   alphafold_id: string | null;
   source: string;
+  uniprot_reviewed: boolean;
+  optimal_temperature: number | null;
+  specific_activity: number | null;
 };
 
 export type SearchResponse = {
@@ -46,7 +49,6 @@ export type PdbDiscoveryHit = {
 
 export type PdbDiscoveryResponse = {
   file_name: string;
-  module: string;
   metadata: PdbDiscoveryMetadata;
   structure_type: string;
   complex_state: string;

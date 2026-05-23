@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, StructureEntry
+from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, PropertyRecord, StructureEntry
 
 
 PDB_WITH_SEQUENCE = """\
@@ -303,7 +303,7 @@ def test_pdb_discovery_preserves_sequence_metrics_for_identifier_matches(client,
     assert body["hits"][0]["evidence"] == ["uniprot_id", "sequence_similarity", "local_database"]
 
 
-def test_pdb_discovery_respects_requested_enzyme_module(client, db_session):
+def test_pdb_discovery_searches_across_enzyme_families_without_module_selection(client, db_session):
     mtgase_family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
         name="Mature microbial transglutaminases",
@@ -354,14 +354,106 @@ def test_pdb_discovery_respects_requested_enzyme_module(client, db_session):
     response = client.post(
         "/enzymes/discover-pdb",
         headers={"Authorization": f"Bearer {token}"},
-        data={"module": EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE.value},
         files={"file": ("query.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["module"] == EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE.value
-    assert [hit["enzyme"]["id"] for hit in body["hits"]] == [aqgt_enzyme.id]
+    assert {hit["enzyme"]["id"] for hit in body["hits"]} == {mtgase_enzyme.id, aqgt_enzyme.id}
+
+
+def test_pdb_discovery_orders_comparable_hits_by_reviewed_temperature_and_activity(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food processing amylases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    reviewed = EnzymeEntry(
+        family_id=family.id,
+        name="PDB ranked reviewed enzyme",
+        organism="Bacillus subtilis",
+        uniprot_id="P00691",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    hot = EnzymeEntry(
+        family_id=family.id,
+        name="PDB ranked hot enzyme",
+        organism="Geobacillus stearothermophilus",
+        source="curated_literature",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    active = EnzymeEntry(
+        family_id=family.id,
+        name="PDB ranked active enzyme",
+        organism="Aspergillus oryzae",
+        source="curated_literature",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([active, hot, reviewed])
+    db_session.flush()
+    for enzyme, checksum in [
+        (active, "pdb-ranked-active"),
+        (hot, "pdb-ranked-hot"),
+        (reviewed, "pdb-ranked-reviewed"),
+    ]:
+        db_session.add(
+            ProteinSequence(
+                enzyme_entry_id=enzyme.id,
+                sequence="AEAKLLND",
+                mature_sequence="AEAKLLND",
+                source="test",
+                checksum=checksum,
+            )
+        )
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=hot.id,
+                property_type="optimal_temperature",
+                value_original="90",
+                unit_original="degC",
+                value_standardized="90",
+                unit_standardized="degC",
+                standardization_status="standardized",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=active.id,
+                property_type="optimal_temperature",
+                value_original="50",
+                unit_original="degC",
+                value_standardized="50",
+                unit_standardized="degC",
+                standardization_status="standardized",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=active.id,
+                property_type="specific_activity",
+                value_original="1200",
+                unit_original="U/mg",
+                value_standardized="1200",
+                unit_standardized="U/mg",
+                standardization_status="standardized",
+            ),
+        ]
+    )
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("query.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    hits = response.json()["hits"]
+    ordered_ids = [hit["enzyme"]["id"] for hit in hits[:3]]
+    assert ordered_ids == [reviewed.id, hot.id, active.id]
+    assert hits[0]["enzyme"]["uniprot_reviewed"] is True
+    assert hits[1]["enzyme"]["optimal_temperature"] == 90.0
+    assert hits[2]["enzyme"]["specific_activity"] == 1200.0
 
 
 def test_pdb_discovery_accepts_mmcif_extension(client, db_session):

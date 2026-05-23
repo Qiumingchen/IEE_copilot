@@ -293,8 +293,118 @@ def test_enzyme_search_returns_clickable_source_matches(client, db_session, monk
     assert response.status_code == 200
     matches = response.json()["matches"]
     assert len(matches) >= 2
-    assert matches[0]["id"] == response.json()["enzyme"]["id"]
+    assert response.json()["enzyme"]["id"] in {match["id"] for match in matches}
     assert {match["source"] for match in matches} >= {"uniprot", "curated_literature"}
+
+
+def test_enzyme_search_orders_source_matches_by_reviewed_temperature_and_activity(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food processing amylases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    reviewed = EnzymeEntry(
+        family_id=family.id,
+        name="Food alpha amylase reviewed",
+        organism="Bacillus subtilis",
+        ec_number="3.2.1.1",
+        uniprot_id="P00691",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    hot = EnzymeEntry(
+        family_id=family.id,
+        name="Food alpha amylase hot",
+        organism="Geobacillus stearothermophilus",
+        ec_number="3.2.1.1",
+        source="curated_literature",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    active = EnzymeEntry(
+        family_id=family.id,
+        name="Food alpha amylase active",
+        organism="Aspergillus oryzae",
+        ec_number="3.2.1.1",
+        source="curated_literature",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([active, hot, reviewed])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=hot.id,
+                property_type="optimal_temperature",
+                value_original="85",
+                unit_original="degC",
+                value_standardized="85",
+                unit_standardized="degC",
+                standardization_status="standardized",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=active.id,
+                property_type="optimal_temperature",
+                value_original="55",
+                unit_original="degC",
+                value_standardized="55",
+                unit_standardized="degC",
+                standardization_status="standardized",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=active.id,
+                property_type="specific_activity",
+                value_original="900",
+                unit_original="U/mg",
+                value_standardized="900",
+                unit_standardized="U/mg",
+                standardization_status="standardized",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "ranked-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Ranked Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "ranked-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "food alpha amylase"},
+    )
+
+    assert response.status_code == 200
+    matches = response.json()["matches"]
+    ordered_ids = [match["id"] for match in matches[:3]]
+    assert ordered_ids == [reviewed.id, hot.id, active.id]
+    assert matches[0]["uniprot_reviewed"] is True
+    assert matches[1]["optimal_temperature"] == 85.0
+    assert matches[2]["specific_activity"] == 900.0
 
 
 def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch):

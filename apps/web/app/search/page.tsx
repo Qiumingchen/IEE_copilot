@@ -8,25 +8,17 @@ import { ApiRequestError, discoverEnzymeFromPdb, searchEnzyme, uploadStructureFi
 import type { PdbDiscoveryHit, PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
 import {
   buildStructureAnalysisHref,
-  formatEnzymeModuleLabel,
+  type EnzymeSortMode,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
+  sortPdbDiscoveryHits,
+  sortSearchMatches,
   searchResultMatches
 } from "./search-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
-const ENZYME_MODULE_OPTIONS = [
-  {
-    label: "Mature microbial transglutaminase",
-    value: "MICROBIAL_TRANSGLUTAMINASE_MATURE"
-  },
-  {
-    label: "Anthraquinone glycosyltransferase",
-    value: "ANTHRAQUINONE_GLYCOSYLTRANSFERASE"
-  }
-];
 
 export default function SearchPage() {
   const router = useRouter();
@@ -35,12 +27,13 @@ export default function SearchPage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [pdbDiscoveryModule, setPdbDiscoveryModule] = useState("MICROBIAL_TRANSGLUTAMINASE_MATURE");
   const [selectedPdbFile, setSelectedPdbFile] = useState<File | null>(null);
   const [pdbDiscovery, setPdbDiscovery] = useState<PdbDiscoveryResponse | null>(null);
   const [pdbDiscoveryError, setPdbDiscoveryError] = useState<string | null>(null);
   const [isDiscoveringPdb, setIsDiscoveringPdb] = useState(false);
   const [attachingHitId, setAttachingHitId] = useState<string | null>(null);
+  const [searchSortMode, setSearchSortMode] = useState<EnzymeSortMode>("default");
+  const [pdbSortMode, setPdbSortMode] = useState<EnzymeSortMode>("default");
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
@@ -60,6 +53,7 @@ export default function SearchPage() {
 
     setError(null);
     setResult(null);
+    setSearchSortMode("default");
     setIsSearching(true);
 
     try {
@@ -77,6 +71,7 @@ export default function SearchPage() {
     setSelectedPdbFile(file);
     setPdbDiscovery(null);
     setPdbDiscoveryError(null);
+    setPdbSortMode("default");
   }
 
   async function handlePdbDiscovery(event: FormEvent<HTMLFormElement>) {
@@ -92,10 +87,11 @@ export default function SearchPage() {
 
     setPdbDiscovery(null);
     setPdbDiscoveryError(null);
+    setPdbSortMode("default");
     setIsDiscoveringPdb(true);
 
     try {
-      const response = await discoverEnzymeFromPdb(selectedPdbFile, token, pdbDiscoveryModule);
+      const response = await discoverEnzymeFromPdb(selectedPdbFile, token);
       setPdbDiscovery(response);
     } catch (caught) {
       if (caught instanceof ApiRequestError && caught.status === 401) {
@@ -191,25 +187,6 @@ export default function SearchPage() {
             <h2 className="mt-1 text-lg font-semibold text-slate-950">Discover from PDB</h2>
           </div>
           <form className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={handlePdbDiscovery}>
-            <label className="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2">
-              Target module
-              <select
-                className="min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
-                name="module"
-                onChange={(event) => {
-                  setPdbDiscoveryModule(event.target.value);
-                  setPdbDiscovery(null);
-                  setPdbDiscoveryError(null);
-                }}
-                value={pdbDiscoveryModule}
-              >
-                {ENZYME_MODULE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               PDB or mmCIF file
               <input
@@ -258,9 +235,21 @@ export default function SearchPage() {
             <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
               {pdbDiscovery.complex_state}
             </span>
-            <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-              {formatEnzymeModuleLabel(pdbDiscovery.module)}
-            </span>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Sort enzymes
+              <select
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                onChange={(event) => setPdbSortMode(event.target.value as EnzymeSortMode)}
+                value={pdbSortMode}
+              >
+                <option value="default">Best match</option>
+                <option value="reviewed">Reviewed UniProt first</option>
+                <option value="temperature">Highest optimal temperature</option>
+                <option value="activity">Highest specific activity</option>
+              </select>
+            </label>
           </div>
 
           <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -299,7 +288,7 @@ export default function SearchPage() {
 
           <div className="mt-5 grid gap-3">
             {pdbDiscovery.hits.length > 0 ? (
-              pdbDiscovery.hits.map((hit) => (
+              sortPdbDiscoveryHits(pdbDiscovery.hits, pdbSortMode).map((hit) => (
                 <article
                   className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
                   key={hit.enzyme.id}
@@ -318,6 +307,7 @@ export default function SearchPage() {
                       <p className="mt-2 text-xs font-medium text-slate-500">
                         {formatPdbDiscoveryHitSubtitle(hit)}
                       </p>
+                      <MetricBadges enzyme={hit.enzyme} />
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
@@ -357,8 +347,21 @@ export default function SearchPage() {
               </h2>
             </div>
             <div className="flex gap-2">
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Sort enzymes
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                  onChange={(event) => setSearchSortMode(event.target.value as EnzymeSortMode)}
+                  value={searchSortMode}
+                >
+                  <option value="default">Recommended</option>
+                  <option value="reviewed">Reviewed UniProt first</option>
+                  <option value="temperature">Highest optimal temperature</option>
+                  <option value="activity">Highest specific activity</option>
+                </select>
+              </label>
               <Link
-                className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
+                className="self-end rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
                 href={`/jobs/${result.job_id}`}
               >
                 Analysis job
@@ -367,7 +370,7 @@ export default function SearchPage() {
           </div>
 
           <div className="mt-5 grid gap-3">
-            {searchResultMatches(result).map((match) => (
+            {sortSearchMatches(searchResultMatches(result), searchSortMode).map((match) => (
               <Link
                 className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
                 href={`/enzymes/${match.id}`}
@@ -377,6 +380,7 @@ export default function SearchPage() {
                   <div>
                     <h3 className="text-base font-semibold text-slate-950">{match.name}</h3>
                     <p className="mt-1 text-sm text-slate-600">{formatSearchMatchSubtitle(match)}</p>
+                    <MetricBadges enzyme={match} />
                   </div>
                   <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                     {match.source}
@@ -395,14 +399,32 @@ export default function SearchPage() {
               <dt className="text-xs font-medium uppercase text-slate-500">Query kind</dt>
               <dd className="mt-1 text-sm text-slate-950">{result.query_kind}</dd>
             </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <dt className="text-xs font-medium uppercase text-slate-500">Module</dt>
-              <dd className="mt-1 text-sm text-slate-950">{result.module}</dd>
-            </div>
           </dl>
         </section>
       ) : null}
 
     </main>
+  );
+}
+
+function MetricBadges({ enzyme }: { enzyme: SearchResponse["enzyme"] }) {
+  const badges = [
+    enzyme.uniprot_reviewed ? "Reviewed UniProt" : null,
+    enzyme.optimal_temperature !== null ? `Topt ${enzyme.optimal_temperature} degC` : null,
+    enzyme.specific_activity !== null ? `Activity ${enzyme.specific_activity}` : null
+  ].filter(Boolean);
+
+  if (badges.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {badges.map((badge) => (
+        <span className="rounded bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700" key={badge}>
+          {badge}
+        </span>
+      ))}
+    </div>
   );
 }

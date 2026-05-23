@@ -8,7 +8,7 @@ test("apiUrl uses the same-origin backend proxy by default", () => {
   assert.equal(apiUrl("enzymes/search"), "/api/backend/enzymes/search");
 });
 
-test("discoverEnzymeFromPdb submits the selected enzyme module", async () => {
+test("discoverEnzymeFromPdb submits only the uploaded structure file", async () => {
   const originalFetch = globalThis.fetch;
   let submittedBody;
   globalThis.fetch = async (_url, init) => {
@@ -16,7 +16,6 @@ test("discoverEnzymeFromPdb submits the selected enzyme module", async () => {
     return new Response(
       JSON.stringify({
         file_name: "query.pdb",
-        module: "ANTHRAQUINONE_GLYCOSYLTRANSFERASE",
         metadata: {},
         structure_type: "pdb",
         complex_state: "apo",
@@ -30,14 +29,11 @@ test("discoverEnzymeFromPdb submits the selected enzyme module", async () => {
   };
 
   try {
-    await discoverEnzymeFromPdb(
-      new File(["ATOM"], "query.pdb", { type: "chemical/x-pdb" }),
-      "token",
-      "ANTHRAQUINONE_GLYCOSYLTRANSFERASE"
-    );
+    await discoverEnzymeFromPdb(new File(["ATOM"], "query.pdb", { type: "chemical/x-pdb" }), "token");
   } finally {
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(submittedBody.get("module"), "ANTHRAQUINONE_GLYCOSYLTRANSFERASE");
+  assert.equal(submittedBody.get("file").name, "query.pdb");
+  assert.equal(submittedBody.has("module"), false);
 });

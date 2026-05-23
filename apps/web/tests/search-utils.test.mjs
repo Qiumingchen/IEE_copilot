@@ -3,11 +3,12 @@ import test from "node:test";
 
 import {
   buildStructureAnalysisHref,
-  formatEnzymeModuleLabel,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
+  sortPdbDiscoveryHits,
+  sortSearchMatches,
   searchResultMatches
 } from "../app/search/search-utils.ts";
 
@@ -20,7 +21,10 @@ const enzyme = {
   uniprot_id: "P81453",
   pdb_id: null,
   alphafold_id: null,
-  source: "uniprot"
+  source: "uniprot",
+  uniprot_reviewed: true,
+  optimal_temperature: null,
+  specific_activity: null
 };
 
 test("searchResultMatches falls back to the primary enzyme and deduplicates matches", () => {
@@ -60,10 +64,77 @@ test("formatSearchMatchSubtitle combines organism identifiers and source details
   );
 });
 
-test("formatEnzymeModuleLabel renders known enzyme modules", () => {
-  assert.equal(formatEnzymeModuleLabel("MICROBIAL_TRANSGLUTAMINASE_MATURE"), "Mature microbial transglutaminase");
-  assert.equal(formatEnzymeModuleLabel("ANTHRAQUINONE_GLYCOSYLTRANSFERASE"), "Anthraquinone glycosyltransferase");
-  assert.equal(formatEnzymeModuleLabel("CUSTOM_MODULE"), "CUSTOM_MODULE");
+test("sortSearchMatches supports reviewed temperature and activity ranking modes", () => {
+  const reviewed = { ...enzyme, id: "reviewed", uniprot_reviewed: true };
+  const hot = {
+    ...enzyme,
+    id: "hot",
+    source: "curated_literature",
+    uniprot_reviewed: false,
+    optimal_temperature: 92,
+    specific_activity: 10
+  };
+  const active = {
+    ...enzyme,
+    id: "active",
+    source: "curated_literature",
+    uniprot_reviewed: false,
+    optimal_temperature: 45,
+    specific_activity: 1200
+  };
+
+  assert.deepEqual(sortSearchMatches([active, hot, reviewed], "reviewed").map((match) => match.id), [
+    "reviewed",
+    "active",
+    "hot"
+  ]);
+  assert.deepEqual(sortSearchMatches([active, hot, reviewed], "temperature").map((match) => match.id), [
+    "hot",
+    "active",
+    "reviewed"
+  ]);
+  assert.deepEqual(sortSearchMatches([hot, active, reviewed], "activity").map((match) => match.id), [
+    "active",
+    "hot",
+    "reviewed"
+  ]);
+});
+
+test("sortPdbDiscoveryHits sorts by enzyme-level ranking fields without changing match metrics", () => {
+  const reviewedHit = {
+    enzyme: { ...enzyme, id: "reviewed", uniprot_reviewed: true },
+    identity: 0.8,
+    coverage: 0.8,
+    aligned_length: 120,
+    evidence: ["sequence_similarity", "local_database"],
+    confidence: "high"
+  };
+  const hotHit = {
+    ...reviewedHit,
+    enzyme: {
+      ...enzyme,
+      id: "hot",
+      source: "curated_literature",
+      uniprot_reviewed: false,
+      optimal_temperature: 90
+    }
+  };
+  const activeHit = {
+    ...reviewedHit,
+    enzyme: {
+      ...enzyme,
+      id: "active",
+      source: "curated_literature",
+      uniprot_reviewed: false,
+      specific_activity: 1500
+    }
+  };
+
+  assert.deepEqual(sortPdbDiscoveryHits([hotHit, activeHit, reviewedHit], "activity").map((hit) => hit.enzyme.id), [
+    "active",
+    "hot",
+    "reviewed"
+  ]);
 });
 
 test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hits", () => {

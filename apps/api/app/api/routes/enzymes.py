@@ -1,10 +1,11 @@
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -616,8 +617,6 @@ def _search_result_matches(
     )
 
     def score(candidate: EnzymeEntry) -> tuple[int, int]:
-        if candidate.id == primary_enzyme.id:
-            return (10_000, 0)
         haystack = " ".join(
             [
                 candidate.name or "",
@@ -632,10 +631,15 @@ def _search_result_matches(
         exact_score = 5 if query.lower() in haystack else 0
         return (exact_score + term_score, 1)
 
-    ranked = sorted(candidates, key=score, reverse=True)
+    scientific_ranks = _enzyme_scientific_rankings(db, candidates)
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (*score(candidate), scientific_ranks.get(candidate.id, (0, 0.0, 0.0))),
+        reverse=True,
+    )
     matches: list[EnzymeEntry] = []
     seen: set[str] = set()
-    for candidate in [primary_enzyme, *ranked]:
+    for candidate in ranked:
         if candidate.id in seen:
             continue
         candidate_score, _ = score(candidate)
@@ -646,6 +650,93 @@ def _search_result_matches(
         if len(matches) >= limit:
             break
     return matches
+
+
+def _enzyme_scientific_rankings(
+    db: Session,
+    enzymes: list[EnzymeEntry],
+) -> dict[str, tuple[int, float, float]]:
+    enzyme_ids = [enzyme.id for enzyme in enzymes]
+    if not enzyme_ids:
+        return {}
+
+    optimal_temperatures = _max_numeric_property_by_enzyme(db, enzyme_ids, "optimal_temperature")
+    specific_activities = _max_numeric_property_by_enzyme(db, enzyme_ids, "specific_activity")
+    return {
+        enzyme.id: (
+            _uniprot_review_priority(enzyme),
+            optimal_temperatures.get(enzyme.id, 0.0),
+            specific_activities.get(enzyme.id, 0.0),
+        )
+        for enzyme in enzymes
+    }
+
+
+def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSummary]:
+    scientific_ranks = _enzyme_scientific_rankings(db, enzymes)
+    return [
+        EnzymeSummary(
+            id=enzyme.id,
+            family_id=enzyme.family_id,
+            name=enzyme.name,
+            organism=enzyme.organism,
+            ec_number=enzyme.ec_number,
+            uniprot_id=enzyme.uniprot_id,
+            pdb_id=enzyme.pdb_id,
+            alphafold_id=enzyme.alphafold_id,
+            source=enzyme.source,
+            uniprot_reviewed=bool(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[0]),
+            optimal_temperature=_none_if_zero(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[1]),
+            specific_activity=_none_if_zero(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[2]),
+        )
+        for enzyme in enzymes
+    ]
+
+
+def _enzyme_summary(db: Session, enzyme: EnzymeEntry) -> EnzymeSummary:
+    return _enzyme_summaries(db, [enzyme])[0]
+
+
+def _none_if_zero(value: float) -> float | None:
+    return value if value != 0.0 else None
+
+
+def _uniprot_review_priority(enzyme: EnzymeEntry) -> int:
+    source = (enzyme.source or "").lower()
+    if not enzyme.uniprot_id:
+        return 0
+    if source == "uniprot" or "reviewed" in source or "swiss" in source:
+        return 1
+    return 0
+
+
+def _max_numeric_property_by_enzyme(
+    db: Session,
+    enzyme_ids: list[str],
+    property_type: str,
+) -> dict[str, float]:
+    rows = db.scalars(
+        select(PropertyRecord).where(
+            PropertyRecord.enzyme_entry_id.in_(enzyme_ids),
+            PropertyRecord.property_type == property_type,
+        )
+    ).all()
+    values: dict[str, float] = {}
+    for row in rows:
+        value = _parse_numeric_property(row.value_standardized) or _parse_numeric_property(row.value_original)
+        if value is None:
+            continue
+        values[row.enzyme_entry_id] = max(values.get(row.enzyme_entry_id, float("-inf")), value)
+    return values
+
+
+def _parse_numeric_property(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = re.search(r"-?\d+(?:\.\d+)?", value)
+    if not match:
+        return None
+    return float(match.group(0))
 
 
 def _extract_pdb_metadata(text: str, *, file_name: str) -> PdbDiscoveryMetadata:
@@ -704,7 +795,7 @@ def _identifier_pdb_discovery_hits(
     *,
     metadata: PdbDiscoveryMetadata,
     query_sequence: str,
-    module: EnzymeModule,
+    module: EnzymeModule | None = None,
 ) -> list[PdbDiscoveryHit]:
     hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
 
@@ -723,42 +814,50 @@ def _identifier_pdb_discovery_hits(
 
     if metadata.pdb_id:
         pdb_id = metadata.pdb_id.upper()
-        enzymes = db.scalars(
+        enzyme_query = (
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
-            .where(EnzymeFamily.module == module)
             .where(EnzymeEntry.pdb_id == pdb_id)
-        ).all()
+        )
+        if module is not None:
+            enzyme_query = enzyme_query.where(EnzymeFamily.module == module)
+        enzymes = db.scalars(enzyme_query).all()
         for enzyme in enzymes:
             add_hit(enzyme, "pdb_id")
 
-        structure_enzymes = db.scalars(
+        structure_query = (
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
             .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
-            .where(EnzymeFamily.module == module)
             .where(StructureEntry.pdb_id == pdb_id)
-        ).all()
+        )
+        if module is not None:
+            structure_query = structure_query.where(EnzymeFamily.module == module)
+        structure_enzymes = db.scalars(structure_query).all()
         for enzyme in structure_enzymes:
             add_hit(enzyme, "pdb_id")
 
     if metadata.alphafold_id:
         alphafold_ids = alphafold_identifier_candidates(metadata.alphafold_id)
-        enzymes = db.scalars(
+        enzyme_query = (
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
-            .where(EnzymeFamily.module == module)
             .where(EnzymeEntry.alphafold_id.in_(alphafold_ids))
-        ).all()
+        )
+        if module is not None:
+            enzyme_query = enzyme_query.where(EnzymeFamily.module == module)
+        enzymes = db.scalars(enzyme_query).all()
         for enzyme in enzymes:
             add_hit(enzyme, "alphafold_id")
 
-        structure_rows = db.execute(
+        structure_query = (
             select(EnzymeEntry, StructureEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
             .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
-            .where(EnzymeFamily.module == module)
-        ).all()
+        )
+        if module is not None:
+            structure_query = structure_query.where(EnzymeFamily.module == module)
+        structure_rows = db.execute(structure_query).all()
         for enzyme, structure in structure_rows:
             identifiers = structure.chain_summary.get("identifiers") if structure.chain_summary else None
             if not isinstance(identifiers, dict):
@@ -769,21 +868,25 @@ def _identifier_pdb_discovery_hits(
 
     if metadata.uniprot_id:
         uniprot_id = metadata.uniprot_id.upper()
-        enzymes = db.scalars(
+        enzyme_query = (
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
-            .where(EnzymeFamily.module == module)
             .where(func.upper(EnzymeEntry.uniprot_id) == uniprot_id)
-        ).all()
+        )
+        if module is not None:
+            enzyme_query = enzyme_query.where(EnzymeFamily.module == module)
+        enzymes = db.scalars(enzyme_query).all()
         for enzyme in enzymes:
             add_hit(enzyme, "uniprot_id")
 
-        structure_rows = db.execute(
+        structure_query = (
             select(EnzymeEntry, StructureEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
             .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
-            .where(EnzymeFamily.module == module)
-        ).all()
+        )
+        if module is not None:
+            structure_query = structure_query.where(EnzymeFamily.module == module)
+        structure_rows = db.execute(structure_query).all()
         for enzyme, structure in structure_rows:
             identifiers = structure.chain_summary.get("identifiers") if structure.chain_summary else None
             if not isinstance(identifiers, dict):
@@ -799,14 +902,16 @@ def _sequence_pdb_discovery_hits(
     db: Session,
     *,
     query_sequence: str,
-    module: EnzymeModule,
+    module: EnzymeModule | None = None,
 ) -> list[PdbDiscoveryHit]:
-    rows = db.execute(
+    query = (
         select(EnzymeEntry, ProteinSequence)
         .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
         .join(ProteinSequence, ProteinSequence.enzyme_entry_id == EnzymeEntry.id)
-        .where(EnzymeFamily.module == module)
-    ).all()
+    )
+    if module is not None:
+        query = query.where(EnzymeFamily.module == module)
+    rows = db.execute(query).all()
 
     hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
     for enzyme, protein_sequence in rows:
@@ -840,7 +945,7 @@ def _local_pdb_discovery_hits(
     *,
     metadata: PdbDiscoveryMetadata,
     query_sequence: str,
-    module: EnzymeModule,
+    module: EnzymeModule | None = None,
     limit: int = 12,
 ) -> list[PdbDiscoveryHit]:
     hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
@@ -861,7 +966,7 @@ def _local_pdb_discovery_hits(
 
     hits = sorted(
         hits_by_enzyme_id.values(),
-        key=_pdb_discovery_hit_score,
+        key=_pdb_discovery_hit_rank(db, hits_by_enzyme_id.values()),
         reverse=True,
     )
     return hits[:limit]
@@ -899,6 +1004,33 @@ def _best_sequence_pdb_discovery_hit(*hits: PdbDiscoveryHit) -> PdbDiscoveryHit 
 def _pdb_discovery_hit_score(hit: PdbDiscoveryHit) -> tuple[int, float, float, int]:
     confidence_rank = {"exact": 3, "high": 2, "medium": 1}.get(hit.confidence, 0)
     return (confidence_rank, hit.identity, hit.coverage, hit.aligned_length)
+
+
+def _pdb_discovery_hit_rank(
+    db: Session,
+    hits: Iterable[PdbDiscoveryHit],
+):
+    scientific_ranks = _enzyme_scientific_rankings(db, [hit.enzyme for hit in hits])
+
+    def rank(hit: PdbDiscoveryHit) -> tuple[int, float, float, int, tuple[int, float, float]]:
+        return (*_pdb_discovery_hit_score(hit), scientific_ranks.get(hit.enzyme.id, (0, 0.0, 0.0)))
+
+    return rank
+
+
+def _enriched_pdb_discovery_hits(db: Session, hits: list[PdbDiscoveryHit]) -> list[PdbDiscoveryHit]:
+    summaries = {summary.id: summary for summary in _enzyme_summaries(db, [hit.enzyme for hit in hits])}
+    return [
+        PdbDiscoveryHit(
+            enzyme=summaries[hit.enzyme.id],
+            identity=hit.identity,
+            coverage=hit.coverage,
+            aligned_length=hit.aligned_length,
+            evidence=hit.evidence,
+            confidence=hit.confidence,
+        )
+        for hit in hits
+    ]
 
 
 @router.post("/search", response_model=EnzymeSearchResponse)
@@ -1082,8 +1214,8 @@ def search_enzymes(
     matches = _search_result_matches(db, primary_enzyme=enzyme, query=request.query)
 
     return EnzymeSearchResponse(
-        enzyme=enzyme,
-        matches=matches,
+        enzyme=_enzyme_summary(db, enzyme),
+        matches=_enzyme_summaries(db, matches),
         job_id=job.id,
         cache_status=cache_status,
         query_kind=resolved.kind.value,
@@ -1094,7 +1226,6 @@ def search_enzymes(
 @router.post("/discover-pdb", response_model=PdbDiscoveryResponse)
 async def discover_enzyme_from_pdb(
     file: UploadFile = File(...),
-    module: EnzymeModule = Form(EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> PdbDiscoveryResponse:
@@ -1127,21 +1258,20 @@ async def discover_enzyme_from_pdb(
         )
     query_chain = max(chains, key=lambda chain: chain.residue_count)
     metadata = _extract_pdb_metadata(text, file_name=file_name)
+    hits = _local_pdb_discovery_hits(
+        db,
+        metadata=metadata,
+        query_sequence=query_chain.sequence,
+    )
     return PdbDiscoveryResponse(
         file_name=file_name,
-        module=module,
         metadata=metadata,
         structure_type=parsed.structure_type,
         complex_state=parsed.complex_state,
         chains=chains,
         query_chain_id=query_chain.chain_id,
         query_sequence=query_chain.sequence,
-        hits=_local_pdb_discovery_hits(
-            db,
-            metadata=metadata,
-            query_sequence=query_chain.sequence,
-            module=module,
-        ),
+        hits=_enriched_pdb_discovery_hits(db, hits),
     )
 
 
