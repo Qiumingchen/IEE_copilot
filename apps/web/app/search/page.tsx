@@ -8,6 +8,7 @@ import { ApiRequestError, discoverEnzymeFromPdb, searchEnzyme, uploadStructureFi
 import type { PdbDiscoveryHit, PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
 import {
   buildStructureAnalysisHref,
+  formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
@@ -285,6 +286,9 @@ export default function SearchPage() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                        {formatPdbDiscoveryMatchReason(hit)}
+                      </span>
                       <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                         {hit.enzyme.source}
                       </span>

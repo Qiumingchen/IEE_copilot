@@ -41,6 +41,19 @@ export function formatPdbDiscoveryHitSubtitle(hit: PdbDiscoveryHit): string {
     .join(" | ");
 }
 
+export function formatPdbDiscoveryMatchReason(hit: PdbDiscoveryHit): string {
+  if (hit.evidence.includes("pdb_id")) {
+    return "Exact RCSB PDB ID match";
+  }
+  if (hit.evidence.includes("alphafold_id")) {
+    return "Exact AlphaFold ID match";
+  }
+  if (hit.evidence.includes("sequence_similarity")) {
+    return "Sequence similarity match";
+  }
+  return "Local database match";
+}
+
 export function buildStructureAnalysisHref(enzymeId: string, structureId: string): string {
   return `/enzymes/${encodeURIComponent(enzymeId)}/structures?structure_id=${encodeURIComponent(structureId)}`;
 }

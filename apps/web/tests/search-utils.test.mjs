@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildStructureAnalysisHref,
+  formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
@@ -69,6 +70,32 @@ test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hi
       confidence: "high"
     }),
     "87.5% identity | 75.0% coverage | high confidence | sequence_similarity, local_database"
+  );
+});
+
+test("formatPdbDiscoveryMatchReason explains exact identifier and sequence matches", () => {
+  assert.equal(
+    formatPdbDiscoveryMatchReason({
+      enzyme,
+      identity: 1,
+      coverage: 1,
+      aligned_length: 407,
+      evidence: ["alphafold_id", "local_database"],
+      confidence: "high"
+    }),
+    "Exact AlphaFold ID match"
+  );
+
+  assert.equal(
+    formatPdbDiscoveryMatchReason({
+      enzyme,
+      identity: 0.875,
+      coverage: 0.75,
+      aligned_length: 120,
+      evidence: ["sequence_similarity", "local_database"],
+      confidence: "high"
+    }),
+    "Sequence similarity match"
   );
 });
 
