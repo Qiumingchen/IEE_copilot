@@ -745,7 +745,7 @@ def test_enzyme_search_fetches_rcsb_metadata_when_pdb_not_local(client, db_sessi
     assert structure.ligand_summary == {"ligands": ["GTP"]}
 
 
-def test_enzyme_search_falls_back_to_mock_rcsb_when_real_provider_fails(
+def test_enzyme_search_reports_rcsb_provider_failure_without_mock_fallback(
     client,
     db_session,
     monkeypatch,
@@ -775,14 +775,14 @@ def test_enzyme_search_falls_back_to_mock_rcsb_when_real_provider_fails(
     client.post(
         "/auth/register",
         json={
-            "email": "rcsb-fallback@example.com",
+            "email": "rcsb-failure@example.com",
             "password": "search-password",
-            "display_name": "RCSB Fallback Searcher",
+            "display_name": "RCSB Failure Searcher",
         },
     )
     token = client.post(
         "/auth/login",
-        json={"email": "rcsb-fallback@example.com", "password": "search-password"},
+        json={"email": "rcsb-failure@example.com", "password": "search-password"},
     ).json()["access_token"]
 
     response = client.post(
@@ -791,14 +791,9 @@ def test_enzyme_search_falls_back_to_mock_rcsb_when_real_provider_fails(
         json={"query": "1abc"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    structure = db_session.scalar(
-        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
-    )
-    assert structure.source == "rcsb_mock"
-    assert structure.chain_summary["provenance"]["mode"] == "fallback"
-    assert "rcsb offline" in structure.chain_summary["provenance"]["warning"]
+    assert response.status_code == 503
+    assert "RCSB provider unavailable" in response.json()["error"]["message"]
+    assert db_session.scalar(select(StructureEntry).where(StructureEntry.source == "rcsb_mock")) is None
 
 
 def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, monkeypatch):
@@ -1109,7 +1104,7 @@ def test_enzyme_search_records_uniprot_retrieval_provenance(client, db_session, 
     assert cache_record.payload_json["retrieval_provenance"]["source_url"].endswith("/P77777.json")
 
 
-def test_enzyme_search_falls_back_to_mock_uniprot_when_real_provider_fails(
+def test_enzyme_search_reports_uniprot_provider_failure_without_mock_fallback(
     client,
     db_session,
     monkeypatch,
@@ -1151,14 +1146,14 @@ def test_enzyme_search_falls_back_to_mock_uniprot_when_real_provider_fails(
     client.post(
         "/auth/register",
         json={
-            "email": "uniprot-fallback@example.com",
+            "email": "uniprot-failure@example.com",
             "password": "search-password",
-            "display_name": "UniProt Fallback Searcher",
+            "display_name": "UniProt Failure Searcher",
         },
     )
     token = client.post(
         "/auth/login",
-        json={"email": "uniprot-fallback@example.com", "password": "search-password"},
+        json={"email": "uniprot-failure@example.com", "password": "search-password"},
     ).json()["access_token"]
 
     response = client.post(
@@ -1167,13 +1162,9 @@ def test_enzyme_search_falls_back_to_mock_uniprot_when_real_provider_fails(
         json={"query": "microbial transglutaminase"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    enzyme = db_session.get(EnzymeEntry, body["enzyme"]["id"])
-    assert enzyme.source == "uniprot_mock"
-    job = db_session.get(AnalysisJob, body["job_id"])
-    assert job.parameters_json["retrieval_provenance"]["mode"] == "fallback"
-    assert "offline" in job.parameters_json["retrieval_provenance"]["warning"]
+    assert response.status_code == 503
+    assert "UniProt provider unavailable" in response.json()["error"]["message"]
+    assert db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.source == "uniprot_mock")) is None
 
 
 def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
@@ -1263,7 +1254,7 @@ def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
     assert structure.chain_summary["provenance"]["source_url"] == "mock://alphafold/AF-P99998-F1.pdb"
 
 
-def test_enzyme_search_falls_back_to_mock_alphafold_when_real_provider_fails(
+def test_enzyme_search_skips_alphafold_structure_when_real_provider_fails_without_mock_fallback(
     client,
     db_session,
     monkeypatch,
@@ -1325,14 +1316,14 @@ def test_enzyme_search_falls_back_to_mock_alphafold_when_real_provider_fails(
     client.post(
         "/auth/register",
         json={
-            "email": "alphafold-fallback@example.com",
+            "email": "alphafold-failure@example.com",
             "password": "search-password",
-            "display_name": "AlphaFold Fallback Searcher",
+            "display_name": "AlphaFold Failure Searcher",
         },
     )
     token = client.post(
         "/auth/login",
-        json={"email": "alphafold-fallback@example.com", "password": "search-password"},
+        json={"email": "alphafold-failure@example.com", "password": "search-password"},
     ).json()["access_token"]
 
     response = client.post(
@@ -1346,9 +1337,7 @@ def test_enzyme_search_falls_back_to_mock_alphafold_when_real_provider_fails(
     structure = db_session.scalar(
         select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
     )
-    assert structure.source == "alphafold_mock"
-    assert structure.chain_summary["provenance"]["mode"] == "fallback"
-    assert "alphafold offline" in structure.chain_summary["provenance"]["warning"]
+    assert structure is None
 
 
 def test_enzyme_search_saves_literature_metadata_for_external_hit(
@@ -1437,7 +1426,7 @@ def test_enzyme_search_saves_literature_metadata_for_external_hit(
     assert "thermostability" in reference.metadata_json["abstract"].lower()
 
 
-def test_enzyme_search_falls_back_to_mock_literature_when_real_provider_fails(
+def test_enzyme_search_skips_literature_when_real_provider_fails_without_mock_fallback(
     client,
     db_session,
     monkeypatch,
@@ -1467,14 +1456,14 @@ def test_enzyme_search_falls_back_to_mock_literature_when_real_provider_fails(
     client.post(
         "/auth/register",
         json={
-            "email": "literature-fallback@example.com",
+            "email": "literature-failure@example.com",
             "password": "search-password",
-            "display_name": "Literature Fallback Searcher",
+            "display_name": "Literature Failure Searcher",
         },
     )
     token = client.post(
         "/auth/login",
-        json={"email": "literature-fallback@example.com", "password": "search-password"},
+        json={"email": "literature-failure@example.com", "password": "search-password"},
     ).json()["access_token"]
 
     response = client.post(
@@ -1484,14 +1473,7 @@ def test_enzyme_search_falls_back_to_mock_literature_when_real_provider_fails(
     )
 
     assert response.status_code == 200
-    reference = db_session.scalar(
-        select(LiteratureReference).where(
-            LiteratureReference.doi == "10.0000/mock-mtgase-thermostability"
-        )
-    )
-    assert reference.source == "literature_mock"
-    assert reference.metadata_json["provenance"]["mode"] == "fallback"
-    assert "crossref offline" in reference.metadata_json["provenance"]["warning"]
+    assert db_session.scalar(select(LiteratureReference).where(LiteratureReference.source == "literature_mock")) is None
 
 
 def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, monkeypatch):

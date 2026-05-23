@@ -1,7 +1,6 @@
 import hashlib
 import re
 from collections.abc import Iterable
-from dataclasses import replace
 from datetime import datetime
 
 import httpx
@@ -26,21 +25,11 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_db
-from app.external.alphafold import (
-    AlphaFoldModelMetadata,
-    MockAlphaFoldClient,
-    get_alphafold_client,
-)
+from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
 from app.external.enzyme_data import get_enzyme_data_client
-from app.external.literature import (
-    LiteratureMetadata,
-    MockLiteratureClient,
-    create_literature_reference,
-    get_literature_client,
-)
-from app.external.rcsb import MockRcsbClient, RcsbStructureMetadata, get_rcsb_client
+from app.external.literature import create_literature_reference, get_literature_client
+from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import (
-    MockUniProtClient,
     P81453_FULL_SEQUENCE,
     P81453_MATURE_SEQUENCE,
     UniProtEntry,
@@ -203,19 +192,10 @@ def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | Non
     except (httpx.HTTPError, ValueError) as exc:
         if getattr(client, "source", "uniprot").endswith("_mock"):
             raise
-        fallback_client = MockUniProtClient()
-        entry, fasta, source = _fetch_uniprot_entry_with_client(resolved_query, fallback_client)
-        return (
-            entry,
-            fasta,
-            source,
-            build_fallback_provenance(
-                provider=source,
-                warning=f"UniProt provider failed; fallback mock data used. {exc}",
-            )
-            if entry is not None
-            else None,
-        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"UniProt provider unavailable; no mock enzyme record was created. {exc}",
+        ) from exc
 
 
 def _fetch_uniprot_entry_with_client(resolved_query, client) -> tuple[UniProtEntry | None, str | None, str | None]:
@@ -294,17 +274,18 @@ def _create_enzyme_from_uniprot_entry(
     alphafold_id = entry.cross_references.get("AlphaFoldDB")
     if alphafold_id:
         model, alphafold_source, alphafold_provenance = _fetch_alphafold_model(entry.accession)
-        _create_alphafold_structure(
-            db,
-            enzyme=enzyme,
-            model=model,
-            source=alphafold_source,
-            provenance=alphafold_provenance,
-        )
+        if model is not None:
+            _create_alphafold_structure(
+                db,
+                enzyme=enzyme,
+                model=model,
+                source=alphafold_source,
+                provenance=alphafold_provenance,
+            )
     return enzyme
 
 
-def _fetch_alphafold_model(uniprot_id: str) -> tuple[AlphaFoldModelMetadata, str, dict | None]:
+def _fetch_alphafold_model(uniprot_id: str) -> tuple[AlphaFoldModelMetadata | None, str, dict | None]:
     client = get_alphafold_client()
     source = getattr(client, "source", "alphafold")
     try:
@@ -313,17 +294,10 @@ def _fetch_alphafold_model(uniprot_id: str) -> tuple[AlphaFoldModelMetadata, str
     except (httpx.HTTPError, ValueError) as exc:
         if source.endswith("_mock"):
             raise
-        fallback_client = MockAlphaFoldClient()
-        fallback_source = getattr(fallback_client, "source", "alphafold_mock")
-        model = fallback_client.fetch_model_by_uniprot(uniprot_id)
-        return (
-            model,
-            fallback_source,
-            build_fallback_provenance(
-                provider=fallback_source,
-                warning=f"AlphaFold provider failed; fallback mock model used. {exc}",
-                extra={"source_url": model.structure_url},
-            ),
+        return None, source, build_real_provenance(
+            provider=source,
+            source_url=f"https://alphafold.ebi.ac.uk/search/text/{uniprot_id}",
+            extra={"warning": f"AlphaFold provider failed; no mock model used. {exc}"},
         )
 
 
@@ -331,26 +305,13 @@ def _save_literature_for_enzyme(db: Session, enzyme: EnzymeEntry) -> None:
     client = get_literature_client()
     try:
         hits = client.search_by_enzyme_name(enzyme.name)
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         if getattr(client, "source", "crossref").endswith("_mock"):
             raise
-        fallback_client = MockLiteratureClient()
-        hits = [
-            _with_literature_fallback_provenance(metadata, exc)
-            for metadata in fallback_client.search_by_enzyme_name(enzyme.name)
-        ]
+        hits = []
 
     for metadata in hits:
         create_literature_reference(db, metadata)
-
-
-def _with_literature_fallback_provenance(metadata: LiteratureMetadata, exc: Exception) -> LiteratureMetadata:
-    metadata_json = dict(metadata.metadata)
-    metadata_json["provenance"] = build_fallback_provenance(
-        provider=metadata.source,
-        warning=f"Literature provider failed; fallback mock metadata used. {exc}",
-    )
-    return replace(metadata, metadata=metadata_json)
 
 
 def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
@@ -524,18 +485,10 @@ def _fetch_rcsb_metadata(pdb_id: str) -> tuple[RcsbStructureMetadata, str, dict 
     except (httpx.HTTPError, ValueError) as exc:
         if source.endswith("_mock"):
             raise
-        fallback_client = MockRcsbClient()
-        fallback_source = getattr(fallback_client, "source", "rcsb_mock")
-        metadata = fallback_client.fetch_structure_metadata(pdb_id)
-        return (
-            metadata,
-            fallback_source,
-            build_fallback_provenance(
-                provider=fallback_source,
-                warning=f"RCSB provider failed; fallback mock structure used. {exc}",
-                extra={"source_url": f"https://www.rcsb.org/structure/{metadata.pdb_id}"},
-            ),
-        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"RCSB provider unavailable; no mock structure record was created. {exc}",
+        ) from exc
 
 
 def _provider_provenance(*, provider: str, source_url: str | None, fallback_warning: str) -> dict:

@@ -73,6 +73,10 @@ tool installs.
 
 When fallbacks are enabled, artifacts are still marked with `mode=fallback`.
 Fallback outputs should not be treated as real scientific results.
+In real-provider mode, API-backed search does not silently create mock UniProt,
+RCSB, AlphaFold, or Crossref records when those providers fail. UniProt and RCSB
+provider outages return explicit API errors; AlphaFold and literature outages
+skip those optional enrichment records.
 
 Enzyme property, kinetic, and mutant records are collected from Europe PMC
 literature metadata in real-provider mode. The adapter extracts conservative
