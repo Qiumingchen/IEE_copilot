@@ -64,7 +64,7 @@ def parse_structure_text(text: str, *, file_name: str) -> ParsedStructure:
     if extension == ".pdb":
         atom_rows = _parse_pdb_rows(text)
         structure_type = "uploaded_pdb"
-    elif extension == ".cif":
+    elif extension in {".cif", ".mmcif"}:
         atom_rows = _parse_cif_rows(text)
         structure_type = "uploaded_cif"
     else:

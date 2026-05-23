@@ -38,6 +38,32 @@ END
 """
 
 
+CIF_WITH_SEQUENCE = """\
+data_query
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+ATOM 1 C CA ALA A 1 ? 11.104 13.207 9.342
+ATOM 2 C CA GLU A 2 ? 12.560 13.407 9.142
+ATOM 3 C CA ALA A 3 ? 13.560 13.407 9.142
+ATOM 4 C CA LYS A 4 ? 14.560 13.407 9.142
+ATOM 5 C CA LEU A 5 ? 15.560 13.407 9.142
+ATOM 6 C CA LEU A 6 ? 16.560 13.407 9.142
+ATOM 7 C CA ASN A 7 ? 17.560 13.407 9.142
+ATOM 8 C CA ASP A 8 ? 18.560 13.407 9.142
+#
+"""
+
+
 def _register_and_login(client) -> str:
     client.post(
         "/auth/register",
@@ -275,6 +301,106 @@ def test_pdb_discovery_preserves_sequence_metrics_for_identifier_matches(client,
     assert body["hits"][0]["identity"] == 0.875
     assert body["hits"][0]["coverage"] == 1.0
     assert body["hits"][0]["evidence"] == ["uniprot_id", "sequence_similarity", "local_database"]
+
+
+def test_pdb_discovery_respects_requested_enzyme_module(client, db_session):
+    mtgase_family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    aqgt_family = EnzymeFamily(
+        module=EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE,
+        name="Anthraquinone glycosyltransferases",
+    )
+    db_session.add_all([mtgase_family, aqgt_family])
+    db_session.flush()
+    mtgase_enzyme = EnzymeEntry(
+        family_id=mtgase_family.id,
+        name="mTGase lookalike",
+        organism="Streptomyces mobaraensis",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    aqgt_enzyme = EnzymeEntry(
+        family_id=aqgt_family.id,
+        name="AQGT selected module hit",
+        organism="Streptomyces sp.",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([mtgase_enzyme, aqgt_enzyme])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ProteinSequence(
+                enzyme_entry_id=mtgase_enzyme.id,
+                sequence="AEAKLLND",
+                mature_sequence="AEAKLLND",
+                source="test",
+                checksum="pdb-discovery-module-mtgase",
+            ),
+            ProteinSequence(
+                enzyme_entry_id=aqgt_enzyme.id,
+                sequence="AEAKLLND",
+                mature_sequence=None,
+                source="test",
+                checksum="pdb-discovery-module-aqgt",
+            ),
+        ]
+    )
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"module": EnzymeModule.ANTHRAQUINONE_GLYCOSYLTRANSFERASE.value},
+        files={"file": ("query.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [hit["enzyme"]["id"] for hit in body["hits"]] == [aqgt_enzyme.id]
+
+
+def test_pdb_discovery_accepts_mmcif_extension(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="mmCIF mTGase hit",
+        organism="Streptomyces mobaraensis",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLND",
+            mature_sequence="AEAKLLND",
+            source="test",
+            checksum="pdb-discovery-mmcif",
+        )
+    )
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("query.mmcif", CIF_WITH_SEQUENCE, "chemical/x-cif")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["structure_type"] == "uploaded_cif"
+    assert body["hits"][0]["enzyme"]["id"] == enzyme.id
 
 
 def test_pdb_discovery_matches_alphafold_file_name_to_accession_style_local_id(client, db_session):

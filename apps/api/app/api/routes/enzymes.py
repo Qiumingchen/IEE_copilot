@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -1094,14 +1094,15 @@ def search_enzymes(
 @router.post("/discover-pdb", response_model=PdbDiscoveryResponse)
 async def discover_enzyme_from_pdb(
     file: UploadFile = File(...),
+    module: EnzymeModule = Form(EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> PdbDiscoveryResponse:
     file_name = file.filename or "structure.pdb"
-    if not file_name.lower().endswith((".pdb", ".cif")):
+    if not file_name.lower().endswith((".pdb", ".cif", ".mmcif")):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="only .pdb and .cif structure files are supported",
+            detail="only .pdb, .cif, and .mmcif structure files are supported",
         )
     content = await file.read()
     try:
@@ -1125,7 +1126,6 @@ async def discover_enzyme_from_pdb(
             detail="uploaded structure does not contain a protein sequence",
         )
     query_chain = max(chains, key=lambda chain: chain.residue_count)
-    module = EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
     metadata = _extract_pdb_metadata(text, file_name=file_name)
     return PdbDiscoveryResponse(
         file_name=file_name,

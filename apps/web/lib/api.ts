@@ -89,9 +89,14 @@ export async function searchEnzyme(query: string, token: string): Promise<Search
   return response.json() as Promise<SearchResponse>;
 }
 
-export async function discoverEnzymeFromPdb(file: File, token: string): Promise<PdbDiscoveryResponse> {
+export async function discoverEnzymeFromPdb(
+  file: File,
+  token: string,
+  module = "MICROBIAL_TRANSGLUTAMINASE_MATURE"
+): Promise<PdbDiscoveryResponse> {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("module", module);
   const response = await fetch(apiUrl("/enzymes/discover-pdb"), {
     method: "POST",
     headers: {

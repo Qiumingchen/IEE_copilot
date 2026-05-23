@@ -16,6 +16,16 @@ import {
 } from "./search-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
+const ENZYME_MODULE_OPTIONS = [
+  {
+    label: "Mature microbial transglutaminase",
+    value: "MICROBIAL_TRANSGLUTAMINASE_MATURE"
+  },
+  {
+    label: "Anthraquinone glycosyltransferase",
+    value: "ANTHRAQUINONE_GLYCOSYLTRANSFERASE"
+  }
+];
 
 export default function SearchPage() {
   const router = useRouter();
@@ -24,6 +34,7 @@ export default function SearchPage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [pdbDiscoveryModule, setPdbDiscoveryModule] = useState("MICROBIAL_TRANSGLUTAMINASE_MATURE");
   const [selectedPdbFile, setSelectedPdbFile] = useState<File | null>(null);
   const [pdbDiscovery, setPdbDiscovery] = useState<PdbDiscoveryResponse | null>(null);
   const [pdbDiscoveryError, setPdbDiscoveryError] = useState<string | null>(null);
@@ -83,7 +94,7 @@ export default function SearchPage() {
     setIsDiscoveringPdb(true);
 
     try {
-      const response = await discoverEnzymeFromPdb(selectedPdbFile, token);
+      const response = await discoverEnzymeFromPdb(selectedPdbFile, token, pdbDiscoveryModule);
       setPdbDiscovery(response);
     } catch (caught) {
       if (caught instanceof ApiRequestError && caught.status === 401) {
@@ -179,6 +190,25 @@ export default function SearchPage() {
             <h2 className="mt-1 text-lg font-semibold text-slate-950">Discover from PDB</h2>
           </div>
           <form className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={handlePdbDiscovery}>
+            <label className="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2">
+              Target module
+              <select
+                className="min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                name="module"
+                onChange={(event) => {
+                  setPdbDiscoveryModule(event.target.value);
+                  setPdbDiscovery(null);
+                  setPdbDiscoveryError(null);
+                }}
+                value={pdbDiscoveryModule}
+              >
+                {ENZYME_MODULE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               PDB or mmCIF file
               <input
