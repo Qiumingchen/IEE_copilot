@@ -233,6 +233,50 @@ def test_pdb_discovery_matches_uniprot_id_case_insensitively(client, db_session)
     assert body["hits"][0]["evidence"] == ["uniprot_id", "local_database"]
 
 
+def test_pdb_discovery_preserves_sequence_metrics_for_identifier_matches(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="UniProt-backed sequence mTGase",
+        organism="Streptomyces mobaraensis",
+        uniprot_id="P81453",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence="AEAKLLNE",
+            mature_sequence="AEAKLLNE",
+            source="test",
+            checksum="pdb-discovery-uniprot-sequence-metrics",
+        )
+    )
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("rcsb-with-uniprot.pdb", PDB_WITH_UNIPROT_REFERENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hits"][0]["enzyme"]["id"] == enzyme.id
+    assert body["hits"][0]["confidence"] == "exact"
+    assert body["hits"][0]["identity"] == 0.875
+    assert body["hits"][0]["coverage"] == 1.0
+    assert body["hits"][0]["evidence"] == ["uniprot_id", "sequence_similarity", "local_database"]
+
+
 def test_pdb_discovery_matches_alphafold_file_name_to_accession_style_local_id(client, db_session):
     family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,

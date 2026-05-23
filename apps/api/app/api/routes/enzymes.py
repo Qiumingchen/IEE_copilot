@@ -854,8 +854,10 @@ def _local_pdb_discovery_hits(
         *_sequence_pdb_discovery_hits(db, query_sequence=query_sequence, module=module),
     ]:
         existing_hit = hits_by_enzyme_id.get(hit.enzyme.id)
-        if existing_hit is None or _pdb_discovery_hit_score(hit) > _pdb_discovery_hit_score(existing_hit):
+        if existing_hit is None:
             hits_by_enzyme_id[hit.enzyme.id] = hit
+        else:
+            hits_by_enzyme_id[hit.enzyme.id] = _merge_pdb_discovery_hits(existing_hit, hit)
 
     hits = sorted(
         hits_by_enzyme_id.values(),
@@ -863,6 +865,35 @@ def _local_pdb_discovery_hits(
         reverse=True,
     )
     return hits[:limit]
+
+
+def _merge_pdb_discovery_hits(existing: PdbDiscoveryHit, incoming: PdbDiscoveryHit) -> PdbDiscoveryHit:
+    sequence_hit = _best_sequence_pdb_discovery_hit(existing, incoming)
+    metric_hit = sequence_hit or max([existing, incoming], key=_pdb_discovery_hit_score)
+    confidence = max(
+        [existing.confidence, incoming.confidence],
+        key=lambda value: {"exact": 3, "high": 2, "medium": 1}.get(value, 0),
+    )
+    evidence = [
+        evidence
+        for evidence in ["pdb_id", "alphafold_id", "uniprot_id", "sequence_similarity", "local_database"]
+        if evidence in {*existing.evidence, *incoming.evidence}
+    ]
+    return PdbDiscoveryHit(
+        enzyme=metric_hit.enzyme,
+        identity=metric_hit.identity,
+        coverage=metric_hit.coverage,
+        aligned_length=metric_hit.aligned_length,
+        evidence=evidence,
+        confidence=confidence,
+    )
+
+
+def _best_sequence_pdb_discovery_hit(*hits: PdbDiscoveryHit) -> PdbDiscoveryHit | None:
+    sequence_hits = [hit for hit in hits if "sequence_similarity" in hit.evidence]
+    if not sequence_hits:
+        return None
+    return max(sequence_hits, key=lambda hit: (hit.identity, hit.coverage, hit.aligned_length))
 
 
 def _pdb_discovery_hit_score(hit: PdbDiscoveryHit) -> tuple[int, float, float, int]:

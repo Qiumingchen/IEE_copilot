@@ -31,9 +31,10 @@ export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
 }
 
 export function formatPdbDiscoveryHitSubtitle(hit: PdbDiscoveryHit): string {
+  const hasSequenceMetrics = hit.evidence.includes("sequence_similarity");
   return [
-    `${(hit.identity * 100).toFixed(1)}% identity`,
-    `${(hit.coverage * 100).toFixed(1)}% coverage`,
+    hasSequenceMetrics ? `${(hit.identity * 100).toFixed(1)}% identity` : "Identifier match",
+    hasSequenceMetrics ? `${(hit.coverage * 100).toFixed(1)}% coverage` : null,
     `${hit.confidence} confidence`,
     hit.evidence.join(", ")
   ]

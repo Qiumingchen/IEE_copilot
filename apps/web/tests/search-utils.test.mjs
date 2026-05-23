@@ -71,6 +71,18 @@ test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hi
     }),
     "87.5% identity | 75.0% coverage | high confidence | sequence_similarity, local_database"
   );
+
+  assert.equal(
+    formatPdbDiscoveryHitSubtitle({
+      enzyme,
+      identity: 1,
+      coverage: 1,
+      aligned_length: 407,
+      evidence: ["uniprot_id", "local_database"],
+      confidence: "exact"
+    }),
+    "Identifier match | exact confidence | uniprot_id, local_database"
+  );
 });
 
 test("formatPdbDiscoveryMatchReason explains exact identifier and sequence matches", () => {
