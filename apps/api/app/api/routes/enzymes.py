@@ -66,6 +66,10 @@ from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind, resolve_query
 from app.services.provenance import build_fallback_provenance, build_real_provenance
 from app.services.similarity_matching import calculate_ungapped_similarity, find_level_two_similarity_match
+from app.services.structure_identifiers import (
+    alphafold_identifier_candidates,
+    extract_structure_database_identifiers,
+)
 from app.services.structure_parser import StructureParseError, parse_structure_text
 from worker.jobs import run_placeholder_analysis
 
@@ -648,48 +652,27 @@ def _extract_pdb_metadata(text: str, *, file_name: str) -> PdbDiscoveryMetadata:
     title_parts: list[str] = []
     compnd_parts: list[str] = []
     source_parts: list[str] = []
-    pdb_id: str | None = None
-    uniprot_id: str | None = None
-    alphafold_id = _extract_alphafold_id(file_name)
+    identifiers = extract_structure_database_identifiers(text, file_name=file_name)
 
     for line in text.splitlines():
         record = line[0:6].strip().upper()
-        if record == "HEADER":
-            candidate_id = line[62:67].strip().upper()
-            if not candidate_id:
-                match = re.search(r"\b[0-9][A-Z0-9]{3}\b", line.upper())
-                candidate_id = match.group(0) if match else ""
-            if candidate_id:
-                pdb_id = candidate_id
-        elif record == "TITLE":
+        if record == "TITLE":
             title_parts.append(line[10:].strip())
         elif record == "COMPND":
             compnd_parts.append(line[10:].strip())
         elif record == "SOURCE":
             source_parts.append(line[10:].strip())
-        elif record == "DBREF" and len(line) >= 42:
-            database = line[26:32].strip().upper()
-            accession = line[33:41].strip()
-            if database in {"UNP", "UNIPROT"} and accession:
-                uniprot_id = accession
-        if alphafold_id is None:
-            alphafold_id = _extract_alphafold_id(line)
 
     compnd_text = " ".join(compnd_parts)
     source_text = " ".join(source_parts)
     return PdbDiscoveryMetadata(
-        pdb_id=pdb_id,
+        pdb_id=identifiers.get("pdb_id"),
         title=" ".join(title_parts) or None,
         enzyme_name=_extract_pdb_semicolon_field(compnd_text, "MOLECULE"),
         organism=_extract_pdb_semicolon_field(source_text, "ORGANISM_SCIENTIFIC"),
-        uniprot_id=uniprot_id,
-        alphafold_id=alphafold_id,
+        uniprot_id=identifiers.get("uniprot_id"),
+        alphafold_id=identifiers.get("alphafold_id"),
     )
-
-
-def _extract_alphafold_id(text: str) -> str | None:
-    match = re.search(r"\bAF-[A-Z0-9]+-F\d+\b", text.upper())
-    return match.group(0) if match else None
 
 
 def _extract_pdb_semicolon_field(text: str, field_name: str) -> str | None:
@@ -760,7 +743,7 @@ def _identifier_pdb_discovery_hits(
             add_hit(enzyme, "pdb_id")
 
     if metadata.alphafold_id:
-        alphafold_ids = _alphafold_identifier_candidates(metadata.alphafold_id)
+        alphafold_ids = alphafold_identifier_candidates(metadata.alphafold_id)
         enzymes = db.scalars(
             select(EnzymeEntry)
             .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
@@ -769,6 +752,20 @@ def _identifier_pdb_discovery_hits(
         ).all()
         for enzyme in enzymes:
             add_hit(enzyme, "alphafold_id")
+
+        structure_rows = db.execute(
+            select(EnzymeEntry, StructureEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
+            .where(EnzymeFamily.module == module)
+        ).all()
+        for enzyme, structure in structure_rows:
+            identifiers = structure.chain_summary.get("identifiers") if structure.chain_summary else None
+            if not isinstance(identifiers, dict):
+                continue
+            structure_alphafold_id = identifiers.get("alphafold_id")
+            if isinstance(structure_alphafold_id, str) and structure_alphafold_id in alphafold_ids:
+                add_hit(enzyme, "alphafold_id")
 
     if metadata.uniprot_id:
         enzymes = db.scalars(
@@ -780,15 +777,21 @@ def _identifier_pdb_discovery_hits(
         for enzyme in enzymes:
             add_hit(enzyme, "uniprot_id")
 
+        structure_rows = db.execute(
+            select(EnzymeEntry, StructureEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
+            .where(EnzymeFamily.module == module)
+        ).all()
+        for enzyme, structure in structure_rows:
+            identifiers = structure.chain_summary.get("identifiers") if structure.chain_summary else None
+            if not isinstance(identifiers, dict):
+                continue
+            structure_uniprot_id = identifiers.get("uniprot_id")
+            if structure_uniprot_id == metadata.uniprot_id:
+                add_hit(enzyme, "uniprot_id")
+
     return list(hits_by_enzyme_id.values())
-
-
-def _alphafold_identifier_candidates(alphafold_id: str) -> set[str]:
-    candidates = {alphafold_id}
-    match = re.fullmatch(r"AF-([A-Z0-9]+)-F\d+", alphafold_id.upper())
-    if match:
-        candidates.add(match.group(1))
-    return candidates
 
 
 def _sequence_pdb_discovery_hits(

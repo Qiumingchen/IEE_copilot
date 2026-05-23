@@ -28,6 +28,21 @@ END
 """
 
 
+PDB_WITH_DATABASE_IDENTIFIERS = """\
+HEADER    TRANSFERASE                              01-JAN-26   9XYZ
+TITLE     ALPHAFOLD MONOMER V2.0 PREDICTION FOR PROTEIN-GLUTAMINE GAMMA-
+TITLE    2 GLUTAMYLTRANSFERASE (P81453)
+COMPND    MOL_ID: 1; MOLECULE: PROTEIN-GLUTAMINE GAMMA-GLUTAMYLTRANSFERASE; CHAIN: A;
+SOURCE    MOL_ID: 1; ORGANISM_SCIENTIFIC: STREPTOMYCES MOBARAENSIS;
+DBREF  XXXX A    1   407  UNP    P81453   TGAS_STRMB       1    407
+ATOM      1  N   MET A   1      11.104  13.207   9.342  1.00 20.00           N
+ATOM      2  CA  MET A   1      12.560  13.407   9.142  1.00 20.00           C
+ATOM      3  N   GLY A   2      14.104  11.907   8.242  1.00 20.00           N
+ATOM      4  CA  GLY A   2      15.560  11.407   8.142  1.00 20.00           C
+END
+"""
+
+
 CIF_COMPLEX_UPLOAD = """\
 data_demo
 loop_
@@ -289,6 +304,46 @@ def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_se
     assert body["ligand_summary"]["ligands"][0]["ligand_code"] == "AQ1"
     assert body["ligand_summary"]["metal_ions"][0]["ligand_code"] == "ZN"
     assert body["ligands"][0]["ligand_code"] == "AQ1"
+
+
+def test_upload_structure_file_records_database_identifiers(client, db_session, monkeypatch):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    def fake_store_structure_file(*, file_name, content, content_type):
+        return {
+            "bucket": "iee-artifacts",
+            "object_key": f"structures/test/{file_name}",
+            "checksum": "checksum-identifiers",
+            "content_type": content_type,
+            "size_bytes": len(content),
+        }
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.store_structure_file",
+        fake_store_structure_file,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures/upload",
+        headers=headers,
+        files={
+            "file": (
+                "AF-P81453-F1-model_v6.pdb",
+                PDB_WITH_DATABASE_IDENTIFIERS.encode(),
+                "chemical/x-pdb",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["pdb_id"] == "9XYZ"
+    assert body["chain_summary"]["identifiers"] == {
+        "pdb_id": "9XYZ",
+        "uniprot_id": "P81453",
+        "alphafold_id": "AF-P81453-F1",
+    }
 
 
 def test_upload_cif_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):

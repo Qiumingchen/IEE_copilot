@@ -38,6 +38,7 @@ export type StructureStatsView = {
   metal_count: number | string;
   residue_count: number;
   complex_state: string;
+  database_identifiers: string;
   artifact_object_key: string;
 };
 
@@ -209,8 +210,24 @@ export function getStructureStats(structure: StructureRecord): StructureStatsVie
     metal_count: valueOrDash(structure.ligand_summary?.metal_count),
     residue_count: chains.reduce((total, chain) => total + numberValue(chain.residue_count), 0),
     complex_state: structure.complex_state,
+    database_identifiers: getStructureDatabaseIdentifiers(structure),
     artifact_object_key: structure.artifact?.object_key ?? "-"
   };
+}
+
+function getStructureDatabaseIdentifiers(structure: StructureRecord): string {
+  const identifiers = isRecord(structure.chain_summary?.identifiers)
+    ? structure.chain_summary.identifiers
+    : {};
+  return [
+    structure.pdb_id ? `RCSB PDB ${structure.pdb_id}` : valueAsString(identifiers.pdb_id, "RCSB PDB"),
+    valueAsString(identifiers.uniprot_id, "UniProt"),
+    valueAsString(identifiers.alphafold_id, "AlphaFold")
+  ].filter(Boolean).join(" | ") || "-";
+}
+
+function valueAsString(value: unknown, label: string): string | null {
+  return typeof value === "string" && value.trim() ? `${label} ${value.trim()}` : null;
 }
 
 export function buildStructureWarnings(structure: StructureRecord): string[] {

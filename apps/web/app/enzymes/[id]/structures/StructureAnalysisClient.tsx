@@ -317,6 +317,12 @@ export default function StructureAnalysisClient({ enzymeId, initialStructureId =
               <MetricCard label="Metals" value={stats.metal_count} />
               <MetricCard label="State" value={stats.complex_state} />
             </section>
+            <section className="rounded-md border border-slate-200 bg-white p-4">
+              <p className="text-xs font-medium uppercase text-slate-500">Database identifiers</p>
+              <p className="mt-1 break-words font-mono text-sm text-slate-950">
+                {stats.database_identifiers}
+              </p>
+            </section>
 
             <div className="flex flex-wrap justify-end gap-2">
               <button

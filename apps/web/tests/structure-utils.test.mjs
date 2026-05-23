@@ -48,6 +48,11 @@ const structure = {
       warning: "AlphaFold provider failed",
       source_url: "mock://alphafold/AF-P99998-F1.pdb"
     },
+    identifiers: {
+      pdb_id: "9XYZ",
+      uniprot_id: "P81453",
+      alphafold_id: "AF-P81453-F1"
+    },
     warnings: ["missing residue around A3"],
     preview_atoms: [
       {
@@ -229,6 +234,7 @@ test("summarizes structure stats and warnings", () => {
     metal_count: 1,
     residue_count: 2,
     complex_state: "enzyme_substrate_complex",
+    database_identifiers: "RCSB PDB 9XYZ | UniProt P81453 | AlphaFold AF-P81453-F1",
     artifact_object_key: "structures/structure-1/complex.pdb"
   });
   assert.deepEqual(buildStructureWarnings(structure), ["missing residue around A3"]);

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence
+from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, StructureEntry
 
 
 PDB_WITH_SEQUENCE = """\
@@ -210,6 +210,52 @@ def test_pdb_discovery_matches_alphafold_file_name_to_accession_style_local_id(c
     assert response.status_code == 200
     body = response.json()
     assert body["metadata"]["alphafold_id"] == "AF-P81453-F1"
+    assert body["hits"][0]["enzyme"]["id"] == enzyme.id
+    assert body["hits"][0]["confidence"] == "exact"
+    assert body["hits"][0]["evidence"] == ["alphafold_id", "local_database"]
+
+
+def test_pdb_discovery_groups_upload_with_structure_level_alphafold_id(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Structure-level AlphaFold mTGase",
+        organism="Streptomyces mobaraensis",
+        source="local",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        StructureEntry(
+            enzyme_entry_id=enzyme.id,
+            structure_type="uploaded_pdb",
+            complex_state="apo",
+            chain_summary={
+                "identifiers": {
+                    "alphafold_id": "AF-P81453-F1",
+                    "uniprot_id": "P81453",
+                }
+            },
+            source="user_upload",
+        )
+    )
+    db_session.commit()
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("AF-P81453-F1-model_v6.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
     assert body["hits"][0]["enzyme"]["id"] == enzyme.id
     assert body["hits"][0]["confidence"] == "exact"
     assert body["hits"][0]["evidence"] == ["alphafold_id", "local_database"]

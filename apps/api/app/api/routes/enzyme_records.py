@@ -75,6 +75,7 @@ from app.services.object_storage import read_structure_file, store_structure_fil
 from app.services.property_ranking import build_property_ranking
 from app.services.property_standardization import standardize_property_value
 from app.services.structure_parser import StructureParseError, parse_structure_text
+from app.services.structure_identifiers import extract_structure_database_identifiers
 from app.services.mutations import (
     MutationParseError,
     normalize_mutation_string,
@@ -1094,7 +1095,8 @@ async def upload_structure(
 
     content = await file.read()
     try:
-        parsed = parse_structure_text(content.decode("utf-8"), file_name=file_name)
+        text = content.decode("utf-8")
+        parsed = parse_structure_text(text, file_name=file_name)
     except UnicodeDecodeError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1125,11 +1127,17 @@ async def upload_structure(
     db.add(artifact)
     db.flush()
 
+    identifiers = extract_structure_database_identifiers(text, file_name=file_name)
+    chain_summary = dict(parsed.chain_summary)
+    if identifiers:
+        chain_summary["identifiers"] = identifiers
+
     structure = StructureEntry(
         enzyme_entry_id=enzyme.id,
         structure_type=parsed.structure_type,
         complex_state=parsed.complex_state,
-        chain_summary=parsed.chain_summary,
+        pdb_id=identifiers.get("pdb_id"),
+        chain_summary=chain_summary,
         ligand_summary=parsed.ligand_summary,
         artifact_id=artifact.id,
         source="user_upload",
