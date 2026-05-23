@@ -21,6 +21,25 @@ from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, U
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
 
 
+class EmptyUniProtClient:
+    source = "uniprot"
+
+    def search_by_ec(self, ec_number: str, size: int = 5):
+        return []
+
+    def search_by_keyword(self, keyword: str, size: int = 5):
+        return []
+
+    def search_by_organism(self, organism: str, size: int = 5):
+        return []
+
+    def fetch_entry(self, accession: str):
+        raise AssertionError("search should not fetch an entry without hits")
+
+    def fetch_fasta(self, accession: str):
+        raise AssertionError("search should not fetch FASTA without hits")
+
+
 def test_seed_mtgase_sequence_repair_updates_old_mock_mature_sequence(db_session):
     family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
@@ -105,6 +124,11 @@ def test_cached_mock_mtgase_search_repairs_old_uniprot_mock_sequence(
     monkeypatch.setattr(
         "app.api.routes.enzymes.run_placeholder_analysis",
         PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: EmptyUniProtClient(),
         raising=False,
     )
 
@@ -405,6 +429,129 @@ def test_enzyme_search_orders_source_matches_by_reviewed_temperature_and_activit
     assert matches[0]["uniprot_reviewed"] is True
     assert matches[1]["optimal_temperature"] == 85.0
     assert matches[2]["specific_activity"] == 900.0
+
+
+def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: EmptyUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-empty-search@example.com",
+            "password": "search-password",
+            "display_name": "Real Empty Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-empty-search@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "no such food enzyme"},
+    )
+
+    assert response.status_code == 404
+    assert "No real enzyme record found" in response.json()["error"]["message"]
+    assert db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.source == "seed")) is None
+
+
+def test_real_provider_search_excludes_mock_and_seed_entries_from_matches(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food enzyme family",
+    )
+    db_session.add(family)
+    db_session.flush()
+    real_enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase real",
+        organism="Bacillus realensis",
+        source="uniprot",
+        uniprot_id="R11111",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    mock_enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase mock",
+        organism="Bacillus mockensis",
+        source="uniprot_mock",
+        uniprot_id="M11111",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    seed_enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase seed",
+        organism="Bacillus seedensis",
+        source="seed",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([real_enzyme, mock_enzyme, seed_enzyme])
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: EmptyUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-match-filter@example.com",
+            "password": "search-password",
+            "display_name": "Real Match Filter",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-match-filter@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "Food lipase real"},
+    )
+
+    assert response.status_code == 200
+    assert [match["id"] for match in response.json()["matches"]] == [real_enzyme.id]
 
 
 def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch):

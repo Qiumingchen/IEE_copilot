@@ -7,6 +7,7 @@ import {
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
+  paginateItems,
   sortPdbDiscoveryHits,
   sortSearchMatches,
   searchResultMatches
@@ -135,6 +136,32 @@ test("sortPdbDiscoveryHits sorts by enzyme-level ranking fields without changing
     "hot",
     "reviewed"
   ]);
+});
+
+test("paginateItems returns one-based pages with adjustable page sizes", () => {
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: `enzyme-${index + 1}` }));
+
+  assert.deepEqual(paginateItems(items, 1, 10).items.map((item) => item.id), [
+    "enzyme-1",
+    "enzyme-2",
+    "enzyme-3",
+    "enzyme-4",
+    "enzyme-5",
+    "enzyme-6",
+    "enzyme-7",
+    "enzyme-8",
+    "enzyme-9",
+    "enzyme-10"
+  ]);
+  assert.deepEqual(paginateItems(items, 3, 10).items.map((item) => item.id), [
+    "enzyme-21",
+    "enzyme-22",
+    "enzyme-23",
+    "enzyme-24",
+    "enzyme-25"
+  ]);
+  assert.equal(paginateItems(items, 99, 20).page, 2);
+  assert.equal(paginateItems(items, 99, 20).pageCount, 2);
 });
 
 test("formatPdbDiscoveryHitSubtitle summarizes similarity evidence for upload hits", () => {

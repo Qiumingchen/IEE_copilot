@@ -12,6 +12,7 @@ import {
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
+  paginateItems,
   pdbDiscoveryErrorMessage,
   sortPdbDiscoveryHits,
   sortSearchMatches,
@@ -19,6 +20,7 @@ import {
 } from "./search-utils";
 
 const TOKEN_KEY = "iee-copilot-token";
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
 export default function SearchPage() {
   const router = useRouter();
@@ -34,6 +36,10 @@ export default function SearchPage() {
   const [attachingHitId, setAttachingHitId] = useState<string | null>(null);
   const [searchSortMode, setSearchSortMode] = useState<EnzymeSortMode>("default");
   const [pdbSortMode, setPdbSortMode] = useState<EnzymeSortMode>("default");
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchPageSize, setSearchPageSize] = useState(10);
+  const [pdbPage, setPdbPage] = useState(1);
+  const [pdbPageSize, setPdbPageSize] = useState(10);
 
   useEffect(() => {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
@@ -54,6 +60,7 @@ export default function SearchPage() {
     setError(null);
     setResult(null);
     setSearchSortMode("default");
+    setSearchPage(1);
     setIsSearching(true);
 
     try {
@@ -72,6 +79,7 @@ export default function SearchPage() {
     setPdbDiscovery(null);
     setPdbDiscoveryError(null);
     setPdbSortMode("default");
+    setPdbPage(1);
   }
 
   async function handlePdbDiscovery(event: FormEvent<HTMLFormElement>) {
@@ -88,6 +96,7 @@ export default function SearchPage() {
     setPdbDiscovery(null);
     setPdbDiscoveryError(null);
     setPdbSortMode("default");
+    setPdbPage(1);
     setIsDiscoveringPdb(true);
 
     try {
@@ -144,6 +153,11 @@ export default function SearchPage() {
       setAttachingHitId(null);
     }
   }
+
+  const searchMatches = result ? sortSearchMatches(searchResultMatches(result), searchSortMode) : [];
+  const pagedSearchMatches = paginateItems(searchMatches, searchPage, searchPageSize);
+  const pdbHits = pdbDiscovery ? sortPdbDiscoveryHits(pdbDiscovery.hits, pdbSortMode) : [];
+  const pagedPdbHits = paginateItems(pdbHits, pdbPage, pdbPageSize);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -241,7 +255,10 @@ export default function SearchPage() {
               Sort enzymes
               <select
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
-                onChange={(event) => setPdbSortMode(event.target.value as EnzymeSortMode)}
+                onChange={(event) => {
+                  setPdbSortMode(event.target.value as EnzymeSortMode);
+                  setPdbPage(1);
+                }}
                 value={pdbSortMode}
               >
                 <option value="default">Best match</option>
@@ -250,6 +267,14 @@ export default function SearchPage() {
                 <option value="activity">Highest specific activity</option>
               </select>
             </label>
+            <PageSizeSelect
+              label="Results per page"
+              pageSize={pdbPageSize}
+              onChange={(value) => {
+                setPdbPageSize(value);
+                setPdbPage(1);
+              }}
+            />
           </div>
 
           <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -288,7 +313,7 @@ export default function SearchPage() {
 
           <div className="mt-5 grid gap-3">
             {pdbDiscovery.hits.length > 0 ? (
-              sortPdbDiscoveryHits(pdbDiscovery.hits, pdbSortMode).map((hit) => (
+              pagedPdbHits.items.map((hit) => (
                 <article
                   className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
                   key={hit.enzyme.id}
@@ -334,6 +359,15 @@ export default function SearchPage() {
               </p>
             )}
           </div>
+          {pdbDiscovery.hits.length > 0 ? (
+            <PaginationControls
+              page={pagedPdbHits.page}
+              pageCount={pagedPdbHits.pageCount}
+              totalCount={pdbHits.length}
+              onPrevious={() => setPdbPage((page) => Math.max(1, page - 1))}
+              onNext={() => setPdbPage((page) => Math.min(pagedPdbHits.pageCount, page + 1))}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -351,7 +385,10 @@ export default function SearchPage() {
                 Sort enzymes
                 <select
                   className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
-                  onChange={(event) => setSearchSortMode(event.target.value as EnzymeSortMode)}
+                  onChange={(event) => {
+                    setSearchSortMode(event.target.value as EnzymeSortMode);
+                    setSearchPage(1);
+                  }}
                   value={searchSortMode}
                 >
                   <option value="default">Recommended</option>
@@ -360,6 +397,14 @@ export default function SearchPage() {
                   <option value="activity">Highest specific activity</option>
                 </select>
               </label>
+              <PageSizeSelect
+                label="Results per page"
+                pageSize={searchPageSize}
+                onChange={(value) => {
+                  setSearchPageSize(value);
+                  setSearchPage(1);
+                }}
+              />
               <Link
                 className="self-end rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
                 href={`/jobs/${result.job_id}`}
@@ -370,7 +415,7 @@ export default function SearchPage() {
           </div>
 
           <div className="mt-5 grid gap-3">
-            {sortSearchMatches(searchResultMatches(result), searchSortMode).map((match) => (
+            {pagedSearchMatches.items.map((match) => (
               <Link
                 className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
                 href={`/enzymes/${match.id}`}
@@ -389,6 +434,13 @@ export default function SearchPage() {
               </Link>
             ))}
           </div>
+          <PaginationControls
+            page={pagedSearchMatches.page}
+            pageCount={pagedSearchMatches.pageCount}
+            totalCount={searchMatches.length}
+            onPrevious={() => setSearchPage((page) => Math.max(1, page - 1))}
+            onNext={() => setSearchPage((page) => Math.min(pagedSearchMatches.pageCount, page + 1))}
+          />
 
           <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-md border border-slate-200 bg-white p-4">
@@ -404,6 +456,73 @@ export default function SearchPage() {
       ) : null}
 
     </main>
+  );
+}
+
+function PageSizeSelect({
+  label,
+  pageSize,
+  onChange
+}: {
+  label: string;
+  pageSize: number;
+  onChange: (pageSize: number) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-sm font-medium text-slate-700">
+      {label}
+      <select
+        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+        onChange={(event) => onChange(Number(event.target.value))}
+        value={pageSize}
+      >
+        {PAGE_SIZE_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function PaginationControls({
+  page,
+  pageCount,
+  totalCount,
+  onPrevious,
+  onNext
+}: {
+  page: number;
+  pageCount: number;
+  totalCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+      <span>
+        Page {page} of {pageCount}, {totalCount} total
+      </span>
+      <div className="flex gap-2">
+        <button
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+          disabled={page <= 1}
+          onClick={onPrevious}
+          type="button"
+        >
+          Previous
+        </button>
+        <button
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+          disabled={page >= pageCount}
+          onClick={onNext}
+          type="button"
+        >
+          Next
+        </button>
+      </div>
+    </div>
   );
 }
 

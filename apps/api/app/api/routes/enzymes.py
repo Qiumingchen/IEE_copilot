@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
+from app.core.config import get_settings
 from app.db.models import (
     AnalysisJob,
     EnzymeEntry,
@@ -568,6 +569,8 @@ def _search_result_matches(
             .limit(100)
         )
     )
+    if get_settings().use_real_science_providers:
+        candidates = [candidate for candidate in candidates if not _is_mock_or_seed_source(candidate.source)]
 
     def score(candidate: EnzymeEntry) -> tuple[int, int]:
         haystack = " ".join(
@@ -603,6 +606,58 @@ def _search_result_matches(
         if len(matches) >= limit:
             break
     return matches
+
+
+def _find_local_keyword_match(
+    db: Session,
+    *,
+    module: EnzymeModule,
+    query: str,
+) -> EnzymeEntry | None:
+    query_terms = [term for term in query.lower().replace("_", " ").split() if term]
+    if not query_terms:
+        return None
+
+    enzyme_query = (
+        select(EnzymeEntry)
+        .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+        .where(EnzymeFamily.module == module)
+        .order_by(EnzymeEntry.updated_at.desc(), EnzymeEntry.created_at.desc())
+        .limit(200)
+    )
+    candidates = list(db.scalars(enzyme_query))
+    if get_settings().use_real_science_providers:
+        candidates = [candidate for candidate in candidates if not _is_mock_or_seed_source(candidate.source)]
+
+    if not candidates:
+        return None
+
+    normalized_query = query.lower().strip()
+    scientific_ranks = _enzyme_scientific_rankings(db, candidates)
+
+    def score(candidate: EnzymeEntry) -> tuple[int, int, tuple[int, float, float]]:
+        haystack = " ".join(
+            [
+                candidate.name or "",
+                candidate.organism or "",
+                candidate.ec_number or "",
+                candidate.uniprot_id or "",
+                candidate.pdb_id or "",
+                candidate.alphafold_id or "",
+            ]
+        ).lower()
+        if not haystack:
+            return (0, 0, (0, 0.0, 0.0))
+        exact_score = 10 if normalized_query in haystack else 0
+        term_score = sum(1 for term in query_terms if term in haystack)
+        return (exact_score, term_score, scientific_ranks.get(candidate.id, (0, 0.0, 0.0)))
+
+    ranked = sorted(candidates, key=score, reverse=True)
+    best = ranked[0]
+    exact_score, term_score, _ = score(best)
+    if exact_score <= 0 and term_score <= 0:
+        return None
+    return best
 
 
 def _enzyme_scientific_rankings(
@@ -690,6 +745,11 @@ def _parse_numeric_property(value: str | None) -> float | None:
     if not match:
         return None
     return float(match.group(0))
+
+
+def _is_mock_or_seed_source(source: str | None) -> bool:
+    value = (source or "").lower()
+    return value == "seed" or value.endswith("_mock")
 
 
 def _extract_pdb_metadata(text: str, *, file_name: str) -> PdbDiscoveryMetadata:
@@ -1007,7 +1067,13 @@ def search_enzymes(
     )
     if fresh_cache and fresh_cache.enzyme_entry_id:
         cached_enzyme = db.get(EnzymeEntry, fresh_cache.enzyme_entry_id)
-        if cached_enzyme is not None:
+        if (
+            cached_enzyme is not None
+            and not (
+                get_settings().use_real_science_providers
+                and _is_mock_or_seed_source(cached_enzyme.source)
+            )
+        ):
             enzyme = cached_enzyme
             cache_status = "hit"
             if isinstance(fresh_cache.payload_json, dict):
@@ -1035,8 +1101,24 @@ def search_enzymes(
             query_kind=resolved.kind,
             normalized_query=resolved.normalized_query,
         )
-        if exact_match is not None:
+        if (
+            exact_match is not None
+            and not (
+                get_settings().use_real_science_providers
+                and _is_mock_or_seed_source(exact_match.source)
+            )
+        ):
             enzyme = exact_match
+            if is_fresh(enzyme.last_refreshed_at):
+                cache_status = "hit"
+            else:
+                enzyme.last_refreshed_at = datetime.utcnow()
+                cache_status = "stale_refreshed"
+
+    if enzyme is None and resolved.kind == QueryKind.KEYWORD:
+        keyword_match = _find_local_keyword_match(db, module=module, query=request.query)
+        if keyword_match is not None:
+            enzyme = keyword_match
             if is_fresh(enzyme.last_refreshed_at):
                 cache_status = "hit"
             else:
@@ -1092,6 +1174,12 @@ def search_enzymes(
         cache_status = "stale_refreshed"
     elif enzyme is not None and stale_cache is not None and not is_fresh(stale_cache.last_refreshed_at):
         cache_status = "stale_refreshed"
+
+    if enzyme is None and get_settings().use_real_science_providers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No real enzyme record found for this query; no seed or mock record was created.",
+        )
 
     seed_name = (
         "Microbial transglutaminase"

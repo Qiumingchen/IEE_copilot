@@ -40,6 +40,22 @@ export function sortPdbDiscoveryHits(hits: PdbDiscoveryHit[], sortMode: EnzymeSo
   return [...hits].sort((left, right) => compareEnzymeSummaries(left.enzyme, right.enzyme, sortMode));
 }
 
+export function paginateItems<T>(
+  items: T[],
+  requestedPage: number,
+  pageSize: number
+): { items: T[]; page: number; pageCount: number } {
+  const safePageSize = Math.max(1, pageSize);
+  const pageCount = Math.max(1, Math.ceil(items.length / safePageSize));
+  const page = Math.min(Math.max(1, requestedPage), pageCount);
+  const start = (page - 1) * safePageSize;
+  return {
+    items: items.slice(start, start + safePageSize),
+    page,
+    pageCount
+  };
+}
+
 function compareEnzymeSummaries(left: EnzymeSummary, right: EnzymeSummary, sortMode: EnzymeSortMode): number {
   if (sortMode === "reviewed") {
     return Number(right.uniprot_reviewed) - Number(left.uniprot_reviewed);
