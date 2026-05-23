@@ -31,9 +31,29 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/backend";
 
+export class ApiRequestError extends Error {
+  status: number;
+  detail: string | null;
+
+  constructor(message: string, status: number, detail: string | null = null) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 export function apiUrl(path: string): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE}${normalizedPath}`;
+}
+
+async function apiErrorFromResponse(response: Response, fallback: string): Promise<ApiRequestError> {
+  const body = (await response.json().catch(() => null)) as
+    | { detail?: string; error?: { message?: string } }
+    | null;
+  const detail = body?.error?.message ?? body?.detail ?? null;
+  return new ApiRequestError(detail ?? `${fallback} with status ${response.status}`, response.status, detail);
 }
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
@@ -63,7 +83,7 @@ export async function searchEnzyme(query: string, token: string): Promise<Search
   });
 
   if (!response.ok) {
-    throw new Error(`Search failed with status ${response.status}`);
+    throw await apiErrorFromResponse(response, "Search failed");
   }
 
   return response.json() as Promise<SearchResponse>;
@@ -81,7 +101,7 @@ export async function discoverEnzymeFromPdb(file: File, token: string): Promise<
   });
 
   if (!response.ok) {
-    throw new Error(`PDB discovery failed with status ${response.status}`);
+    throw await apiErrorFromResponse(response, "PDB discovery failed");
   }
 
   return response.json() as Promise<PdbDiscoveryResponse>;
@@ -98,7 +118,7 @@ async function fetchWithToken<T>(path: string, token: string, init?: RequestInit
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
+    throw await apiErrorFromResponse(response, "API request failed");
   }
 
   return response.json() as Promise<T>;
@@ -122,7 +142,11 @@ async function fetchWithTokenAndErrorMessage<T>(
     const body = (await response.json().catch(() => null)) as
       | { error?: { message?: string } }
       | null;
-    throw new Error(body?.error?.message ?? `API request failed with status ${response.status}`);
+    throw new ApiRequestError(
+      body?.error?.message ?? `API request failed with status ${response.status}`,
+      response.status,
+      body?.error?.message ?? null
+    );
   }
 
   return response.json() as Promise<T>;
@@ -339,10 +363,7 @@ export async function uploadStructureFile(
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as
-      | { error?: { message?: string } }
-      | null;
-    throw new Error(body?.error?.message ?? `Structure upload failed with status ${response.status}`);
+    throw await apiErrorFromResponse(response, "Structure upload failed");
   }
 
   return response.json() as Promise<StructureRecord>;
@@ -360,7 +381,7 @@ export async function downloadStructureFile(
   });
 
   if (!response.ok) {
-    throw new Error(`Structure download failed with status ${response.status}`);
+    throw await apiErrorFromResponse(response, "Structure download failed");
   }
 
   return response.blob();

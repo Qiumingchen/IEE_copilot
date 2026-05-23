@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
-import { discoverEnzymeFromPdb, searchEnzyme, uploadStructureFile } from "../../lib/api";
+import { ApiRequestError, discoverEnzymeFromPdb, searchEnzyme, uploadStructureFile } from "../../lib/api";
 import type { PdbDiscoveryHit, PdbDiscoveryResponse, SearchResponse } from "../../lib/types";
 import {
   buildStructureAnalysisHref,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
+  pdbDiscoveryErrorMessage,
   searchResultMatches
 } from "./search-utils";
 
@@ -83,9 +84,20 @@ export default function SearchPage() {
     try {
       const response = await discoverEnzymeFromPdb(selectedPdbFile, token);
       setPdbDiscovery(response);
-    } catch {
+    } catch (caught) {
+      if (caught instanceof ApiRequestError && caught.status === 401) {
+        window.localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setPdbDiscoveryError(pdbDiscoveryErrorMessage(caught));
+        router.replace("/login");
+        return;
+      }
       setPdbDiscoveryError(
-        "PDB discovery failed. Please confirm the file contains a protein chain and the API is running."
+        pdbDiscoveryErrorMessage(
+          caught instanceof ApiRequestError
+            ? caught
+            : { message: "PDB discovery failed. Please confirm the API is running." }
+        )
       );
     } finally {
       setIsDiscoveringPdb(false);
@@ -106,9 +118,18 @@ export default function SearchPage() {
     try {
       const structure = await uploadStructureFile(hit.enzyme.id, token, selectedPdbFile);
       router.push(buildStructureAnalysisHref(hit.enzyme.id, structure.id));
-    } catch {
+    } catch (caught) {
+      if (caught instanceof ApiRequestError && caught.status === 401) {
+        window.localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setPdbDiscoveryError("Your login session has expired. Please sign in again before saving this structure.");
+        router.replace("/login");
+        return;
+      }
       setPdbDiscoveryError(
-        "Unable to save the uploaded structure to this enzyme. Please try again from the structure page."
+        caught instanceof ApiRequestError && caught.detail
+          ? caught.detail
+          : "Unable to save the uploaded structure to this enzyme. Please try again from the structure page."
       );
     } finally {
       setAttachingHitId(null);

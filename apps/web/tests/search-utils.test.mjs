@@ -5,6 +5,7 @@ import {
   buildStructureAnalysisHref,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
+  pdbDiscoveryErrorMessage,
   searchResultMatches
 } from "../app/search/search-utils.ts";
 
@@ -75,5 +76,16 @@ test("buildStructureAnalysisHref points discovery uploads at the selected struct
   assert.equal(
     buildStructureAnalysisHref("enzyme 1", "structure/2"),
     "/enzymes/enzyme%201/structures?structure_id=structure%2F2"
+  );
+});
+
+test("pdbDiscoveryErrorMessage distinguishes authentication and parser failures", () => {
+  assert.equal(
+    pdbDiscoveryErrorMessage({ status: 401 }),
+    "Your login session has expired. Please sign in again before uploading a PDB file."
+  );
+  assert.equal(
+    pdbDiscoveryErrorMessage({ status: 422, detail: "uploaded structure does not contain a protein sequence" }),
+    "uploaded structure does not contain a protein sequence"
   );
 });
