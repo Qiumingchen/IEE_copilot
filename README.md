@@ -62,7 +62,7 @@ The platform can run in demo mode or real-provider mode. Development defaults
 keep fallbacks enabled so the workflow remains usable without local scientific
 tool installs.
 
-- `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, and literature adapters.
+- `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, Crossref literature, and Europe PMC enzyme-data adapters.
 - `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
 - `HOMOLOG_PROVIDER_FETCH_SIZE=25` limits the upstream UniProt candidate pool before local identity and coverage filtering.
 - `SEQUENCE_SIMILARITY_FASTA_PATH="/path/to/homologs.fasta"` configures the `sequence_similarity` homolog runner to scan a local FASTA sequence database.
@@ -73,6 +73,13 @@ tool installs.
 
 When fallbacks are enabled, artifacts are still marked with `mode=fallback`.
 Fallback outputs should not be treated as real scientific results.
+
+Enzyme property, kinetic, and mutant records are collected from Europe PMC
+literature metadata in real-provider mode. The adapter extracts conservative
+mentions of optimum temperature, optimum pH, Km, kcat, kcat/Km, and mutation
+strings from article titles and abstracts. If Europe PMC is unavailable or no
+extractable values are found, the real adapter returns no records rather than
+inventing demo values.
 
 For mature microbial transglutaminases, engineering calculations use the
 UniProt mature chain when a `Chain` feature is available. The bundled seed

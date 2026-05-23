@@ -6,7 +6,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AnalysisArtifact, AnalysisJob, EnzymeEntry, EnzymeFamily, JobStatus, ProteinSequence
+from app.db.models import (
+    AnalysisArtifact,
+    AnalysisJob,
+    EnzymeEntry,
+    EnzymeFamily,
+    JobStatus,
+    KineticRecord,
+    MutationRecord,
+    ProteinSequence,
+    PropertyRecord,
+    StructureEntry,
+)
 from app.db.session import SessionLocal
 from app.external.uniprot import get_uniprot_client
 from app.services.conservation import calculate_conservation_profile
@@ -47,6 +58,9 @@ def finish_placeholder_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
     job.started_at = now
     db.commit()
 
+    payload = _family_profile_summary_payload(db, job)
+    payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+
     artifact = AnalysisArtifact(
         project_id=job.project_id,
         enzyme_entry_id=job.enzyme_entry_id,
@@ -54,17 +68,78 @@ def finish_placeholder_job(db: Session, job_id: str, bucket: str) -> AnalysisJob
         artifact_type="family_profile_summary",
         bucket=bucket,
         object_key=f"analysis-jobs/{job.id}/family-profile-summary.json",
+        checksum=hashlib.sha256(payload_bytes).hexdigest(),
         content_type="application/json",
-        size_bytes=0,
+        size_bytes=len(payload_bytes),
     )
     db.add(artifact)
 
     job.status = JobStatus.FINISHED
     job.finished_at = datetime.utcnow()
-    job.result_summary_json = {"message": "placeholder analysis completed"}
+    job.result_summary_json = payload
     db.commit()
     db.refresh(job)
     return job
+
+
+def _family_profile_summary_payload(db: Session, job: AnalysisJob) -> dict:
+    enzyme = db.get(EnzymeEntry, job.enzyme_entry_id) if job.enzyme_entry_id else None
+    if enzyme is None:
+        return {
+            "message": "family profile summary completed",
+            "artifact_type": "family_profile_summary",
+            "enzyme": None,
+            "counts": {
+                "protein_sequences": 0,
+                "properties": 0,
+                "kinetics": 0,
+                "mutations": 0,
+                "structures": 0,
+            },
+            "sources": [],
+        }
+
+    protein_sequences = db.scalars(
+        select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id)
+    ).all()
+    properties = db.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    kinetics = db.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)).all()
+    mutations = db.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    structures = db.scalars(select(StructureEntry).where(StructureEntry.enzyme_entry_id == enzyme.id)).all()
+    sources = {
+        enzyme.source,
+        *(sequence.source for sequence in protein_sequences),
+        *(record.method for record in properties if record.method),
+        *(record.method for record in kinetics if record.method),
+        *(structure.source for structure in structures),
+    }
+    for mutation in mutations:
+        summary = mutation.assay_condition_summary if isinstance(mutation.assay_condition_summary, dict) else {}
+        source = summary.get("source")
+        if isinstance(source, str):
+            sources.add(source)
+
+    return {
+        "message": "family profile summary completed",
+        "artifact_type": "family_profile_summary",
+        "enzyme": {
+            "id": enzyme.id,
+            "name": enzyme.name,
+            "organism": enzyme.organism,
+            "uniprot_id": enzyme.uniprot_id,
+            "pdb_id": enzyme.pdb_id,
+            "alphafold_id": enzyme.alphafold_id,
+            "source": enzyme.source,
+        },
+        "counts": {
+            "protein_sequences": len(protein_sequences),
+            "properties": len(properties),
+            "kinetics": len(kinetics),
+            "mutations": len(mutations),
+            "structures": len(structures),
+        },
+        "sources": sorted(source for source in sources if source),
+    }
 
 
 def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> AnalysisJob:

@@ -10,7 +10,11 @@ from app.db.models import (
     EnzymeFamily,
     EnzymeModule,
     JobStatus,
+    KineticRecord,
+    MutationRecord,
     ProteinSequence,
+    PropertyRecord,
+    StructureEntry,
 )
 from worker.jobs import (
     _homolog_candidates_for_job,
@@ -64,13 +68,71 @@ class _FakeUniProtClient:
         )
 
 
-def test_finish_placeholder_job_marks_job_finished_and_creates_artifact():
+def test_finish_placeholder_job_builds_real_local_family_profile_summary():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     with SessionLocal() as db:
-        job = AnalysisJob(job_type="family_profile_placeholder", status=JobStatus.QUEUED)
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker profile enzyme",
+            organism="Bacillus subtilis",
+            uniprot_id="P00691",
+            source="uniprot",
+        )
+        db.add(enzyme)
+        db.flush()
+        db.add_all(
+            [
+                ProteinSequence(
+                    enzyme_entry_id=enzyme.id,
+                    sequence="ACDEFGHIKL",
+                    mature_sequence=None,
+                    source="uniprot",
+                    checksum="worker-profile-sequence",
+                ),
+                PropertyRecord(
+                    enzyme_entry_id=enzyme.id,
+                    property_type="optimal_temperature",
+                    value_original="72",
+                    unit_original="degC",
+                    method="europepmc",
+                    evidence_text="real literature evidence",
+                ),
+                KineticRecord(
+                    enzyme_entry_id=enzyme.id,
+                    substrate="starch",
+                    km="1.8",
+                    kcat="42",
+                    method="europepmc",
+                    evidence_text="real kinetic literature evidence",
+                ),
+                MutationRecord(
+                    enzyme_entry_id=enzyme.id,
+                    mutation_string="A123V",
+                    effect_summary="thermostability improved",
+                    assay_condition_summary={"source": "europepmc"},
+                ),
+                StructureEntry(
+                    enzyme_entry_id=enzyme.id,
+                    structure_type="alphafold_model",
+                    complex_state="apo",
+                    source="alphafold",
+                ),
+            ]
+        )
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="family_profile_summary",
+            status=JobStatus.QUEUED,
+        )
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -81,9 +143,20 @@ def test_finish_placeholder_job_marks_job_finished_and_creates_artifact():
         artifact = db.scalar(select(AnalysisArtifact).where(AnalysisArtifact.job_id == job.id))
 
     assert job.status == JobStatus.FINISHED
-    assert job.result_summary_json == {"message": "placeholder analysis completed"}
+    assert job.result_summary_json["message"] == "family profile summary completed"
+    assert job.result_summary_json["artifact_type"] == "family_profile_summary"
+    assert job.result_summary_json["enzyme"]["name"] == "Worker profile enzyme"
+    assert job.result_summary_json["counts"] == {
+        "protein_sequences": 1,
+        "properties": 1,
+        "kinetics": 1,
+        "mutations": 1,
+        "structures": 1,
+    }
+    assert job.result_summary_json["sources"] == ["alphafold", "europepmc", "uniprot"]
     assert artifact is not None
     assert artifact.artifact_type == "family_profile_summary"
+    assert artifact.size_bytes > 0
 
 
 def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
@@ -861,7 +934,7 @@ def test_mark_job_failed_records_error_message():
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     with SessionLocal() as db:
-        job = AnalysisJob(job_type="family_profile_placeholder", status=JobStatus.RUNNING)
+        job = AnalysisJob(job_type="family_profile_summary", status=JobStatus.RUNNING)
         db.add(job)
         db.commit()
         db.refresh(job)

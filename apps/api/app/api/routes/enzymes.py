@@ -1183,7 +1183,7 @@ def search_enzymes(
     job = AnalysisJob(
         project_id=request.project_id,
         enzyme_entry_id=enzyme.id,
-        job_type="family_profile_placeholder",
+        job_type="family_profile_summary",
         status=JobStatus.QUEUED,
         parameters_json={
             "query": request.query,
