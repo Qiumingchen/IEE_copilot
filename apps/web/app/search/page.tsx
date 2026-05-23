@@ -207,7 +207,7 @@ export default function SearchPage() {
             </span>
           </div>
 
-          <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <dt className="text-xs font-medium uppercase text-slate-500">Detected name</dt>
               <dd className="mt-1 text-sm text-slate-950">
@@ -224,6 +224,12 @@ export default function SearchPage() {
               <dt className="text-xs font-medium uppercase text-slate-500">PDB ID</dt>
               <dd className="mt-1 text-sm text-slate-950">
                 {pdbDiscovery.metadata.pdb_id ?? "Uploaded file"}
+              </dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <dt className="text-xs font-medium uppercase text-slate-500">AlphaFold ID</dt>
+              <dd className="mt-1 text-sm text-slate-950">
+                {pdbDiscovery.metadata.alphafold_id ?? "Not reported"}
               </dd>
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">

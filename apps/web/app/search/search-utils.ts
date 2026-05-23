@@ -13,7 +13,13 @@ export function searchResultMatches(result: SearchResponse): EnzymeSummary[] {
 }
 
 export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
-  return [match.organism, match.ec_number ? `EC ${match.ec_number}` : null, match.uniprot_id]
+  return [
+    match.organism,
+    match.ec_number ? `EC ${match.ec_number}` : null,
+    match.uniprot_id ? `UniProt ${match.uniprot_id}` : null,
+    match.pdb_id ? `RCSB PDB ${match.pdb_id}` : null,
+    match.alphafold_id ? `AlphaFold ${match.alphafold_id}` : null
+  ]
     .filter(Boolean)
     .join(" | ") || "Source details not reported";
 }

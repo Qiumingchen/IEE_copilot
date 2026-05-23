@@ -48,8 +48,8 @@ test("searchResultMatches falls back to the primary enzyme and deduplicates matc
 
 test("formatSearchMatchSubtitle combines organism identifiers and source details", () => {
   assert.equal(
-    formatSearchMatchSubtitle(enzyme),
-    "Streptomyces mobaraensis | EC 2.3.2.13 | P81453"
+    formatSearchMatchSubtitle({ ...enzyme, pdb_id: "1ABC", alphafold_id: "AF-P81453-F1" }),
+    "Streptomyces mobaraensis | EC 2.3.2.13 | UniProt P81453 | RCSB PDB 1ABC | AlphaFold AF-P81453-F1"
   );
   assert.equal(
     formatSearchMatchSubtitle({ ...enzyme, organism: null, ec_number: null, uniprot_id: null }),

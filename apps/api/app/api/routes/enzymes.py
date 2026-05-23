@@ -644,12 +644,13 @@ def _search_result_matches(
     return matches
 
 
-def _extract_pdb_metadata(text: str) -> PdbDiscoveryMetadata:
+def _extract_pdb_metadata(text: str, *, file_name: str) -> PdbDiscoveryMetadata:
     title_parts: list[str] = []
     compnd_parts: list[str] = []
     source_parts: list[str] = []
     pdb_id: str | None = None
     uniprot_id: str | None = None
+    alphafold_id = _extract_alphafold_id(file_name)
 
     for line in text.splitlines():
         record = line[0:6].strip().upper()
@@ -671,6 +672,8 @@ def _extract_pdb_metadata(text: str) -> PdbDiscoveryMetadata:
             accession = line[33:41].strip()
             if database in {"UNP", "UNIPROT"} and accession:
                 uniprot_id = accession
+        if alphafold_id is None:
+            alphafold_id = _extract_alphafold_id(line)
 
     compnd_text = " ".join(compnd_parts)
     source_text = " ".join(source_parts)
@@ -680,7 +683,13 @@ def _extract_pdb_metadata(text: str) -> PdbDiscoveryMetadata:
         enzyme_name=_extract_pdb_semicolon_field(compnd_text, "MOLECULE"),
         organism=_extract_pdb_semicolon_field(source_text, "ORGANISM_SCIENTIFIC"),
         uniprot_id=uniprot_id,
+        alphafold_id=alphafold_id,
     )
+
+
+def _extract_alphafold_id(text: str) -> str | None:
+    match = re.search(r"\bAF-[A-Z0-9]+-F\d+\b", text.upper())
+    return match.group(0) if match else None
 
 
 def _extract_pdb_semicolon_field(text: str, field_name: str) -> str | None:
@@ -707,12 +716,86 @@ def _discovery_chains(chain_summary: dict) -> list[PdbDiscoveryChain]:
     ]
 
 
-def _local_pdb_discovery_hits(
+def _identifier_pdb_discovery_hits(
+    db: Session,
+    *,
+    metadata: PdbDiscoveryMetadata,
+    query_sequence: str,
+    module: EnzymeModule,
+) -> list[PdbDiscoveryHit]:
+    hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
+
+    def add_hit(enzyme: EnzymeEntry, evidence: str) -> None:
+        hit = PdbDiscoveryHit(
+            enzyme=enzyme,
+            identity=1.0,
+            coverage=1.0,
+            aligned_length=len(query_sequence),
+            evidence=[evidence, "local_database"],
+            confidence="exact",
+        )
+        existing_hit = hits_by_enzyme_id.get(enzyme.id)
+        if existing_hit is None or _pdb_discovery_hit_score(hit) > _pdb_discovery_hit_score(existing_hit):
+            hits_by_enzyme_id[enzyme.id] = hit
+
+    if metadata.pdb_id:
+        pdb_id = metadata.pdb_id.upper()
+        enzymes = db.scalars(
+            select(EnzymeEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .where(EnzymeFamily.module == module)
+            .where(EnzymeEntry.pdb_id == pdb_id)
+        ).all()
+        for enzyme in enzymes:
+            add_hit(enzyme, "pdb_id")
+
+        structure_enzymes = db.scalars(
+            select(EnzymeEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .join(StructureEntry, StructureEntry.enzyme_entry_id == EnzymeEntry.id)
+            .where(EnzymeFamily.module == module)
+            .where(StructureEntry.pdb_id == pdb_id)
+        ).all()
+        for enzyme in structure_enzymes:
+            add_hit(enzyme, "pdb_id")
+
+    if metadata.alphafold_id:
+        alphafold_ids = _alphafold_identifier_candidates(metadata.alphafold_id)
+        enzymes = db.scalars(
+            select(EnzymeEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .where(EnzymeFamily.module == module)
+            .where(EnzymeEntry.alphafold_id.in_(alphafold_ids))
+        ).all()
+        for enzyme in enzymes:
+            add_hit(enzyme, "alphafold_id")
+
+    if metadata.uniprot_id:
+        enzymes = db.scalars(
+            select(EnzymeEntry)
+            .join(EnzymeFamily, EnzymeFamily.id == EnzymeEntry.family_id)
+            .where(EnzymeFamily.module == module)
+            .where(EnzymeEntry.uniprot_id == metadata.uniprot_id)
+        ).all()
+        for enzyme in enzymes:
+            add_hit(enzyme, "uniprot_id")
+
+    return list(hits_by_enzyme_id.values())
+
+
+def _alphafold_identifier_candidates(alphafold_id: str) -> set[str]:
+    candidates = {alphafold_id}
+    match = re.fullmatch(r"AF-([A-Z0-9]+)-F\d+", alphafold_id.upper())
+    if match:
+        candidates.add(match.group(1))
+    return candidates
+
+
+def _sequence_pdb_discovery_hits(
     db: Session,
     *,
     query_sequence: str,
     module: EnzymeModule,
-    limit: int = 12,
 ) -> list[PdbDiscoveryHit]:
     rows = db.execute(
         select(EnzymeEntry, ProteinSequence)
@@ -745,11 +828,42 @@ def _local_pdb_discovery_hits(
         key=_pdb_discovery_hit_score,
         reverse=True,
     )
+    return hits
+
+
+def _local_pdb_discovery_hits(
+    db: Session,
+    *,
+    metadata: PdbDiscoveryMetadata,
+    query_sequence: str,
+    module: EnzymeModule,
+    limit: int = 12,
+) -> list[PdbDiscoveryHit]:
+    hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
+    for hit in [
+        *_identifier_pdb_discovery_hits(
+            db,
+            metadata=metadata,
+            query_sequence=query_sequence,
+            module=module,
+        ),
+        *_sequence_pdb_discovery_hits(db, query_sequence=query_sequence, module=module),
+    ]:
+        existing_hit = hits_by_enzyme_id.get(hit.enzyme.id)
+        if existing_hit is None or _pdb_discovery_hit_score(hit) > _pdb_discovery_hit_score(existing_hit):
+            hits_by_enzyme_id[hit.enzyme.id] = hit
+
+    hits = sorted(
+        hits_by_enzyme_id.values(),
+        key=_pdb_discovery_hit_score,
+        reverse=True,
+    )
     return hits[:limit]
 
 
-def _pdb_discovery_hit_score(hit: PdbDiscoveryHit) -> tuple[float, float, int]:
-    return (hit.identity, hit.coverage, hit.aligned_length)
+def _pdb_discovery_hit_score(hit: PdbDiscoveryHit) -> tuple[int, float, float, int]:
+    confidence_rank = {"exact": 3, "high": 2, "medium": 1}.get(hit.confidence, 0)
+    return (confidence_rank, hit.identity, hit.coverage, hit.aligned_length)
 
 
 @router.post("/search", response_model=EnzymeSearchResponse)
@@ -977,15 +1091,21 @@ async def discover_enzyme_from_pdb(
         )
     query_chain = max(chains, key=lambda chain: chain.residue_count)
     module = EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
+    metadata = _extract_pdb_metadata(text, file_name=file_name)
     return PdbDiscoveryResponse(
         file_name=file_name,
-        metadata=_extract_pdb_metadata(text),
+        metadata=metadata,
         structure_type=parsed.structure_type,
         complex_state=parsed.complex_state,
         chains=chains,
         query_chain_id=query_chain.chain_id,
         query_sequence=query_chain.sequence,
-        hits=_local_pdb_discovery_hits(db, query_sequence=query_chain.sequence, module=module),
+        hits=_local_pdb_discovery_hits(
+            db,
+            metadata=metadata,
+            query_sequence=query_chain.sequence,
+            module=module,
+        ),
     )
 
 

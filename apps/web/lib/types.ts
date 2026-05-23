@@ -32,6 +32,7 @@ export type PdbDiscoveryMetadata = {
   enzyme_name: string | null;
   organism: string | null;
   uniprot_id: string | null;
+  alphafold_id: string | null;
 };
 
 export type PdbDiscoveryHit = {

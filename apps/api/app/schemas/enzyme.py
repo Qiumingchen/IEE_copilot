@@ -46,6 +46,7 @@ class PdbDiscoveryMetadata(BaseModel):
     enzyme_name: str | None = None
     organism: str | None = None
     uniprot_id: str | None = None
+    alphafold_id: str | None = None
 
 
 class PdbDiscoveryHit(BaseModel):

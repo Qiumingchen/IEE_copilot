@@ -481,7 +481,7 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
 
       {bundle ? (
         <>
-          <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <dt className="text-xs font-medium uppercase text-slate-500">Organism</dt>
               <dd className="mt-1 text-sm text-slate-950">{textOrDash(bundle.enzyme.organism)}</dd>
@@ -493,6 +493,14 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <dt className="text-xs font-medium uppercase text-slate-500">UniProt</dt>
               <dd className="mt-1 text-sm text-slate-950">{textOrDash(bundle.enzyme.uniprot_id)}</dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <dt className="text-xs font-medium uppercase text-slate-500">RCSB PDB</dt>
+              <dd className="mt-1 text-sm text-slate-950">{textOrDash(bundle.enzyme.pdb_id)}</dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <dt className="text-xs font-medium uppercase text-slate-500">AlphaFold DB</dt>
+              <dd className="mt-1 text-sm text-slate-950">{textOrDash(bundle.enzyme.alphafold_id)}</dd>
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <dt className="text-xs font-medium uppercase text-slate-500">Source</dt>
