@@ -204,6 +204,27 @@ def test_create_and_list_enzyme_domain_records(client, db_session):
     assert list_expression.json()[0]["condition"]["method"] == "shake flask expression"
 
 
+def test_create_structure_record_promotes_pdb_id_to_empty_enzyme_field(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures",
+        headers=headers,
+        json={
+            "structure_type": "pdb",
+            "complex_state": "apo",
+            "pdb_id": "9XYZ",
+            "source": "user_upload",
+        },
+    )
+
+    assert response.status_code == 201
+    db_session.expire_all()
+    enzyme = db_session.get(EnzymeEntry, enzyme_id)
+    assert enzyme.pdb_id == "9XYZ"
+
+
 def test_list_evidence_records_embed_literature_reference(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)
@@ -344,6 +365,93 @@ def test_upload_structure_file_records_database_identifiers(client, db_session, 
         "uniprot_id": "P81453",
         "alphafold_id": "AF-P81453-F1",
     }
+
+
+def test_upload_structure_file_promotes_database_identifiers_to_empty_enzyme_fields(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+
+    def fake_store_structure_file(*, file_name, content, content_type):
+        return {
+            "bucket": "iee-artifacts",
+            "object_key": f"structures/test/{file_name}",
+            "checksum": "checksum-promoted-identifiers",
+            "content_type": content_type,
+            "size_bytes": len(content),
+        }
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.store_structure_file",
+        fake_store_structure_file,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures/upload",
+        headers=headers,
+        files={
+            "file": (
+                "AF-P81453-F1-model_v6.pdb",
+                PDB_WITH_DATABASE_IDENTIFIERS.encode(),
+                "chemical/x-pdb",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    db_session.expire_all()
+    enzyme = db_session.get(EnzymeEntry, enzyme_id)
+    assert enzyme.pdb_id == "9XYZ"
+    assert enzyme.uniprot_id == "P81453"
+    assert enzyme.alphafold_id == "AF-P81453-F1"
+
+
+def test_upload_structure_file_upgrades_accession_style_alphafold_id(
+    client,
+    db_session,
+    monkeypatch,
+):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    enzyme = db_session.get(EnzymeEntry, enzyme_id)
+    enzyme.alphafold_id = "P81453"
+    enzyme.uniprot_id = "P81453"
+    db_session.commit()
+
+    def fake_store_structure_file(*, file_name, content, content_type):
+        return {
+            "bucket": "iee-artifacts",
+            "object_key": f"structures/test/{file_name}",
+            "checksum": "checksum-upgraded-alphafold-id",
+            "content_type": content_type,
+            "size_bytes": len(content),
+        }
+
+    monkeypatch.setattr(
+        "app.api.routes.enzyme_records.store_structure_file",
+        fake_store_structure_file,
+    )
+
+    response = client.post(
+        f"/enzymes/{enzyme_id}/structures/upload",
+        headers=headers,
+        files={
+            "file": (
+                "AF-P81453-F1-model_v6.pdb",
+                PDB_WITH_DATABASE_IDENTIFIERS.encode(),
+                "chemical/x-pdb",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    db_session.expire_all()
+    enzyme = db_session.get(EnzymeEntry, enzyme_id)
+    assert enzyme.alphafold_id == "AF-P81453-F1"
+    assert enzyme.uniprot_id == "P81453"
 
 
 def test_upload_cif_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):

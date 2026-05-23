@@ -75,7 +75,10 @@ from app.services.object_storage import read_structure_file, store_structure_fil
 from app.services.property_ranking import build_property_ranking
 from app.services.property_standardization import standardize_property_value
 from app.services.structure_parser import StructureParseError, parse_structure_text
-from app.services.structure_identifiers import extract_structure_database_identifiers
+from app.services.structure_identifiers import (
+    alphafold_identifier_candidates,
+    extract_structure_database_identifiers,
+)
 from app.services.mutations import (
     MutationParseError,
     normalize_mutation_string,
@@ -781,6 +784,26 @@ def _structure_response(
     )
 
 
+def _promote_structure_identifiers_to_enzyme(
+    enzyme: EnzymeEntry,
+    identifiers: dict[str, str],
+) -> None:
+    if identifiers.get("pdb_id") and enzyme.pdb_id is None:
+        enzyme.pdb_id = identifiers["pdb_id"]
+    if identifiers.get("uniprot_id") and enzyme.uniprot_id is None:
+        enzyme.uniprot_id = identifiers["uniprot_id"]
+    alphafold_id = identifiers.get("alphafold_id")
+    if alphafold_id and enzyme.alphafold_id is None:
+        enzyme.alphafold_id = alphafold_id
+    elif (
+        alphafold_id
+        and alphafold_id.startswith("AF-")
+        and enzyme.alphafold_id in alphafold_identifier_candidates(alphafold_id)
+        and enzyme.alphafold_id != alphafold_id
+    ):
+        enzyme.alphafold_id = alphafold_id
+
+
 def _property_ranking_response(ranking) -> PropertyRankingResponse:
     return PropertyRankingResponse(
         property_type=ranking.property_type,
@@ -1041,6 +1064,8 @@ def create_structure(
     db: Session = Depends(get_db),
 ) -> StructureResponse:
     enzyme = _get_enzyme(db, enzyme_id)
+    if request.pdb_id:
+        _promote_structure_identifiers_to_enzyme(enzyme, {"pdb_id": request.pdb_id})
     structure = StructureEntry(
         enzyme_entry_id=enzyme.id,
         structure_type=request.structure_type,
@@ -1131,6 +1156,7 @@ async def upload_structure(
     chain_summary = dict(parsed.chain_summary)
     if identifiers:
         chain_summary["identifiers"] = identifiers
+        _promote_structure_identifiers_to_enzyme(enzyme, identifiers)
 
     structure = StructureEntry(
         enzyme_entry_id=enzyme.id,
