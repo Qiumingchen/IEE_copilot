@@ -1061,6 +1061,78 @@ def _enzyme_matches_organism(enzyme: EnzymeEntry, organism: str | None) -> bool:
     return normalized_organism.lower() in (enzyme.organism or "").lower()
 
 
+FAMILY_MATCH_STOP_WORDS = {
+    "chain",
+    "class",
+    "enzyme",
+    "family",
+    "fragment",
+    "isoform",
+    "mature",
+    "microbial",
+    "probable",
+    "protein",
+    "putative",
+    "subunit",
+    "uncharacterized",
+}
+
+
+def _related_family_entries(
+    db: Session,
+    primary: EnzymeEntry,
+    entries: list[EnzymeEntry],
+) -> list[EnzymeEntry]:
+    if not get_settings().use_real_science_providers:
+        return entries
+    family = db.get(EnzymeFamily, primary.family_id)
+    family_names = [family.name if family is not None else None]
+    if family is not None:
+        family_names.append(FAMILY_NAMES.get(family.module))
+    return [entry for entry in entries if _is_related_family_entry(primary, entry, family_names)]
+
+
+def _is_related_family_entry(
+    primary: EnzymeEntry,
+    candidate: EnzymeEntry,
+    family_names: list[str | None],
+) -> bool:
+    if candidate.id == primary.id:
+        return True
+    if _is_mock_or_seed_source(candidate.source):
+        return False
+    if primary.ec_number and candidate.ec_number and primary.ec_number == candidate.ec_number:
+        return True
+
+    primary_tokens = _family_match_tokens(primary.name, *family_names)
+    candidate_tokens = _family_match_tokens(candidate.name)
+    return bool(primary_tokens & candidate_tokens)
+
+
+def _family_match_tokens(*values: str | None) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        for token in re.split(r"[^a-zA-Z0-9]+", value.lower()):
+            normalized = _normalize_family_match_token(token)
+            if normalized:
+                tokens.add(normalized)
+    return tokens
+
+
+def _normalize_family_match_token(token: str) -> str | None:
+    if len(token) < 5 or token in FAMILY_MATCH_STOP_WORDS:
+        return None
+    if token.endswith("ies") and len(token) > 5:
+        token = f"{token[:-3]}y"
+    elif token.endswith("s") and len(token) > 5:
+        token = token[:-1]
+    if token in FAMILY_MATCH_STOP_WORDS:
+        return None
+    return token
+
+
 def _enzyme_scientific_rankings(
     db: Session,
     enzymes: list[EnzymeEntry],
@@ -1864,6 +1936,7 @@ def refresh_enzyme_family_real_data(
     family_entries = list(
         db.scalars(select(EnzymeEntry).where(EnzymeEntry.family_id == enzyme.family_id))
     )
+    family_entries = _related_family_entries(db, enzyme, family_entries)
     for family_enzyme in family_entries:
         _refresh_real_data_for_enzyme(db, family_enzyme, created=created, sources=sources, warnings=warnings)
 
@@ -1956,6 +2029,7 @@ def list_enzyme_family_entries(
             .order_by(EnzymeEntry.name.asc(), EnzymeEntry.organism.asc())
         )
     )
+    entries = _related_family_entries(db, enzyme, entries)
     return _enzyme_summaries(db, entries)
 
 

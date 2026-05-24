@@ -642,6 +642,83 @@ def test_enzyme_family_entries_endpoint_lists_same_family_sources(client, db_ses
     assert {entry["family_name"] for entry in body} == {"Food lipases"}
 
 
+def test_real_family_entries_endpoint_filters_unrelated_same_family_records(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferase",
+    )
+    db_session.add(family)
+    db_session.flush()
+    primary = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        uniprot_id="P81453",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    related_by_ec = EnzymeEntry(
+        family_id=family.id,
+        name="Microbial transglutaminase",
+        organism="Streptomyces cinnamoneus",
+        ec_number="2.3.2.13",
+        uniprot_id="Q00001",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    related_by_name = EnzymeEntry(
+        family_id=family.id,
+        name="Putative transglutaminase",
+        organism="Streptomyces sp.",
+        ec_number=None,
+        uniprot_id="Q00002",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    unrelated = EnzymeEntry(
+        family_id=family.id,
+        name="High mobility group protein B1",
+        organism="Homo sapiens",
+        ec_number=None,
+        uniprot_id="P09429",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([primary, related_by_ec, related_by_name, unrelated])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-family-filter@example.com",
+            "password": "search-password",
+            "display_name": "Family Filter",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-family-filter@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.get(
+        f"/enzymes/{primary.id}/family-entries",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert {entry["id"] for entry in response.json()} == {
+        primary.id,
+        related_by_ec.id,
+        related_by_name.id,
+    }
+
+
 def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings
