@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import EnzymeModule
@@ -44,6 +46,7 @@ class EnzymeSearchResponse(BaseModel):
     cache_status: str
     query_kind: str
     module: EnzymeModule
+    retrieval_provenance: dict[str, Any] | None = None
 
     model_config = ConfigDict(use_enum_values=True)
 

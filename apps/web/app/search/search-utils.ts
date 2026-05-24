@@ -1,4 +1,5 @@
 import type { EnzymeSummary, PdbDiscoveryHit, SearchResponse } from "../../lib/types";
+import { formatProvenanceLabel, type ProvenanceRecord } from "../../lib/provenance.ts";
 
 export type EnzymeSortMode = "default" | "reviewed" | "temperature" | "activity";
 
@@ -66,6 +67,10 @@ export function formatRecordCoverageBadges(enzyme: EnzymeSummary): string[] {
   ].filter((badge): badge is string => Boolean(badge));
 
   return badges.length > 0 ? badges : ["Real data not fetched"];
+}
+
+export function formatSearchProvenanceSummary(provenance: ProvenanceRecord | null | undefined): string {
+  return formatProvenanceLabel(provenance);
 }
 
 export function paginateItems<T>(

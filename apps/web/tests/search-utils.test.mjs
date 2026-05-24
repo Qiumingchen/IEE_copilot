@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildStructureAnalysisHref,
   formatRecordCoverageBadges,
+  formatSearchProvenanceSummary,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
@@ -141,6 +142,18 @@ test("formatRecordCoverageBadges summarizes fetched real data coverage", () => {
     }),
     ["2 properties", "1 kinetics", "3 mutants", "1 structure"]
   );
+});
+
+test("formatSearchProvenanceSummary reports real provider provenance", () => {
+  assert.equal(
+    formatSearchProvenanceSummary({
+      provider: "uniprot",
+      mode: "real",
+      retrieved_at: "2026-05-21T00:00:00Z"
+    }),
+    "uniprot real / 2026-05-21T00:00:00Z"
+  );
+  assert.equal(formatSearchProvenanceSummary(null), "source unknown");
 });
 
 test("sortPdbDiscoveryHits sorts by enzyme-level ranking fields without changing match metrics", () => {

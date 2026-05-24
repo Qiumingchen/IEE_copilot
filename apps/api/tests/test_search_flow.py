@@ -2216,6 +2216,8 @@ def test_enzyme_search_records_uniprot_retrieval_provenance(client, db_session, 
 
     assert response.status_code == 200
     body = response.json()
+    assert body["retrieval_provenance"]["provider"] == "uniprot"
+    assert body["retrieval_provenance"]["mode"] == "real"
     job = db_session.get(AnalysisJob, body["job_id"])
     assert job.parameters_json["retrieval_provenance"]["provider"] == "uniprot"
     assert job.parameters_json["retrieval_provenance"]["mode"] == "real"

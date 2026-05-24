@@ -1652,6 +1652,7 @@ def search_enzymes(
         cache_status=cache_status,
         query_kind=resolved.kind.value,
         module=module,
+        retrieval_provenance=retrieval_provenance,
     )
 
 

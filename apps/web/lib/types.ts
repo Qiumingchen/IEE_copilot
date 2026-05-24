@@ -30,6 +30,7 @@ export type SearchResponse = {
   cache_status: string;
   query_kind: string;
   module: string;
+  retrieval_provenance: Record<string, unknown> | null;
 };
 
 export type PdbDiscoveryChain = {

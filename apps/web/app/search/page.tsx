@@ -13,6 +13,7 @@ import {
   formatPdbDiscoveryHitSubtitle,
   formatRecordCoverageBadges,
   formatSearchMatchSubtitle,
+  formatSearchProvenanceSummary,
   paginateItems,
   pdbDiscoveryErrorMessage,
   sortPdbDiscoveryHits,
@@ -472,6 +473,12 @@ export default function SearchPage() {
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <dt className="text-xs font-medium uppercase text-slate-500">Query kind</dt>
               <dd className="mt-1 text-sm text-slate-950">{result.query_kind}</dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-4">
+              <dt className="text-xs font-medium uppercase text-slate-500">Retrieval source</dt>
+              <dd className="mt-1 break-words text-sm text-slate-950">
+                {formatSearchProvenanceSummary(result.retrieval_provenance)}
+              </dd>
             </div>
           </dl>
         </section>
