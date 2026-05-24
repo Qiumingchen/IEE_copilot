@@ -321,6 +321,22 @@ def _uniprot_retrieval_provenance(entry: UniProtEntry | None, source: str | None
     )
 
 
+def _first_cross_reference_id(cross_references: dict, key: str) -> str | None:
+    value = cross_references.get(key)
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+            if isinstance(item, dict):
+                candidate = item.get("id") or item.get("value")
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+    return None
+
+
 def _create_enzyme_from_uniprot_entry(
     db: Session,
     *,
@@ -331,12 +347,14 @@ def _create_enzyme_from_uniprot_entry(
 ) -> EnzymeEntry:
     now = datetime.utcnow()
     sequence = entry.sequence or parse_fasta_sequence(fasta or "")
+    pdb_id = _first_cross_reference_id(entry.cross_references, "PDB")
     enzyme = EnzymeEntry(
         family_id=family.id,
         name=entry.protein_name,
         organism=entry.organism,
         ec_number=entry.ec_number,
         uniprot_id=entry.accession,
+        pdb_id=pdb_id,
         alphafold_id=entry.cross_references.get("AlphaFoldDB"),
         source=source or "uniprot",
         last_refreshed_at=now,
@@ -368,6 +386,8 @@ def _create_enzyme_from_uniprot_entry(
                 source=alphafold_source,
                 provenance=alphafold_provenance,
             )
+    if pdb_id:
+        _save_rcsb_structure_for_enzyme(db, enzyme, pdb_id=pdb_id)
     return enzyme
 
 
@@ -394,6 +414,7 @@ def _upsert_enzyme_from_uniprot_entry(
     enzyme.name = entry.protein_name
     enzyme.organism = entry.organism
     enzyme.ec_number = entry.ec_number
+    enzyme.pdb_id = _first_cross_reference_id(entry.cross_references, "PDB")
     enzyme.alphafold_id = entry.cross_references.get("AlphaFoldDB")
     enzyme.source = source or "uniprot"
     enzyme.last_refreshed_at = now
@@ -423,6 +444,8 @@ def _upsert_enzyme_from_uniprot_entry(
             protein_sequence.is_engineering_target = True
             protein_sequence.source = source or "uniprot"
             protein_sequence.checksum = checksum
+    if enzyme.pdb_id:
+        _save_rcsb_structure_for_enzyme(db, enzyme, pdb_id=enzyme.pdb_id)
     return enzyme
 
 
@@ -666,6 +689,62 @@ def _create_alphafold_structure(
     )
     db.add(structure)
     return structure
+
+
+def _save_rcsb_structure_for_enzyme(
+    db: Session,
+    enzyme: EnzymeEntry,
+    *,
+    pdb_id: str,
+    require_real: bool = False,
+) -> tuple[int, list[str], list[str]]:
+    normalized_pdb_id = pdb_id.upper()
+    enzyme.pdb_id = normalized_pdb_id
+    existing = db.scalar(
+        select(StructureEntry).where(
+            StructureEntry.enzyme_entry_id == enzyme.id,
+            StructureEntry.pdb_id == normalized_pdb_id,
+        )
+    )
+    if existing is not None:
+        return 0, [], []
+
+    client = get_rcsb_client()
+    source = getattr(client, "source", "rcsb")
+    if require_real:
+        _raise_if_mock_provider(source, "RCSB")
+    try:
+        metadata = client.fetch_structure_metadata(normalized_pdb_id)
+    except (httpx.HTTPError, ValueError) as exc:
+        if source.endswith("_mock"):
+            raise
+        if require_real:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"RCSB provider unavailable; no mock structure was used. {exc}",
+            ) from exc
+        return 0, [source], [f"RCSB provider unavailable: {exc}"]
+
+    now = datetime.utcnow()
+    chain_summary = dict(metadata.chain_summary)
+    chain_summary["provenance"] = _provider_provenance(
+        provider=source,
+        source_url=f"https://www.rcsb.org/structure/{normalized_pdb_id}",
+        fallback_warning="RCSB structure metadata came from a configured fallback client.",
+    )
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme.id,
+        structure_type="pdb",
+        complex_state="unknown",
+        pdb_id=normalized_pdb_id,
+        chain_summary=chain_summary,
+        ligand_summary=metadata.ligand_summary,
+        source=source,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(structure)
+    return 1, [source], []
 
 
 def _create_enzyme_from_rcsb_metadata(
@@ -1718,6 +1797,17 @@ def _refresh_real_data_for_enzyme(
     created["structures"] = created.get("structures", 0) + structure_count
     sources.extend(structure_sources)
     warnings.extend(structure_warnings)
+
+    if enzyme.pdb_id:
+        rcsb_structure_count, rcsb_sources, rcsb_warnings = _save_rcsb_structure_for_enzyme(
+            db,
+            enzyme,
+            pdb_id=enzyme.pdb_id,
+            require_real=True,
+        )
+        created["structures"] = created.get("structures", 0) + rcsb_structure_count
+        sources.extend(rcsb_sources)
+        warnings.extend(rcsb_warnings)
 
     enzyme.last_refreshed_at = datetime.utcnow()
 

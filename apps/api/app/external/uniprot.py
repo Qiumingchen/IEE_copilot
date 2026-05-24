@@ -142,11 +142,11 @@ def _protein_name(description: dict) -> str:
 
 
 def parse_uniprot_entry_payload(payload: dict) -> UniProtEntry:
-    cross_references = {
-        str(item.get("database")): str(item.get("id"))
-        for item in payload.get("uniProtKBCrossReferences", [])
-        if item.get("database") and item.get("id")
-    }
+    cross_references = {}
+    for item in payload.get("uniProtKBCrossReferences", []):
+        if not item.get("database") or not item.get("id"):
+            continue
+        cross_references.setdefault(str(item.get("database")), str(item.get("id")))
     description = payload.get("proteinDescription") or {}
     sequence = (payload.get("sequence") or {}).get("value")
     return UniProtEntry(

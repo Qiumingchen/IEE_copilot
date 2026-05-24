@@ -86,6 +86,26 @@ def test_parse_uniprot_entry_payload_extracts_core_fields():
     assert entry.cross_references["PDB"] == "1IU4"
 
 
+def test_parse_uniprot_entry_payload_keeps_first_pdb_cross_reference():
+    payload = {
+        "primaryAccession": "P12345",
+        "proteinDescription": {
+            "recommendedName": {
+                "fullName": {"value": "Food enzyme with multiple PDB structures"},
+            }
+        },
+        "sequence": {"value": "ACDEFG"},
+        "uniProtKBCrossReferences": [
+            {"database": "PDB", "id": "1AAA"},
+            {"database": "PDB", "id": "2BBB"},
+        ],
+    }
+
+    entry = parse_uniprot_entry_payload(payload)
+
+    assert entry.cross_references["PDB"] == "1AAA"
+
+
 def test_get_uniprot_client_returns_real_client_when_enabled(monkeypatch):
     from app.external.uniprot import get_uniprot_client
 

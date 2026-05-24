@@ -21,6 +21,7 @@ from app.api.routes.enzymes import _ensure_protein_sequence
 from app.external.alphafold import AlphaFoldModelMetadata
 from app.external.enzyme_data import ExternalKineticParameter, ExternalMutantRecord, ExternalPropertyDatum
 from app.external.literature import LiteratureMetadata
+from app.external.rcsb import RcsbStructureMetadata
 from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, UniProtEntry, UniProtSearchHit
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
 
@@ -960,6 +961,95 @@ def test_real_data_refresh_saves_alphafold_structure_for_known_uniprot(client, d
     assert structure.structure_type == "alphafold"
     assert structure.source == "alphafold"
     assert structure.chain_summary["model_id"] == "AF-P12345-F1"
+
+
+def test_real_data_refresh_saves_rcsb_structure_for_known_pdb_id(client, db_session, monkeypatch):
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class RealRcsbClient:
+        source = "rcsb"
+
+        def fetch_structure_metadata(self, pdb_id: str):
+            assert pdb_id == "1ABC"
+            return RcsbStructureMetadata(
+                pdb_id="1ABC",
+                title="Real PDB-linked food enzyme",
+                method="X-RAY DIFFRACTION",
+                resolution=1.8,
+                uniprot_id="P12346",
+                organism="Bacillus subtilis",
+                chain_summary={"polymer_entity_count": 1, "chains": ["A"]},
+                ligand_summary={"ligands": ["CA"]},
+            )
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_rcsb_client", lambda: RealRcsbClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food oxidoreductases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food oxidoreductase with PDB",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="P12346",
+        pdb_id="1ABC",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "rcsb-real-refresh@example.com",
+            "password": "search-password",
+            "display_name": "RCSB Real Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "rcsb-real-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["structures"] == 1
+    assert "rcsb" in body["sources"]
+    structure = db_session.scalar(select(StructureEntry).where(StructureEntry.enzyme_entry_id == enzyme.id))
+    assert structure.structure_type == "pdb"
+    assert structure.pdb_id == "1ABC"
+    assert structure.source == "rcsb"
+    assert structure.chain_summary["provenance"]["provider"] == "rcsb"
 
 
 def test_family_real_data_refresh_updates_same_family_entries(client, db_session, monkeypatch):
@@ -2282,6 +2372,89 @@ def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
     assert structure.chain_summary["provenance"]["provider"] == "alphafold_mock"
     assert structure.chain_summary["provenance"]["mode"] == "fallback"
     assert structure.chain_summary["provenance"]["source_url"] == "mock://alphafold/AF-P99998-F1.pdb"
+
+
+def test_enzyme_search_saves_rcsb_structure_from_uniprot_cross_reference(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            assert accession == "P99996"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="RCSB linked enzyme",
+                organism="Bacillus testingensis",
+                ec_number=None,
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={"PDB": "1ABC"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P99996|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {"PDB": "1ABC"}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "rcsb-connector@example.com",
+            "password": "search-password",
+            "display_name": "RCSB Connector Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "rcsb-connector@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P99996"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enzyme"]["pdb_id"] == "1ABC"
+
+    structure = db_session.scalar(
+        select(StructureEntry).where(StructureEntry.enzyme_entry_id == body["enzyme"]["id"])
+    )
+    assert structure is not None
+    assert structure.structure_type == "pdb"
+    assert structure.pdb_id == "1ABC"
+    assert structure.source == "rcsb_mock"
+    assert structure.chain_summary["provenance"]["provider"] == "rcsb_mock"
 
 
 def test_enzyme_search_skips_alphafold_structure_when_real_provider_fails_without_mock_fallback(
