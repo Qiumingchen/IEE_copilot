@@ -89,7 +89,7 @@ class EnzymeFamily(Base):
     __tablename__ = "enzyme_family"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
-    module: Mapped[EnzymeModule] = mapped_column(Enum(EnzymeModule), unique=True)
+    module: Mapped[EnzymeModule] = mapped_column(Enum(EnzymeModule))
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime)

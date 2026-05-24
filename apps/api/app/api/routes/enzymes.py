@@ -95,7 +95,12 @@ def _module_for_search(
 
 
 def _ensure_family(db: Session, module: EnzymeModule) -> EnzymeFamily:
-    family = db.scalar(select(EnzymeFamily).where(EnzymeFamily.module == module))
+    family = db.scalar(
+        select(EnzymeFamily).where(
+            EnzymeFamily.module == module,
+            EnzymeFamily.name == FAMILY_NAMES[module],
+        )
+    )
     if family is not None:
         return family
 
@@ -108,6 +113,35 @@ def _ensure_family(db: Session, module: EnzymeModule) -> EnzymeFamily:
     db.add(family)
     db.flush()
     return family
+
+
+def _ensure_uniprot_entry_family(db: Session, module: EnzymeModule, entry: UniProtEntry) -> EnzymeFamily:
+    family_name = _uniprot_entry_family_name(entry)
+    existing = db.scalar(select(EnzymeFamily).where(func.lower(EnzymeFamily.name) == family_name.lower()))
+    if existing is not None:
+        return existing
+
+    family = EnzymeFamily(
+        module=module,
+        name=family_name,
+        description=_uniprot_entry_family_description(entry),
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db.add(family)
+    db.flush()
+    return family
+
+
+def _uniprot_entry_family_name(entry: UniProtEntry) -> str:
+    return " ".join((entry.protein_name or "").split()) or "Unclassified enzyme family"
+
+
+def _uniprot_entry_family_description(entry: UniProtEntry) -> str | None:
+    parts = [
+        f"EC {entry.ec_number}" if entry.ec_number else None,
+        "Family inferred from UniProt search result.",
+    ]
+    return " ".join(part for part in parts if part)
 
 
 def _seed_sequence_for_module(module: EnzymeModule) -> str:
@@ -1356,14 +1390,17 @@ def search_enzymes(
         cache_status = "miss_refreshed"
 
     if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
+        uniprot_family: EnzymeFamily | None = None
         for entry, fasta, source, entry_provenance in _fetch_uniprot_entries(
             resolved,
             limit=request.result_limit,
             organism=source_organism,
         ):
+            if uniprot_family is None:
+                uniprot_family = _ensure_uniprot_entry_family(db, module, entry)
             created_enzyme = _upsert_enzyme_from_uniprot_entry(
                 db,
-                family=family,
+                family=uniprot_family,
                 entry=entry,
                 fasta=fasta,
                 source=source,
