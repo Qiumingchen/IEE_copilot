@@ -419,6 +419,7 @@ export type VisibilityRequestDetailRecord = VisibilityRequestRecord & {
 
 export type EnzymeRecordBundle = {
   enzyme: EnzymeSummary;
+  family_entries: EnzymeSummary[];
   substrates: SubstrateRecord[];
   structures: StructureRecord[];
   properties: PropertyRecord[];

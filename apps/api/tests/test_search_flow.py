@@ -570,6 +570,70 @@ def test_enzyme_search_summarizes_available_real_records(client, db_session, mon
     }
 
 
+def test_enzyme_family_entries_endpoint_lists_same_family_sources(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food lipases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    primary = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase Bacillus",
+        organism="Bacillus subtilis",
+        ec_number="3.1.1.3",
+        uniprot_id="LIP001",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    sibling = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase Geobacillus",
+        organism="Geobacillus stearothermophilus",
+        ec_number="3.1.1.3",
+        uniprot_id="LIP002",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    other_family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Other enzymes",
+    )
+    db_session.add(other_family)
+    db_session.flush()
+    other = EnzymeEntry(
+        family_id=other_family.id,
+        name="Other enzyme",
+        organism="Other organism",
+        source="uniprot",
+    )
+    db_session.add_all([primary, sibling, other])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "family-list@example.com",
+            "password": "search-password",
+            "display_name": "Family List",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "family-list@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.get(
+        f"/enzymes/{primary.id}/family-entries",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [entry["id"] for entry in body] == [primary.id, sibling.id]
+    assert {entry["family_name"] for entry in body} == {"Food lipases"}
+
+
 def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings

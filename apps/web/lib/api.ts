@@ -185,8 +185,9 @@ export async function getEnzymeRecordBundle(
   enzymeId: string,
   token: string
 ): Promise<EnzymeRecordBundle> {
-  const [enzyme, substrates, structures, properties, kinetics, expression] = await Promise.all([
+  const [enzyme, familyEntries, substrates, structures, properties, kinetics, expression] = await Promise.all([
     getEnzyme(enzymeId, token),
+    fetchWithToken<EnzymeSummary[]>(`/enzymes/${enzymeId}/family-entries`, token),
     fetchWithToken<SubstrateRecord[]>(`/enzymes/${enzymeId}/substrates`, token),
     fetchWithToken<StructureRecord[]>(`/enzymes/${enzymeId}/structures`, token),
     fetchWithToken<PropertyRecord[]>(`/enzymes/${enzymeId}/properties`, token),
@@ -194,7 +195,7 @@ export async function getEnzymeRecordBundle(
     fetchWithToken<ExpressionRecord[]>(`/enzymes/${enzymeId}/expression`, token)
   ]);
 
-  return { enzyme, substrates, structures, properties, kinetics, expression };
+  return { enzyme, family_entries: familyEntries, substrates, structures, properties, kinetics, expression };
 }
 
 export async function refreshEnzymeRealData(

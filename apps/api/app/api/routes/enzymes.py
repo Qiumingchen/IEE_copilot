@@ -1632,11 +1632,30 @@ def get_enzyme(
     enzyme_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> EnzymeEntry:
+) -> EnzymeSummary:
     enzyme = db.get(EnzymeEntry, enzyme_id)
     if enzyme is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
-    return enzyme
+    return _enzyme_summary(db, enzyme)
+
+
+@router.get("/{enzyme_id}/family-entries", response_model=list[EnzymeSummary])
+def list_enzyme_family_entries(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[EnzymeSummary]:
+    enzyme = db.get(EnzymeEntry, enzyme_id)
+    if enzyme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
+    entries = list(
+        db.scalars(
+            select(EnzymeEntry)
+            .where(EnzymeEntry.family_id == enzyme.family_id)
+            .order_by(EnzymeEntry.name.asc(), EnzymeEntry.organism.asc())
+        )
+    )
+    return _enzyme_summaries(db, entries)
 
 
 def _unique_strings(values: Iterable[str]) -> list[str]:

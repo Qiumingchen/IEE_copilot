@@ -125,6 +125,18 @@ function textOrDash(value: string | null | undefined): string {
   return value && value.trim() ? value : "-";
 }
 
+function summarizeRecordCounts(enzyme: EnzymeRecordBundle["enzyme"]): string {
+  const counts = enzyme.record_counts;
+  const parts = [
+    counts.properties ? `${counts.properties} properties` : null,
+    counts.kinetics ? `${counts.kinetics} kinetics` : null,
+    counts.mutations ? `${counts.mutations} mutants` : null,
+    counts.structures ? `${counts.structures} structures` : null,
+    counts.expression ? `${counts.expression} expression` : null
+  ].filter(Boolean);
+  return parts.join(" / ") || "No fetched records";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -988,6 +1000,20 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
           ) : null}
 
           <section className="mt-8 grid gap-6">
+            <RecordTable
+              columns={["Name", "Organism", "EC", "UniProt", "Source", "Records"]}
+              rows={bundle.family_entries.map((item) => [
+                <Link className="font-medium text-slate-950 hover:underline" href={`/enzymes/${item.id}`}>
+                  {item.name}
+                </Link>,
+                textOrDash(item.organism),
+                textOrDash(item.ec_number),
+                textOrDash(item.uniprot_id),
+                item.source,
+                summarizeRecordCounts(item)
+              ])}
+              title={`Family entries${bundle.enzyme.family_name ? `: ${bundle.enzyme.family_name}` : ""}`}
+            />
             <RecordTable
               columns={["Name", "Class", "SMILES"]}
               rows={bundle.substrates.map((item) => [
