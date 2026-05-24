@@ -6,6 +6,7 @@ from app.db.models import EnzymeModule
 class EnzymeSearchRequest(BaseModel):
     query: str
     project_id: str | None = None
+    organism: str | None = None
     result_limit: int = Field(default=10, ge=1, le=50)
 
 

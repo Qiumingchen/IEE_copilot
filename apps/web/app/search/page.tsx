@@ -25,6 +25,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50];
 export default function SearchPage() {
   const router = useRouter();
   const [query, setQuery] = useState("microbial transglutaminase");
+  const [sourceOrganism, setSourceOrganism] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export default function SearchPage() {
     setIsSearching(true);
 
     try {
-      const response = await searchEnzyme(query, token, searchPageSize);
+      const response = await searchEnzyme(query, token, searchPageSize, sourceOrganism);
       setResult(response);
     } catch {
       setError("Search failed. Please confirm the API is running and your login is still valid.");
@@ -183,6 +184,16 @@ export default function SearchPage() {
                 name="query"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2">
+              Source organism
+              <input
+                className="min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-500"
+                name="organism"
+                placeholder="Optional, e.g. Bacillus subtilis"
+                value={sourceOrganism}
+                onChange={(event) => setSourceOrganism(event.target.value)}
               />
             </label>
             <button

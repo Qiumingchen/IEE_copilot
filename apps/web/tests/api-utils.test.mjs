@@ -57,10 +57,14 @@ test("searchEnzyme sends the requested result limit", async () => {
   };
 
   try {
-    await searchEnzyme("food lipase", "token", 20);
+    await searchEnzyme("food lipase", "token", 20, "Bacillus subtilis");
   } finally {
     globalThis.fetch = originalFetch;
   }
 
-  assert.deepEqual(submittedBody, { query: "food lipase", result_limit: 20 });
+  assert.deepEqual(submittedBody, {
+    query: "food lipase",
+    result_limit: 20,
+    organism: "Bacillus subtilis"
+  });
 });

@@ -191,10 +191,16 @@ def _fetch_uniprot_entries(
     resolved_query,
     *,
     limit: int,
+    organism: str | None = None,
 ) -> list[tuple[UniProtEntry, str | None, str | None, dict | None]]:
     client = get_uniprot_client()
     try:
-        entries = _fetch_uniprot_entries_with_client(resolved_query, client, limit=limit)
+        entries = _fetch_uniprot_entries_with_client(
+            resolved_query,
+            client,
+            limit=limit,
+            organism=organism,
+        )
     except (httpx.HTTPError, ValueError) as exc:
         if getattr(client, "source", "uniprot").endswith("_mock"):
             raise
@@ -214,6 +220,7 @@ def _fetch_uniprot_entries_with_client(
     client,
     *,
     limit: int,
+    organism: str | None = None,
 ) -> list[tuple[UniProtEntry, str | None, str | None]]:
     source = getattr(client, "source", "uniprot")
     if resolved_query.kind == QueryKind.UNIPROT:
@@ -222,9 +229,18 @@ def _fetch_uniprot_entries_with_client(
 
     hits = []
     if resolved_query.kind == QueryKind.EC:
-        hits = client.search_by_ec(resolved_query.normalized_query, size=limit)
+        if organism:
+            hits = client.search_by_keyword(
+                _uniprot_query_with_organism(f"ec:{resolved_query.normalized_query}", organism),
+                size=limit,
+            )
+        else:
+            hits = client.search_by_ec(resolved_query.normalized_query, size=limit)
     elif resolved_query.kind == QueryKind.KEYWORD:
-        hits = client.search_by_keyword(resolved_query.normalized_query, size=limit)
+        hits = client.search_by_keyword(
+            _uniprot_query_with_organism(resolved_query.normalized_query, organism),
+            size=limit,
+        )
 
     entries: list[tuple[UniProtEntry, str | None, str | None]] = []
     seen_accessions: set[str] = set()
@@ -235,6 +251,19 @@ def _fetch_uniprot_entries_with_client(
         entry = client.fetch_entry(hit.accession)
         entries.append((entry, client.fetch_fasta(entry.accession), source))
     return entries
+
+
+def _normalize_source_organism(organism: str | None) -> str | None:
+    normalized = " ".join((organism or "").split())
+    return normalized or None
+
+
+def _uniprot_query_with_organism(query: str, organism: str | None) -> str:
+    normalized_organism = _normalize_source_organism(organism)
+    if normalized_organism is None:
+        return query
+    escaped_organism = normalized_organism.replace('"', "")
+    return f'{query} AND organism_name:"{escaped_organism}"'
 
 
 def _uniprot_retrieval_provenance(entry: UniProtEntry | None, source: str | None) -> dict | None:
@@ -639,6 +668,13 @@ def _search_cache_payload(
     return payload
 
 
+def _search_cache_normalized_query(normalized_query: str, organism: str | None) -> str:
+    normalized_organism = _normalize_source_organism(organism)
+    if normalized_organism is None:
+        return normalized_query
+    return f"{normalized_query} | organism:{normalized_organism.lower()}"
+
+
 def _upsert_search_cache(
     db: Session,
     *,
@@ -681,6 +717,7 @@ def _search_result_matches(
     *,
     primary_enzyme: EnzymeEntry,
     query: str,
+    organism: str | None = None,
     limit: int = 12,
 ) -> list[EnzymeEntry]:
     query_terms = [term for term in query.lower().replace("_", " ").split() if term]
@@ -694,6 +731,7 @@ def _search_result_matches(
     )
     if get_settings().use_real_science_providers:
         candidates = [candidate for candidate in candidates if not _is_mock_or_seed_source(candidate.source)]
+    candidates = [candidate for candidate in candidates if _enzyme_matches_organism(candidate, organism)]
 
     def score(candidate: EnzymeEntry) -> tuple[int, int, int]:
         haystack = " ".join(
@@ -737,6 +775,7 @@ def _find_local_keyword_match(
     *,
     module: EnzymeModule,
     query: str,
+    organism: str | None = None,
 ) -> EnzymeEntry | None:
     query_terms = [term for term in query.lower().replace("_", " ").split() if term]
     if not query_terms:
@@ -752,6 +791,7 @@ def _find_local_keyword_match(
     candidates = list(db.scalars(enzyme_query))
     if get_settings().use_real_science_providers:
         candidates = [candidate for candidate in candidates if not _is_mock_or_seed_source(candidate.source)]
+    candidates = [candidate for candidate in candidates if _enzyme_matches_organism(candidate, organism)]
 
     if not candidates:
         return None
@@ -782,6 +822,13 @@ def _find_local_keyword_match(
     if exact_score <= 0 and term_score <= 0:
         return None
     return best
+
+
+def _enzyme_matches_organism(enzyme: EnzymeEntry, organism: str | None) -> bool:
+    normalized_organism = _normalize_source_organism(organism)
+    if normalized_organism is None:
+        return True
+    return normalized_organism.lower() in (enzyme.organism or "").lower()
 
 
 def _enzyme_scientific_rankings(
@@ -1177,6 +1224,8 @@ def search_enzymes(
     db: Session = Depends(get_db),
 ) -> EnzymeSearchResponse:
     resolved = resolve_query(request.query)
+    source_organism = _normalize_source_organism(request.organism)
+    cache_normalized_query = _search_cache_normalized_query(resolved.normalized_query, source_organism)
     module = _module_for_search(db, request, resolved.module_hint, user)
     family = _ensure_family(db, module)
     cache_status = "miss_refreshed"
@@ -1185,7 +1234,7 @@ def search_enzymes(
     enzyme: EnzymeEntry | None = None
     fresh_cache = find_fresh_search_cache(
         db,
-        normalized_query=resolved.normalized_query,
+        normalized_query=cache_normalized_query,
         query_kind=resolved.kind.value,
         module=module,
     )
@@ -1240,7 +1289,12 @@ def search_enzymes(
                 cache_status = "stale_refreshed"
 
     if enzyme is None and resolved.kind == QueryKind.KEYWORD:
-        keyword_match = _find_local_keyword_match(db, module=module, query=request.query)
+        keyword_match = _find_local_keyword_match(
+            db,
+            module=module,
+            query=request.query,
+            organism=source_organism,
+        )
         if keyword_match is not None:
             enzyme = keyword_match
             if is_fresh(enzyme.last_refreshed_at):
@@ -1278,6 +1332,7 @@ def search_enzymes(
         for entry, fasta, source, entry_provenance in _fetch_uniprot_entries(
             resolved,
             limit=request.result_limit,
+            organism=source_organism,
         ):
             created_enzyme = _upsert_enzyme_from_uniprot_entry(
                 db,
@@ -1295,7 +1350,7 @@ def search_enzymes(
 
     stale_cache = find_search_cache(
         db,
-        normalized_query=resolved.normalized_query,
+        normalized_query=cache_normalized_query,
         query_kind=resolved.kind.value,
         module=module,
     )
@@ -1360,6 +1415,7 @@ def search_enzymes(
             "normalized_query": resolved.normalized_query,
             "query_kind": resolved.kind.value,
             "module": module.value,
+            **({"organism": source_organism} if source_organism else {}),
             "refresh_modules": refresh_modules,
             **({"retrieval_provenance": retrieval_provenance} if retrieval_provenance else {}),
         },
@@ -1370,7 +1426,7 @@ def search_enzymes(
     _upsert_search_cache(
         db,
         query=request.query,
-        normalized_query=resolved.normalized_query,
+        normalized_query=cache_normalized_query,
         query_kind=resolved.kind.value,
         module=module,
         enzyme=enzyme,
@@ -1385,6 +1441,7 @@ def search_enzymes(
         db,
         primary_enzyme=enzyme,
         query=request.query,
+        organism=source_organism,
         limit=request.result_limit,
     )
 
