@@ -147,3 +147,13 @@ export function pdbDiscoveryErrorMessage(error: ApiErrorLike): string {
   }
   return error.message ?? "PDB discovery failed. Please confirm the API is running.";
 }
+
+export function searchErrorMessage(error: ApiErrorLike): string {
+  if (error.status === 401) {
+    return "Your login session has expired. Please sign in again before searching.";
+  }
+  if (error.status === 404 && error.detail) {
+    return error.detail;
+  }
+  return "Search failed. Please confirm the API is running and your login is still valid.";
+}

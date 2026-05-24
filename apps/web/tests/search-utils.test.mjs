@@ -10,6 +10,7 @@ import {
   formatSearchMatchSubtitle,
   pdbDiscoveryErrorMessage,
   paginateItems,
+  searchErrorMessage,
   sortPdbDiscoveryHits,
   sortSearchMatches,
   searchResultMatches
@@ -298,5 +299,23 @@ test("pdbDiscoveryErrorMessage distinguishes authentication and parser failures"
   assert.equal(
     pdbDiscoveryErrorMessage({ status: 422, detail: "uploaded structure does not contain a protein sequence" }),
     "uploaded structure does not contain a protein sequence"
+  );
+});
+
+test("searchErrorMessage distinguishes real no-hit results from auth and API failures", () => {
+  assert.equal(
+    searchErrorMessage({
+      status: 404,
+      detail: "No real enzyme record found for this query; no seed or mock record was created."
+    }),
+    "No real enzyme record found for this query; no seed or mock record was created."
+  );
+  assert.equal(
+    searchErrorMessage({ status: 401 }),
+    "Your login session has expired. Please sign in again before searching."
+  );
+  assert.equal(
+    searchErrorMessage({ message: "NetworkError" }),
+    "Search failed. Please confirm the API is running and your login is still valid."
   );
 });

@@ -18,6 +18,7 @@ import {
   pdbDiscoveryErrorMessage,
   sortPdbDiscoveryHits,
   sortSearchMatches,
+  searchErrorMessage,
   searchResultMatches
 } from "./search-utils";
 
@@ -69,8 +70,21 @@ export default function SearchPage() {
     try {
       const response = await searchEnzyme(query, token, searchPageSize, sourceOrganism);
       setResult(response);
-    } catch {
-      setError("Search failed. Please confirm the API is running and your login is still valid.");
+    } catch (caught) {
+      if (caught instanceof ApiRequestError && caught.status === 401) {
+        window.localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setError(searchErrorMessage(caught));
+        router.replace("/login");
+        return;
+      }
+      setError(
+        searchErrorMessage(
+          caught instanceof ApiRequestError
+            ? caught
+            : { message: "Search failed. Please confirm the API is running." }
+        )
+      );
     } finally {
       setIsSearching(false);
     }
