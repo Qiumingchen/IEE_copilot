@@ -7,6 +7,7 @@ from app.db.models import EnzymeModule
 
 class QueryKind(str, enum.Enum):
     UNIPROT = "uniprot"
+    ALPHAFOLD = "alphafold"
     PDB = "pdb"
     EC = "ec"
     SEQUENCE = "sequence"
@@ -25,6 +26,7 @@ UNIPROT_RE = re.compile(
     r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})$"
 )
 PDB_RE = re.compile(r"^[0-9][A-Za-z0-9]{3}$")
+ALPHAFOLD_RE = re.compile(r"^AF-[A-Z0-9]+-F\d+$", re.IGNORECASE)
 EC_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 AA_SEQUENCE_RE = re.compile(r"^[ACDEFGHIKLMNPQRSTVWYBXZJUO]+$", re.IGNORECASE)
 
@@ -48,6 +50,9 @@ def resolve_query(query: str) -> ResolvedQuery:
     upper = normalized.upper()
     if EC_RE.match(normalized):
         kind = QueryKind.EC
+    elif ALPHAFOLD_RE.match(normalized):
+        kind = QueryKind.ALPHAFOLD
+        normalized = upper
     elif PDB_RE.match(upper):
         kind = QueryKind.PDB
         normalized = upper

@@ -1415,6 +1415,142 @@ def test_enzyme_search_hits_local_entry_by_pdb_id(client, db_session, monkeypatc
     assert enqueued_job_ids == [body["job_id"]]
 
 
+def test_enzyme_search_hits_local_entry_by_alphafold_id(client, db_session, monkeypatch):
+    enqueued_job_ids = []
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="AlphaFold-backed mTGase",
+        organism="Streptomyces mobaraensis",
+        uniprot_id="P81453",
+        alphafold_id="AF-P81453-F1",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "alphafold-searcher@example.com",
+            "password": "search-password",
+            "display_name": "AlphaFold Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alphafold-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "af-p81453-f1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "hit"
+    assert body["query_kind"] == "alphafold"
+    assert body["enzyme"]["id"] == enzyme.id
+    assert body["enzyme"]["alphafold_id"] == "AF-P81453-F1"
+    assert enqueued_job_ids == [body["job_id"]]
+
+
+def test_enzyme_search_fetches_uniprot_entry_from_alphafold_id_when_not_local(
+    client,
+    db_session,
+    monkeypatch,
+):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot_mock"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            assert accession == "P81453"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="AlphaFold resolved enzyme",
+                organism="Streptomyces mobaraensis",
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                cross_references={"AlphaFoldDB": "AF-P81453-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P81453|MOCK\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {"AlphaFoldDB": "AF-P81453-F1"}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "alphafold-uniprot-searcher@example.com",
+            "password": "search-password",
+            "display_name": "AlphaFold UniProt Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alphafold-uniprot-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "AF-P81453-F1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "miss_refreshed"
+    assert body["query_kind"] == "alphafold"
+    assert body["enzyme"]["uniprot_id"] == "P81453"
+    assert body["enzyme"]["alphafold_id"] == "AF-P81453-F1"
+
+
 def test_enzyme_search_refreshes_stale_local_pdb_match(client, db_session, monkeypatch):
     class PlaceholderTask:
         @staticmethod

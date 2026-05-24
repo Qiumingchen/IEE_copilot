@@ -168,7 +168,7 @@ export default function SearchPage() {
         <p className="text-sm font-medium text-slate-500">Workbench search</p>
         <h1 className="mt-2 text-2xl font-semibold text-slate-950">Search enzyme</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Search by enzyme name, EC number, organism, UniProt ID, or PDB ID.
+          Search by enzyme name, EC number, organism, UniProt ID, PDB ID, or AlphaFold ID.
         </p>
       </header>
 

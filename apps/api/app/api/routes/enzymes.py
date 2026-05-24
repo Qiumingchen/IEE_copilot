@@ -262,6 +262,12 @@ def _fetch_uniprot_entries_with_client(
     if resolved_query.kind == QueryKind.UNIPROT:
         entry = client.fetch_entry(resolved_query.normalized_query)
         return [(entry, client.fetch_fasta(entry.accession), source)]
+    if resolved_query.kind == QueryKind.ALPHAFOLD:
+        accession = _uniprot_accession_from_alphafold_id(resolved_query.normalized_query)
+        if accession is None:
+            return []
+        entry = client.fetch_entry(accession)
+        return [(entry, client.fetch_fasta(entry.accession), source)]
 
     hits = []
     if resolved_query.kind == QueryKind.EC:
@@ -287,6 +293,11 @@ def _fetch_uniprot_entries_with_client(
         entry = client.fetch_entry(hit.accession)
         entries.append((entry, client.fetch_fasta(entry.accession), source))
     return entries
+
+
+def _uniprot_accession_from_alphafold_id(alphafold_id: str) -> str | None:
+    match = re.fullmatch(r"AF-([A-Z0-9]+)-F\d+", alphafold_id.upper())
+    return match.group(1) if match else None
 
 
 def _normalize_source_organism(organism: str | None) -> str | None:
@@ -1525,7 +1536,7 @@ def search_enzymes(
         )
         cache_status = "miss_refreshed"
 
-    if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
+    if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.ALPHAFOLD, QueryKind.EC, QueryKind.KEYWORD}:
         uniprot_family: EnzymeFamily | None = None
         for entry, fasta, source, entry_provenance in _fetch_uniprot_entries(
             resolved,

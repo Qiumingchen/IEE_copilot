@@ -23,6 +23,13 @@ def test_resolve_pdb_id():
     assert resolved.normalized_query == "1IU4"
 
 
+def test_resolve_alphafold_id():
+    resolved = resolve_query("af-p81453-f1")
+
+    assert resolved.kind == QueryKind.ALPHAFOLD
+    assert resolved.normalized_query == "AF-P81453-F1"
+
+
 def test_resolve_ec_number():
     resolved = resolve_query("2.3.2.13")
 

@@ -5,7 +5,13 @@ from app.services.exact_matching import find_level_one_exact_match
 from app.services.query_resolver import QueryKind
 
 
-def _enzyme_with_ids(db_session, *, uniprot_id: str | None = None, pdb_id: str | None = None) -> EnzymeEntry:
+def _enzyme_with_ids(
+    db_session,
+    *,
+    uniprot_id: str | None = None,
+    pdb_id: str | None = None,
+    alphafold_id: str | None = None,
+) -> EnzymeEntry:
     family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
         name="Mature microbial transglutaminases",
@@ -19,6 +25,7 @@ def _enzyme_with_ids(db_session, *, uniprot_id: str | None = None, pdb_id: str |
         ec_number="2.3.2.13",
         uniprot_id=uniprot_id,
         pdb_id=pdb_id,
+        alphafold_id=alphafold_id,
         source="local",
         last_refreshed_at=datetime.utcnow() - timedelta(days=1),
     )
@@ -46,6 +53,18 @@ def test_level_one_exact_match_finds_same_pdb_id(db_session):
         db_session,
         query_kind=QueryKind.PDB,
         normalized_query="1ABC",
+    )
+
+    assert match == enzyme
+
+
+def test_level_one_exact_match_finds_same_alphafold_id(db_session):
+    enzyme = _enzyme_with_ids(db_session, alphafold_id="AF-P81453-F1")
+
+    match = find_level_one_exact_match(
+        db_session,
+        query_kind=QueryKind.ALPHAFOLD,
+        normalized_query="AF-P81453-F1",
     )
 
     assert match == enzyme
