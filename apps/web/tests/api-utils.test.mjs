@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { apiUrl, discoverEnzymeFromPdb, getEnzymeRecordBundle, searchEnzyme } from "../lib/api.ts";
+import {
+  apiUrl,
+  discoverEnzymeFromPdb,
+  getEnzymeRecordBundle,
+  refreshEnzymeFamilyRealData,
+  searchEnzyme
+} from "../lib/api.ts";
 
 test("apiUrl uses the same-origin backend proxy by default", () => {
   assert.equal(apiUrl("/auth/login"), "/api/backend/auth/login");
@@ -127,4 +133,32 @@ test("getEnzymeRecordBundle fetches same-family enzyme entries", async () => {
   assert.equal(bundle.family_entries.length, 1);
   assert.equal(bundle.family_entries[0].id, "enzyme-2");
   assert.ok(requestedUrls.includes("/api/backend/enzymes/enzyme-1/family-entries"));
+});
+
+test("refreshEnzymeFamilyRealData posts to the family refresh endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  let requestedMethod;
+  globalThis.fetch = async (url, init) => {
+    requestedUrl = url;
+    requestedMethod = init.method;
+    return new Response(
+      JSON.stringify({
+        enzyme: {},
+        created: { references: 2, properties: 2, kinetics: 0, mutations: 0, structures: 0 },
+        sources: ["crossref", "europepmc"],
+        warnings: []
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  try {
+    await refreshEnzymeFamilyRealData("enzyme-1", "token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedUrl, "/api/backend/enzymes/enzyme-1/family-real-data/refresh");
+  assert.equal(requestedMethod, "POST");
 });

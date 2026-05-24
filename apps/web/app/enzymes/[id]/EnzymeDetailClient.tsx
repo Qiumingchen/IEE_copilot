@@ -13,6 +13,7 @@ import {
   createSubstrate,
   getEnzymeRecordBundle,
   listEnzymeReferences,
+  refreshEnzymeFamilyRealData,
   refreshEnzymeRealData,
   uploadStructureFile
 } from "../../../lib/api";
@@ -236,6 +237,7 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   const [isSavingKinetic, setIsSavingKinetic] = useState(false);
   const [isSavingExpression, setIsSavingExpression] = useState(false);
   const [isFetchingRealData, setIsFetchingRealData] = useState(false);
+  const [isFetchingFamilyRealData, setIsFetchingFamilyRealData] = useState(false);
   const [realDataNotice, setRealDataNotice] = useState<string | null>(null);
   const [substrateName, setSubstrateName] = useState("");
   const [substrateClass, setSubstrateClass] = useState("");
@@ -452,7 +454,7 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   }
 
   async function handleRefreshRealData() {
-    if (!token || isFetchingRealData) {
+    if (!token || isFetchingRealData || isFetchingFamilyRealData) {
       return;
     }
 
@@ -471,6 +473,29 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
       );
     } finally {
       setIsFetchingRealData(false);
+    }
+  }
+
+  async function handleRefreshFamilyRealData() {
+    if (!token || isFetchingRealData || isFetchingFamilyRealData) {
+      return;
+    }
+
+    setIsFetchingFamilyRealData(true);
+    setError(null);
+    setRealDataNotice(null);
+    try {
+      const response = await refreshEnzymeFamilyRealData(enzymeId, token);
+      setRealDataNotice(formatRealDataRefreshSummary(response.created, response.sources));
+      await loadBundle(token);
+    } catch (caught) {
+      setError(
+        caught instanceof Error && caught.message
+          ? caught.message
+          : "Unable to fetch real external data for this enzyme family."
+      );
+    } finally {
+      setIsFetchingFamilyRealData(false);
     }
   }
 
@@ -510,11 +535,19 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
             </button>
             <button
               className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
-              disabled={!token || isLoading || isFetchingRealData}
+              disabled={!token || isLoading || isFetchingRealData || isFetchingFamilyRealData}
               onClick={() => void handleRefreshRealData()}
               type="button"
             >
               {isFetchingRealData ? "Fetching..." : "Fetch Real Data"}
+            </button>
+            <button
+              className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-sky-300"
+              disabled={!token || isLoading || isFetchingRealData || isFetchingFamilyRealData}
+              onClick={() => void handleRefreshFamilyRealData()}
+              type="button"
+            >
+              {isFetchingFamilyRealData ? "Fetching..." : "Fetch Family Data"}
             </button>
           </div>
         </div>

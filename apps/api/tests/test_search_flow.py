@@ -876,6 +876,97 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert references[0].source == "crossref"
 
 
+def test_family_real_data_refresh_updates_same_family_entries(client, db_session, monkeypatch):
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original=f"{query} 62",
+                    unit_original="degC",
+                    source=self.source,
+                    evidence=f"Europe PMC family property for {query}",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class RealLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return [
+                LiteratureMetadata(
+                    title=f"Real family evidence for {enzyme_name}",
+                    journal="Food Enzyme Reports",
+                    year=2026,
+                    doi=f"10.1000/{enzyme_name.lower().replace(' ', '-')}",
+                    source=self.source,
+                )
+            ]
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: RealLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food lipases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    first = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase Bacillus",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    second = EnzymeEntry(
+        family_id=family.id,
+        name="Food lipase Geobacillus",
+        organism="Geobacillus stearothermophilus",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([first, second])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "family-real-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Family Real Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "family-real-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{first.id}/family-real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] == {"references": 2, "properties": 2, "kinetics": 0, "mutations": 0, "structures": 0}
+    assert body["sources"] == ["crossref", "europepmc"]
+
+    refreshed = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id.in_([first.id, second.id]))).all()
+    assert {record.enzyme_entry_id for record in refreshed} == {first.id, second.id}
+
+
 def test_real_data_refresh_rejects_mock_provider(client, db_session):
     family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,

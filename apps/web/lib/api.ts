@@ -209,6 +209,17 @@ export async function refreshEnzymeRealData(
   );
 }
 
+export async function refreshEnzymeFamilyRealData(
+  enzymeId: string,
+  token: string
+): Promise<EnzymeRealDataRefreshResponse> {
+  return fetchWithTokenAndErrorMessage<EnzymeRealDataRefreshResponse>(
+    `/enzymes/${enzymeId}/family-real-data/refresh`,
+    token,
+    { method: "POST" }
+  );
+}
+
 export async function listStructures(
   enzymeId: string,
   token: string

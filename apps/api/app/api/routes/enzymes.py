@@ -1596,26 +1596,8 @@ def refresh_enzyme_real_data(
     created = {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0, "structures": 0}
     sources: list[str] = []
     warnings: list[str] = []
+    _refresh_real_data_for_enzyme(db, enzyme, created=created, sources=sources, warnings=warnings)
 
-    reference_count, reference_sources, reference_warnings = _save_literature_for_enzyme(
-        db,
-        enzyme,
-        require_real=True,
-    )
-    created["references"] = reference_count
-    sources.extend(reference_sources)
-    warnings.extend(reference_warnings)
-
-    data_counts, data_sources, data_warnings = _save_external_enzyme_data(
-        db,
-        enzyme,
-        require_real=True,
-    )
-    created.update(data_counts)
-    sources.extend(data_sources)
-    warnings.extend(data_warnings)
-
-    enzyme.last_refreshed_at = datetime.utcnow()
     db.commit()
     db.refresh(enzyme)
 
@@ -1625,6 +1607,66 @@ def refresh_enzyme_real_data(
         sources=_unique_strings(sources),
         warnings=warnings,
     )
+
+
+@router.post("/{enzyme_id}/family-real-data/refresh", response_model=EnzymeRealDataRefreshResponse)
+def refresh_enzyme_family_real_data(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> EnzymeRealDataRefreshResponse:
+    enzyme = db.get(EnzymeEntry, enzyme_id)
+    if enzyme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
+
+    created = {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0, "structures": 0}
+    sources: list[str] = []
+    warnings: list[str] = []
+    family_entries = list(
+        db.scalars(select(EnzymeEntry).where(EnzymeEntry.family_id == enzyme.family_id))
+    )
+    for family_enzyme in family_entries:
+        _refresh_real_data_for_enzyme(db, family_enzyme, created=created, sources=sources, warnings=warnings)
+
+    db.commit()
+    db.refresh(enzyme)
+
+    return EnzymeRealDataRefreshResponse(
+        enzyme=_enzyme_summary(db, enzyme),
+        created=created,
+        sources=_unique_strings(sources),
+        warnings=warnings,
+    )
+
+
+def _refresh_real_data_for_enzyme(
+    db: Session,
+    enzyme: EnzymeEntry,
+    *,
+    created: dict[str, int],
+    sources: list[str],
+    warnings: list[str],
+) -> None:
+    reference_count, reference_sources, reference_warnings = _save_literature_for_enzyme(
+        db,
+        enzyme,
+        require_real=True,
+    )
+    created["references"] += reference_count
+    sources.extend(reference_sources)
+    warnings.extend(reference_warnings)
+
+    data_counts, data_sources, data_warnings = _save_external_enzyme_data(
+        db,
+        enzyme,
+        require_real=True,
+    )
+    for key, count in data_counts.items():
+        created[key] = created.get(key, 0) + count
+    sources.extend(data_sources)
+    warnings.extend(data_warnings)
+
+    enzyme.last_refreshed_at = datetime.utcnow()
 
 
 @router.get("/{enzyme_id}", response_model=EnzymeSummary)
