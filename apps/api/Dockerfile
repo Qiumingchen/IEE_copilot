@@ -3,6 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONPATH=/app/apps/api:/app/apps/worker
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends mafft \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml /app/pyproject.toml
 RUN pip install --no-cache-dir ".[dev]"
 

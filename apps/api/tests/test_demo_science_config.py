@@ -36,6 +36,15 @@ def test_env_example_configures_local_sequence_similarity_demo():
     ) in content
 
 
+def test_env_example_configures_mafft_runner():
+    env_example = Path(".env.example")
+    assert env_example.exists()
+
+    content = env_example.read_text(encoding="utf-8")
+
+    assert "MAFFT_BIN=mafft --auto -" in content
+
+
 def test_demo_homolog_fasta_contains_mtgase_like_sequences():
     fasta_path = Path("data/demo/homologs.fasta")
     assert fasta_path.exists()
@@ -54,4 +63,6 @@ def test_demo_data_is_included_in_api_and_worker_images():
 
     assert "COPY data /app/data" in api_dockerfile
     assert "COPY data /app/data" in worker_dockerfile
+    assert "apt-get install -y --no-install-recommends mafft" in api_dockerfile
+    assert "apt-get install -y --no-install-recommends mafft" in worker_dockerfile
     assert "!data/demo/**" in dockerignore
