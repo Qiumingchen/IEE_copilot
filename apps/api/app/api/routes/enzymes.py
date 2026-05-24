@@ -571,6 +571,50 @@ def _save_external_enzyme_data(
     return created, [source], []
 
 
+def _save_alphafold_structure_for_enzyme(
+    db: Session,
+    enzyme: EnzymeEntry,
+    *,
+    require_real: bool = False,
+) -> tuple[int, list[str], list[str]]:
+    if not enzyme.uniprot_id or not enzyme.alphafold_id:
+        return 0, [], []
+    existing = db.scalar(
+        select(StructureEntry).where(
+            StructureEntry.enzyme_entry_id == enzyme.id,
+            StructureEntry.structure_type == "alphafold",
+        )
+    )
+    if existing is not None:
+        return 0, [], []
+
+    client = get_alphafold_client()
+    source = getattr(client, "source", "alphafold")
+    if require_real:
+        _raise_if_mock_provider(source, "AlphaFold")
+    try:
+        model = client.fetch_model_by_uniprot(enzyme.uniprot_id)
+    except (httpx.HTTPError, ValueError) as exc:
+        if source.endswith("_mock"):
+            raise
+        if require_real:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"AlphaFold provider unavailable; no mock structure was used. {exc}",
+            ) from exc
+        return 0, [source], [f"AlphaFold provider unavailable: {exc}"]
+
+    _create_alphafold_structure(
+        db,
+        enzyme=enzyme,
+        model=model,
+        source=source,
+        provenance=build_real_provenance(provider=source, source_url=model.structure_url),
+    )
+    enzyme.alphafold_id = model.model_id
+    return 1, [source], []
+
+
 def _literature_reference_exists(db: Session, doi: str | None, pubmed_id: str | None) -> bool:
     if doi:
         return db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi)) is not None
@@ -1665,6 +1709,15 @@ def _refresh_real_data_for_enzyme(
         created[key] = created.get(key, 0) + count
     sources.extend(data_sources)
     warnings.extend(data_warnings)
+
+    structure_count, structure_sources, structure_warnings = _save_alphafold_structure_for_enzyme(
+        db,
+        enzyme,
+        require_real=True,
+    )
+    created["structures"] = created.get("structures", 0) + structure_count
+    sources.extend(structure_sources)
+    warnings.extend(structure_warnings)
 
     enzyme.last_refreshed_at = datetime.utcnow()
 

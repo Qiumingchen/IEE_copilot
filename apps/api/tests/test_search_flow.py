@@ -18,6 +18,7 @@ from app.db.models import (
     StructureEntry,
 )
 from app.api.routes.enzymes import _ensure_protein_sequence
+from app.external.alphafold import AlphaFoldModelMetadata
 from app.external.enzyme_data import ExternalKineticParameter, ExternalMutantRecord, ExternalPropertyDatum
 from app.external.literature import LiteratureMetadata
 from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, UniProtEntry, UniProtSearchHit
@@ -874,6 +875,91 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert kinetics[0].method == "europepmc"
     assert mutations[0].assay_condition_summary["source"] == "europepmc"
     assert references[0].source == "crossref"
+
+
+def test_real_data_refresh_saves_alphafold_structure_for_known_uniprot(client, db_session, monkeypatch):
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class RealAlphaFoldClient:
+        source = "alphafold"
+
+        def fetch_model_by_uniprot(self, uniprot_id: str):
+            assert uniprot_id == "P12345"
+            return AlphaFoldModelMetadata(
+                model_id="AF-P12345-F1",
+                uniprot_id="P12345",
+                structure_url="https://alphafold.ebi.ac.uk/files/AF-P12345-F1-model_v6.pdb",
+                confidence_url="https://alphafold.ebi.ac.uk/files/AF-P12345-F1-confidence_v6.json",
+                confidence_summary={"avg_plddt": 88.0},
+            )
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: RealAlphaFoldClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food hydrolases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food hydrolase with AlphaFold",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="P12345",
+        alphafold_id="AF-P12345-F1",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "alphafold-real-refresh@example.com",
+            "password": "search-password",
+            "display_name": "AlphaFold Real Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alphafold-real-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["structures"] == 1
+    assert "alphafold" in body["sources"]
+    structure = db_session.scalar(select(StructureEntry).where(StructureEntry.enzyme_entry_id == enzyme.id))
+    assert structure.structure_type == "alphafold"
+    assert structure.source == "alphafold"
+    assert structure.chain_summary["model_id"] == "AF-P12345-F1"
 
 
 def test_family_real_data_refresh_updates_same_family_entries(client, db_session, monkeypatch):
