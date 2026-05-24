@@ -415,3 +415,10 @@ export type EnzymeRecordBundle = {
   kinetics: KineticRecord[];
   expression: ExpressionRecord[];
 };
+
+export type EnzymeRealDataRefreshResponse = {
+  enzyme: EnzymeSummary;
+  created: Record<string, number>;
+  sources: string[];
+  warnings: string[];
+};

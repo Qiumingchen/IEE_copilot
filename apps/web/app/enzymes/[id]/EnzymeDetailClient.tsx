@@ -13,11 +13,17 @@ import {
   createSubstrate,
   getEnzymeRecordBundle,
   listEnzymeReferences,
+  refreshEnzymeRealData,
   uploadStructureFile
 } from "../../../lib/api";
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
 import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
-import { formatConditionEvidence, formatReferenceForTable, formatVisibilityStatus } from "./enzyme-detail-utils";
+import {
+  formatConditionEvidence,
+  formatRealDataRefreshSummary,
+  formatReferenceForTable,
+  formatVisibilityStatus
+} from "./enzyme-detail-utils";
 import { ReferenceCitation } from "./ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
@@ -217,6 +223,8 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   const [isUploadingStructure, setIsUploadingStructure] = useState(false);
   const [isSavingKinetic, setIsSavingKinetic] = useState(false);
   const [isSavingExpression, setIsSavingExpression] = useState(false);
+  const [isFetchingRealData, setIsFetchingRealData] = useState(false);
+  const [realDataNotice, setRealDataNotice] = useState<string | null>(null);
   const [substrateName, setSubstrateName] = useState("");
   const [substrateClass, setSubstrateClass] = useState("");
   const [substrateSmiles, setSubstrateSmiles] = useState("");
@@ -431,6 +439,29 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     }
   }
 
+  async function handleRefreshRealData() {
+    if (!token || isFetchingRealData) {
+      return;
+    }
+
+    setIsFetchingRealData(true);
+    setError(null);
+    setRealDataNotice(null);
+    try {
+      const response = await refreshEnzymeRealData(enzymeId, token);
+      setRealDataNotice(formatRealDataRefreshSummary(response.created, response.sources));
+      await loadBundle(token);
+    } catch (caught) {
+      setError(
+        caught instanceof Error && caught.message
+          ? caught.message
+          : "Unable to fetch real external data for this enzyme."
+      );
+    } finally {
+      setIsFetchingRealData(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -465,6 +496,14 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
             >
               Refresh
             </button>
+            <button
+              className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
+              disabled={!token || isLoading || isFetchingRealData}
+              onClick={() => void handleRefreshRealData()}
+              type="button"
+            >
+              {isFetchingRealData ? "Fetching..." : "Fetch Real Data"}
+            </button>
           </div>
         </div>
       </header>
@@ -472,6 +511,12 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
       {error ? (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
+        </p>
+      ) : null}
+
+      {realDataNotice ? (
+        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {realDataNotice}
         </p>
       ) : null}
 

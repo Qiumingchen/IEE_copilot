@@ -17,6 +17,7 @@ from app.db.models import (
     EnzymeModule,
     JobStatus,
     KineticRecord,
+    LiteratureReference,
     MutationRecord,
     Project,
     ProteinSequence,
@@ -40,6 +41,7 @@ from app.external.uniprot import (
 from app.schemas.enzyme import (
     EnzymeSearchRequest,
     EnzymeSearchResponse,
+    EnzymeRealDataRefreshResponse,
     EnzymeSummary,
     PdbDiscoveryChain,
     PdbDiscoveryHit,
@@ -302,22 +304,49 @@ def _fetch_alphafold_model(uniprot_id: str) -> tuple[AlphaFoldModelMetadata | No
         )
 
 
-def _save_literature_for_enzyme(db: Session, enzyme: EnzymeEntry) -> None:
+def _save_literature_for_enzyme(
+    db: Session,
+    enzyme: EnzymeEntry,
+    *,
+    require_real: bool = False,
+) -> tuple[int, list[str], list[str]]:
     client = get_literature_client()
+    source = getattr(client, "source", "literature")
+    if require_real:
+        _raise_if_mock_provider(source, "literature")
     try:
         hits = client.search_by_enzyme_name(enzyme.name)
-    except (httpx.HTTPError, ValueError):
-        if getattr(client, "source", "crossref").endswith("_mock"):
+    except (httpx.HTTPError, ValueError) as exc:
+        if source.endswith("_mock"):
             raise
-        hits = []
+        if require_real:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Literature provider unavailable; no mock references were used. {exc}",
+            ) from exc
+        return 0, [source], [f"Literature provider unavailable: {exc}"]
 
+    created = 0
     for metadata in hits:
+        existed = _literature_reference_exists(db, metadata.doi, metadata.pubmed_id)
         create_literature_reference(db, metadata)
+        if not existed:
+            created += 1
+    return created, [source], []
 
 
-def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
+def _save_external_enzyme_data(
+    db: Session,
+    enzyme: EnzymeEntry,
+    *,
+    require_real: bool = False,
+) -> tuple[dict[str, int], list[str], list[str]]:
     client = get_enzyme_data_client()
+    source = getattr(client, "source", "enzyme_data")
+    if require_real:
+        _raise_if_mock_provider(source, "enzyme data")
     query = enzyme.name
+    created = {"properties": 0, "kinetics": 0, "mutations": 0}
 
     property_data = [
         *client.fetch_opt_temperature(query),
@@ -347,6 +376,7 @@ def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
                 evidence_text=datum.evidence,
             )
         )
+        created["properties"] += 1
 
     for parameter in client.fetch_kinetic_parameters(query):
         existing = db.scalar(
@@ -374,6 +404,7 @@ def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
                 evidence_text=parameter.evidence,
             )
         )
+        created["kinetics"] += 1
 
     for mutant in client.fetch_mutants(query):
         existing = db.scalar(
@@ -398,6 +429,25 @@ def _save_external_enzyme_data(db: Session, enzyme: EnzymeEntry) -> None:
                 },
             )
         )
+        created["mutations"] += 1
+    return created, [source], []
+
+
+def _literature_reference_exists(db: Session, doi: str | None, pubmed_id: str | None) -> bool:
+    if doi:
+        return db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi)) is not None
+    if pubmed_id:
+        return db.scalar(select(LiteratureReference).where(LiteratureReference.pubmed_id == pubmed_id)) is not None
+    return False
+
+
+def _raise_if_mock_provider(source: str | None, provider_label: str) -> None:
+    if not _is_mock_or_seed_source(source):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"{provider_label} provider is configured as {source}; real-data refresh will not use mock data.",
+    )
 
 
 def _create_alphafold_structure(
@@ -1316,6 +1366,50 @@ async def discover_enzyme_from_pdb(
     )
 
 
+@router.post("/{enzyme_id}/real-data/refresh", response_model=EnzymeRealDataRefreshResponse)
+def refresh_enzyme_real_data(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> EnzymeRealDataRefreshResponse:
+    enzyme = db.get(EnzymeEntry, enzyme_id)
+    if enzyme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
+
+    created = {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0, "structures": 0}
+    sources: list[str] = []
+    warnings: list[str] = []
+
+    reference_count, reference_sources, reference_warnings = _save_literature_for_enzyme(
+        db,
+        enzyme,
+        require_real=True,
+    )
+    created["references"] = reference_count
+    sources.extend(reference_sources)
+    warnings.extend(reference_warnings)
+
+    data_counts, data_sources, data_warnings = _save_external_enzyme_data(
+        db,
+        enzyme,
+        require_real=True,
+    )
+    created.update(data_counts)
+    sources.extend(data_sources)
+    warnings.extend(data_warnings)
+
+    enzyme.last_refreshed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(enzyme)
+
+    return EnzymeRealDataRefreshResponse(
+        enzyme=_enzyme_summary(db, enzyme),
+        created=created,
+        sources=_unique_strings(sources),
+        warnings=warnings,
+    )
+
+
 @router.get("/{enzyme_id}", response_model=EnzymeSummary)
 def get_enzyme(
     enzyme_id: str,
@@ -1326,3 +1420,14 @@ def get_enzyme(
     if enzyme is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
     return enzyme
+
+
+def _unique_strings(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result

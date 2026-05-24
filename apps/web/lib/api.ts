@@ -5,6 +5,7 @@ import type {
   CuratedEvidenceImportResponse,
   CuratedEvidencePreviewResponse,
   EnzymeRecordBundle,
+  EnzymeRealDataRefreshResponse,
   EnzymeSummary,
   ExpressionRecord,
   ExperimentImportPreview,
@@ -184,6 +185,17 @@ export async function getEnzymeRecordBundle(
   ]);
 
   return { enzyme, substrates, structures, properties, kinetics, expression };
+}
+
+export async function refreshEnzymeRealData(
+  enzymeId: string,
+  token: string
+): Promise<EnzymeRealDataRefreshResponse> {
+  return fetchWithTokenAndErrorMessage<EnzymeRealDataRefreshResponse>(
+    `/enzymes/${enzymeId}/real-data/refresh`,
+    token,
+    { method: "POST" }
+  );
 }
 
 export async function listStructures(

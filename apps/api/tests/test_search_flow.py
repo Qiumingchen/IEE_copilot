@@ -17,6 +17,8 @@ from app.db.models import (
     StructureEntry,
 )
 from app.api.routes.enzymes import _ensure_protein_sequence
+from app.external.enzyme_data import ExternalKineticParameter, ExternalMutantRecord, ExternalPropertyDatum
+from app.external.literature import LiteratureMetadata
 from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, UniProtEntry, UniProtSearchHit
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
 
@@ -552,6 +554,165 @@ def test_real_provider_search_excludes_mock_and_seed_entries_from_matches(client
 
     assert response.status_code == 200
     assert [match["id"] for match in response.json()["matches"]] == [real_enzyme.id]
+
+
+def test_real_data_refresh_saves_external_records_without_mock_fallback(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="62",
+                    unit_original="degC",
+                    source=self.source,
+                    evidence="Europe PMC PMID:123 optimum temperature",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_pH",
+                    value_original="7.5",
+                    source=self.source,
+                    evidence="Europe PMC PMID:123 optimum pH",
+                )
+            ]
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="casein",
+                    km="1.8",
+                    kcat="24.0",
+                    unit_original="mM; s^-1",
+                    source=self.source,
+                    evidence="Europe PMC PMID:123 kinetic parameters",
+                )
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return [
+                ExternalMutantRecord(
+                    mutation_string="A10V",
+                    effect_summary="Real literature mention: A10V improved thermostability.",
+                    source=self.source,
+                    evidence="Europe PMC PMID:123 mutant",
+                )
+            ]
+
+    class RealLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return [
+                LiteratureMetadata(
+                    title="Real transglutaminase evidence",
+                    journal="Food Enzyme Reports",
+                    year=2025,
+                    doi="10.1000/real-refresh",
+                    source=self.source,
+                )
+            ]
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: RealLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Real microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-data-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Real Data Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-data-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] == {"references": 1, "properties": 2, "kinetics": 1, "mutations": 1, "structures": 0}
+    assert body["sources"] == ["crossref", "europepmc"]
+
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    kinetics = db_session.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)).all()
+    mutations = db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    references = db_session.scalars(select(LiteratureReference)).all()
+    assert {record.method for record in properties} == {"europepmc"}
+    assert kinetics[0].method == "europepmc"
+    assert mutations[0].assay_condition_summary["source"] == "europepmc"
+    assert references[0].source == "crossref"
+
+
+def test_real_data_refresh_rejects_mock_provider(client, db_session):
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Mock-only microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "mock-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Mock Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "mock-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 409
+    assert db_session.scalar(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)) is None
 
 
 def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch):

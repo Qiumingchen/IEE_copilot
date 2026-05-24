@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   formatConditionEvidence,
+  formatRealDataRefreshSummary,
   formatReferenceForTable,
   formatVisibilityStatus
 } from "../app/enzymes/[id]/enzyme-detail-utils.ts";
@@ -49,4 +50,14 @@ test("formatConditionEvidence extracts curated evidence from condition metadata"
   assert.equal(formatConditionEvidence({ evidence: "   " }), "-");
   assert.equal(formatConditionEvidence({ evidence: 123 }), "-");
   assert.equal(formatConditionEvidence(null), "-");
+});
+
+test("formatRealDataRefreshSummary reports created records and sources", () => {
+  assert.equal(
+    formatRealDataRefreshSummary(
+      { references: 1, properties: 2, kinetics: 1, mutations: 1, structures: 0 },
+      ["crossref", "europepmc"]
+    ),
+    "Fetched real data: references 1, properties 2, kinetics 1, mutations 1, structures 0. Sources: crossref, europepmc."
+  );
 });

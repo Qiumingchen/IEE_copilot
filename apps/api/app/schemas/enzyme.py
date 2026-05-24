@@ -36,6 +36,13 @@ class EnzymeSearchResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
 
+class EnzymeRealDataRefreshResponse(BaseModel):
+    enzyme: EnzymeSummary
+    created: dict[str, int] = Field(default_factory=dict)
+    sources: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PdbDiscoveryChain(BaseModel):
     chain_id: str
     sequence: str
