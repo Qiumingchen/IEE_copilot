@@ -19,8 +19,13 @@ from app.db.models import (
 )
 from app.api.routes.enzymes import _ensure_protein_sequence
 from app.external.alphafold import AlphaFoldModelMetadata
-from app.external.enzyme_data import ExternalKineticParameter, ExternalMutantRecord, ExternalPropertyDatum
-from app.external.literature import LiteratureMetadata
+from app.external.enzyme_data import (
+    ExternalKineticParameter,
+    ExternalMutantRecord,
+    ExternalPropertyDatum,
+    MockEnzymeDataClient,
+)
+from app.external.literature import LiteratureMetadata, MockLiteratureClient
 from app.external.rcsb import RcsbStructureMetadata
 from app.external.uniprot import P81453_FULL_SEQUENCE, P81453_MATURE_SEQUENCE, UniProtEntry, UniProtSearchHit
 from app.services.cache import DATA_MODULE_SEQUENCE, DATA_MODULE_STRUCTURE
@@ -758,6 +763,203 @@ def test_real_provider_search_excludes_mock_and_seed_entries_from_matches(client
 
     assert response.status_code == 200
     assert [match["id"] for match in response.json()["matches"]] == [real_enzyme.id]
+
+
+def test_real_provider_search_does_not_persist_mock_enrichment_data(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class RealUniProtClient:
+        source = "uniprot"
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return [
+                UniProtSearchHit(
+                    accession="P81453",
+                    protein_name="Microbial transglutaminase",
+                    organism="Streptomyces mobaraensis",
+                    ec_number="2.3.2.13",
+                    score=1.0,
+                )
+            ][:size]
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Microbial transglutaminase",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                sequence=P81453_FULL_SEQUENCE,
+                mature_sequence=P81453_MATURE_SEQUENCE,
+                reviewed=True,
+                cross_references={},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return f">sp|{accession}|MTG_STREMO\n{P81453_FULL_SEQUENCE}\n"
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: RealUniProtClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_literature_client",
+        lambda: MockLiteratureClient(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_enzyme_data_client",
+        lambda: MockEnzymeDataClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-search-no-mock-enrichment@example.com",
+            "password": "search-password",
+            "display_name": "Real Search No Mock Enrichment",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-search-no-mock-enrichment@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase"},
+    )
+
+    assert response.status_code == 200
+    assert db_session.scalar(select(PropertyRecord)) is None
+    assert db_session.scalar(select(KineticRecord)) is None
+    assert db_session.scalar(select(MutationRecord)) is None
+    assert db_session.scalar(select(LiteratureReference)) is None
+
+
+def test_real_provider_search_summary_ignores_existing_mock_records(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: EmptyUniProtClient(),
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Real search family",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Real lipase",
+        organism="Bacillus realensis",
+        source="uniprot",
+        uniprot_id="R22222",
+        uniprot_reviewed=True,
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme.id,
+                property_type="optimal_temperature",
+                value_original="99",
+                method="enzyme_data_mock",
+            ),
+            PropertyRecord(
+                enzyme_entry_id=enzyme.id,
+                property_type="optimal_temperature",
+                value_original="55",
+                method="europepmc",
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme.id,
+                substrate="casein",
+                km="1.0",
+                method="enzyme_data_mock",
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme.id,
+                mutation_string="A1V",
+                assay_condition_summary={"source": "enzyme_data_mock"},
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme.id,
+                structure_type="alphafold",
+                source="alphafold_mock",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-summary-filter@example.com",
+            "password": "search-password",
+            "display_name": "Real Summary Filter",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-summary-filter@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "Real lipase"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enzyme"]["optimal_temperature"] == 55.0
+    assert body["enzyme"]["record_counts"] == {
+        "properties": 1,
+        "kinetics": 0,
+        "mutations": 0,
+        "structures": 0,
+        "expression": 0,
+    }
 
 
 def test_real_data_refresh_saves_external_records_without_mock_fallback(client, db_session, monkeypatch):

@@ -283,6 +283,102 @@ def test_list_evidence_records_embed_literature_reference(client, db_session):
     assert mutations[0]["reference"]["doi"] == "10.1000/traceable"
 
 
+def test_real_provider_record_lists_hide_existing_mock_records(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    real_reference = LiteratureReference(
+        title="Real enzyme evidence",
+        year=2024,
+        doi="10.1000/real-evidence",
+        source="europepmc",
+    )
+    mock_reference = LiteratureReference(
+        title="Mock enzyme evidence",
+        year=2024,
+        doi="10.0000/mock-evidence",
+        source="literature_mock",
+    )
+    db_session.add_all([real_reference, mock_reference])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme_id,
+                property_type="optimal_temperature",
+                value_original="55",
+                method="europepmc",
+                reference_id=real_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            PropertyRecord(
+                enzyme_entry_id=enzyme_id,
+                property_type="optimal_temperature",
+                value_original="99",
+                method="enzyme_data_mock",
+                reference_id=mock_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme_id,
+                substrate="casein",
+                km="1.8",
+                method="europepmc",
+                reference_id=real_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme_id,
+                substrate="casein",
+                km="9.9",
+                method="enzyme_data_mock",
+                reference_id=mock_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="S2P",
+                assay_condition_summary={"source": "europepmc"},
+                reference_id=real_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="A1V",
+                assay_condition_summary={"source": "enzyme_data_mock"},
+                reference_id=mock_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="alphafold",
+                source="alphafold",
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="alphafold",
+                source="alphafold_mock",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    properties = client.get(f"/enzymes/{enzyme_id}/properties", headers=headers).json()
+    kinetics = client.get(f"/enzymes/{enzyme_id}/kinetics", headers=headers).json()
+    mutations = client.get(f"/enzymes/{enzyme_id}/mutations", headers=headers).json()
+    structures = client.get(f"/enzymes/{enzyme_id}/structures", headers=headers).json()
+    references = client.get(f"/enzymes/{enzyme_id}/references", headers=headers).json()
+
+    assert [record["value_original"] for record in properties] == ["55"]
+    assert [record["km"] for record in kinetics] == ["1.8"]
+    assert [record["mutation_string"] for record in mutations] == ["S2P"]
+    assert [record["source"] for record in structures] == ["alphafold"]
+    assert [record["doi"] for record in references] == ["10.1000/real-evidence"]
+
+
 def test_upload_structure_file_saves_artifact_and_parsed_structure(client, db_session, monkeypatch):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

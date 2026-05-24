@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     api_secret_key: str = "dev-secret"
     access_token_expire_minutes: int = 1440
     skip_db_healthcheck: bool = False
-    allow_science_fallbacks: bool = True
-    use_real_science_providers: bool = False
+    allow_science_fallbacks: bool = False
+    use_real_science_providers: bool = True
     homolog_provider_fetch_size: int = 25
     sequence_similarity_fasta_path: str | None = None
     sequence_similarity_command: str | None = None

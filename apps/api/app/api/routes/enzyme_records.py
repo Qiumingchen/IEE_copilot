@@ -2,10 +2,11 @@ import base64
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
+from app.core.config import get_settings
 from app.db.models import (
     AnalysisArtifact,
     AnalysisJob,
@@ -132,17 +133,43 @@ def _require_curator(user: User) -> None:
 
 def _enzyme_reference_ids(db: Session, enzyme_id: str) -> set[str]:
     reference_ids: set[str] = set()
-    for model in (PropertyRecord, KineticRecord, MutationRecord, ExpressionRecord):
-        reference_ids.update(
-            reference_id
-            for reference_id in db.scalars(
-                select(model.reference_id).where(
-                    model.enzyme_entry_id == enzyme_id,
-                    model.reference_id.is_not(None),
-                )
-            )
-            if reference_id
+    property_query = select(PropertyRecord.reference_id).where(
+        PropertyRecord.enzyme_entry_id == enzyme_id,
+        PropertyRecord.reference_id.is_not(None),
+    )
+    kinetic_query = select(KineticRecord.reference_id).where(
+        KineticRecord.enzyme_entry_id == enzyme_id,
+        KineticRecord.reference_id.is_not(None),
+    )
+    structure_real_mode = get_settings().use_real_science_providers
+    if structure_real_mode:
+        property_query = property_query.where(_non_mock_text_filter(PropertyRecord.method))
+        kinetic_query = kinetic_query.where(_non_mock_text_filter(KineticRecord.method))
+
+    for statement in (property_query, kinetic_query):
+        reference_ids.update(reference_id for reference_id in db.scalars(statement) if reference_id)
+
+    mutation_records = db.scalars(
+        select(MutationRecord).where(
+            MutationRecord.enzyme_entry_id == enzyme_id,
+            MutationRecord.reference_id.is_not(None),
         )
+    ).all()
+    reference_ids.update(
+        record.reference_id
+        for record in mutation_records
+        if record.reference_id and (not structure_real_mode or _record_is_not_mock(record))
+    )
+    reference_ids.update(
+        reference_id
+        for reference_id in db.scalars(
+            select(ExpressionRecord.reference_id).where(
+                ExpressionRecord.enzyme_entry_id == enzyme_id,
+                ExpressionRecord.reference_id.is_not(None),
+            )
+        )
+        if reference_id
+    )
     reference_ids.update(
         reference_id
         for reference_id in db.scalars(
@@ -191,6 +218,24 @@ def _references_by_id_for_records(
             select(LiteratureReference).where(LiteratureReference.id.in_(reference_ids))
         )
     }
+
+
+def _is_mock_like_source(source: str | None) -> bool:
+    value = (source or "").lower()
+    return value == "seed" or value.endswith("_mock") or "_mock" in value
+
+
+def _non_mock_text_filter(column):
+    return or_(column.is_(None), ~func.lower(column).contains("_mock"))
+
+
+def _record_is_not_mock(record) -> bool:
+    if isinstance(record, MutationRecord):
+        summary = record.assay_condition_summary
+        source = summary.get("source") if isinstance(summary, dict) else None
+        return not _is_mock_like_source(source)
+    source = getattr(record, "source", None) or getattr(record, "method", None)
+    return not _is_mock_like_source(source)
 
 
 def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
@@ -1005,11 +1050,12 @@ def list_structures(
     db: Session = Depends(get_db),
 ) -> list[StructureResponse]:
     _get_enzyme(db, enzyme_id)
+    query = select(StructureEntry).where(StructureEntry.enzyme_entry_id == enzyme_id)
+    if get_settings().use_real_science_providers:
+        query = query.where(_non_mock_text_filter(StructureEntry.source))
     structures = list(
         db.scalars(
-            select(StructureEntry)
-            .where(StructureEntry.enzyme_entry_id == enzyme_id)
-            .order_by(StructureEntry.created_at)
+            query.order_by(StructureEntry.created_at)
         )
     )
     return [
@@ -1199,11 +1245,12 @@ def list_properties(
     db: Session = Depends(get_db),
 ) -> list[PropertyRecordResponse]:
     _get_enzyme(db, enzyme_id)
+    query = select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme_id)
+    if get_settings().use_real_science_providers:
+        query = query.where(_non_mock_text_filter(PropertyRecord.method))
     records = list(
         db.scalars(
-            select(PropertyRecord)
-            .where(PropertyRecord.enzyme_entry_id == enzyme_id)
-            .order_by(PropertyRecord.created_at)
+            query.order_by(PropertyRecord.created_at)
         )
     )
     references_by_id = _references_by_id_for_records(db, records)
@@ -1342,14 +1389,15 @@ def get_property_ranking(
     db: Session = Depends(get_db),
 ) -> PropertyRankingResponse:
     enzyme = _get_enzyme(db, enzyme_id)
+    query = select(PropertyRecord).where(
+        PropertyRecord.property_type == property_type,
+        PropertyRecord.visibility == Visibility.PUBLIC,
+    )
+    if get_settings().use_real_science_providers:
+        query = query.where(_non_mock_text_filter(PropertyRecord.method))
     records = list(
         db.scalars(
-            select(PropertyRecord)
-            .where(
-                PropertyRecord.property_type == property_type,
-                PropertyRecord.visibility == Visibility.PUBLIC,
-            )
-            .order_by(PropertyRecord.created_at)
+            query.order_by(PropertyRecord.created_at)
         )
     )
     enzyme_ids = {record.enzyme_entry_id for record in records}
@@ -1393,7 +1441,8 @@ def list_mutations(
     return [
         _mutation_response(record, references_by_id.get(record.reference_id or ""))
         for record in records
-        if _mutation_record_matches_position(record, position)
+        if (not get_settings().use_real_science_providers or _record_is_not_mock(record))
+        and _mutation_record_matches_position(record, position)
         and _mutation_record_matches_source(record, source)
         and _mutation_record_matches_property_delta(record, property_delta_key, beneficial_only)
     ]
@@ -1406,11 +1455,12 @@ def list_kinetics(
     db: Session = Depends(get_db),
 ) -> list[KineticRecordResponse]:
     _get_enzyme(db, enzyme_id)
+    query = select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme_id)
+    if get_settings().use_real_science_providers:
+        query = query.where(_non_mock_text_filter(KineticRecord.method))
     records = list(
         db.scalars(
-            select(KineticRecord)
-            .where(KineticRecord.enzyme_entry_id == enzyme_id)
-            .order_by(KineticRecord.created_at)
+            query.order_by(KineticRecord.created_at)
         )
     )
     references_by_id = _references_by_id_for_records(db, records)

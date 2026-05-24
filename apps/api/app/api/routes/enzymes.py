@@ -5,7 +5,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import current_user
@@ -483,11 +483,14 @@ def _save_literature_for_enzyme(
     enzyme: EnzymeEntry,
     *,
     require_real: bool = False,
+    skip_mock: bool = False,
 ) -> tuple[int, list[str], list[str]]:
     client = get_literature_client()
     source = getattr(client, "source", "literature")
     if require_real:
         _raise_if_mock_provider(source, "literature")
+    if skip_mock and _is_mock_or_seed_source(source):
+        return 0, [source], [f"Literature provider is configured as {source}; mock references were skipped."]
     try:
         hits = client.search_by_enzyme_name(enzyme.name)
     except (httpx.HTTPError, ValueError) as exc:
@@ -514,6 +517,7 @@ def _save_external_enzyme_data(
     enzyme: EnzymeEntry,
     *,
     require_real: bool = False,
+    skip_mock: bool = False,
 ) -> tuple[dict[str, int], list[str], list[str]]:
     client = get_enzyme_data_client()
     source = getattr(client, "source", "enzyme_data")
@@ -521,6 +525,8 @@ def _save_external_enzyme_data(
         _raise_if_mock_provider(source, "enzyme data")
     query = enzyme.name
     created = {"properties": 0, "kinetics": 0, "mutations": 0}
+    if skip_mock and _is_mock_or_seed_source(source):
+        return created, [source], [f"Enzyme data provider is configured as {source}; mock records were skipped."]
 
     property_data = [
         *client.fetch_opt_temperature(query),
@@ -1068,20 +1074,43 @@ def _enzyme_record_counts(db: Session, enzyme_ids: list[str]) -> dict[str, Enzym
 
     counts = {enzyme_id: EnzymeRecordCounts() for enzyme_id in enzyme_ids}
     count_specs = [
-        ("properties", PropertyRecord),
-        ("kinetics", KineticRecord),
-        ("mutations", MutationRecord),
-        ("structures", StructureEntry),
-        ("expression", ExpressionRecord),
+        ("properties", PropertyRecord, _non_mock_text_filter(PropertyRecord.method)),
+        ("kinetics", KineticRecord, _non_mock_text_filter(KineticRecord.method)),
+        ("structures", StructureEntry, _non_mock_text_filter(StructureEntry.source)),
+        ("expression", ExpressionRecord, None),
     ]
-    for field_name, model in count_specs:
-        rows = db.execute(
-            select(model.enzyme_entry_id, func.count(model.id))
-            .where(model.enzyme_entry_id.in_(enzyme_ids))
-            .group_by(model.enzyme_entry_id)
-        ).all()
+    for field_name, model, real_filter in count_specs:
+        statement = select(model.enzyme_entry_id, func.count(model.id)).where(model.enzyme_entry_id.in_(enzyme_ids))
+        if get_settings().use_real_science_providers and real_filter is not None:
+            statement = statement.where(real_filter)
+        rows = db.execute(statement.group_by(model.enzyme_entry_id)).all()
         for enzyme_id, count in rows:
             setattr(counts[enzyme_id], field_name, count)
+
+    if get_settings().use_real_science_providers:
+        mutation_rows = db.execute(
+            select(MutationRecord.enzyme_entry_id, MutationRecord.assay_condition_summary).where(
+                MutationRecord.enzyme_entry_id.in_(enzyme_ids)
+            )
+        ).all()
+        mutation_counts: dict[str, int] = {}
+        for enzyme_id, assay_condition_summary in mutation_rows:
+            source = None
+            if isinstance(assay_condition_summary, dict):
+                source = assay_condition_summary.get("source")
+            if _is_mock_like_source(source):
+                continue
+            mutation_counts[enzyme_id] = mutation_counts.get(enzyme_id, 0) + 1
+        for enzyme_id, count in mutation_counts.items():
+            counts[enzyme_id].mutations = count
+    else:
+        rows = db.execute(
+            select(MutationRecord.enzyme_entry_id, func.count(MutationRecord.id))
+            .where(MutationRecord.enzyme_entry_id.in_(enzyme_ids))
+            .group_by(MutationRecord.enzyme_entry_id)
+        ).all()
+        for enzyme_id, count in rows:
+            counts[enzyme_id].mutations = count
     return counts
 
 
@@ -1106,6 +1135,11 @@ def _max_numeric_property_by_enzyme(
         select(PropertyRecord).where(
             PropertyRecord.enzyme_entry_id.in_(enzyme_ids),
             PropertyRecord.property_type == property_type,
+            *(
+                [_non_mock_text_filter(PropertyRecord.method)]
+                if get_settings().use_real_science_providers
+                else []
+            ),
         )
     ).all()
     values: dict[str, float] = {}
@@ -1129,6 +1163,15 @@ def _parse_numeric_property(value: str | None) -> float | None:
 def _is_mock_or_seed_source(source: str | None) -> bool:
     value = (source or "").lower()
     return value == "seed" or value.endswith("_mock")
+
+
+def _is_mock_like_source(source: str | None) -> bool:
+    value = (source or "").lower()
+    return value == "seed" or value.endswith("_mock") or "_mock" in value
+
+
+def _non_mock_text_filter(column):
+    return or_(column.is_(None), ~func.lower(column).contains("_mock"))
 
 
 def _extract_pdb_metadata(text: str, *, file_name: str) -> PdbDiscoveryMetadata:
@@ -1556,7 +1599,11 @@ def search_enzymes(
                 retrieval_provenance = entry_provenance
                 enzyme = created_enzyme
         if enzyme is not None:
-            _save_literature_for_enzyme(db, enzyme)
+            _save_literature_for_enzyme(
+                db,
+                enzyme,
+                skip_mock=get_settings().use_real_science_providers,
+            )
             cache_status = "miss_refreshed"
 
     stale_cache = find_search_cache(
@@ -1612,7 +1659,11 @@ def search_enzymes(
 
     _ensure_protein_sequence(db, enzyme, module)
     db.flush()
-    _save_external_enzyme_data(db, enzyme)
+    _save_external_enzyme_data(
+        db,
+        enzyme,
+        skip_mock=get_settings().use_real_science_providers,
+    )
     db.flush()
     refresh_modules = stale_data_modules(db, enzyme.id)
 

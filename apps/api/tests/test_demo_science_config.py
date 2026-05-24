@@ -1,5 +1,27 @@
 from pathlib import Path
 
+from app.core.config import Settings
+
+
+def test_default_settings_use_real_science_without_fallbacks(monkeypatch):
+    monkeypatch.delenv("USE_REAL_SCIENCE_PROVIDERS", raising=False)
+    monkeypatch.delenv("ALLOW_SCIENCE_FALLBACKS", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.use_real_science_providers is True
+    assert settings.allow_science_fallbacks is False
+
+
+def test_env_example_uses_real_science_without_fallbacks():
+    env_example = Path(".env.example")
+    assert env_example.exists()
+
+    content = env_example.read_text(encoding="utf-8")
+
+    assert "USE_REAL_SCIENCE_PROVIDERS=true" in content
+    assert "ALLOW_SCIENCE_FALLBACKS=false" in content
+
 
 def test_env_example_configures_local_sequence_similarity_demo():
     env_example = Path(".env.example")
