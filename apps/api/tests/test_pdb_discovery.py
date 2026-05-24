@@ -374,6 +374,7 @@ def test_pdb_discovery_orders_comparable_hits_by_reviewed_temperature_and_activi
         name="PDB ranked reviewed enzyme",
         organism="Bacillus subtilis",
         uniprot_id="P00691",
+        uniprot_reviewed=True,
         source="uniprot",
         last_refreshed_at=datetime.utcnow(),
     )

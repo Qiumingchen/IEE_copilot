@@ -354,6 +354,7 @@ def _create_enzyme_from_uniprot_entry(
         organism=entry.organism,
         ec_number=entry.ec_number,
         uniprot_id=entry.accession,
+        uniprot_reviewed=entry.reviewed,
         pdb_id=pdb_id,
         alphafold_id=entry.cross_references.get("AlphaFoldDB"),
         source=source or "uniprot",
@@ -414,6 +415,7 @@ def _upsert_enzyme_from_uniprot_entry(
     enzyme.name = entry.protein_name
     enzyme.organism = entry.organism
     enzyme.ec_number = entry.ec_number
+    enzyme.uniprot_reviewed = entry.reviewed
     enzyme.pdb_id = _first_cross_reference_id(entry.cross_references, "PDB")
     enzyme.alphafold_id = entry.cross_references.get("AlphaFoldDB")
     enzyme.source = source or "uniprot"
@@ -1077,10 +1079,9 @@ def _none_if_zero(value: float) -> float | None:
 
 
 def _uniprot_review_priority(enzyme: EnzymeEntry) -> int:
-    source = (enzyme.source or "").lower()
     if not enzyme.uniprot_id:
         return 0
-    if source == "uniprot" or "reviewed" in source or "swiss" in source:
+    if enzyme.uniprot_reviewed:
         return 1
     return 0
 

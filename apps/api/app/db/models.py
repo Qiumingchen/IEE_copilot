@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -104,6 +104,7 @@ class EnzymeEntry(Base):
     organism: Mapped[str | None] = mapped_column(String(240))
     ec_number: Mapped[str | None] = mapped_column(String(40))
     uniprot_id: Mapped[str | None] = mapped_column(String(40), index=True)
+    uniprot_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     pdb_id: Mapped[str | None] = mapped_column(String(12), index=True)
     alphafold_id: Mapped[str | None] = mapped_column(String(80))
     source: Mapped[str] = mapped_column(String(80), default="local")

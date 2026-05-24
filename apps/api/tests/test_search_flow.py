@@ -371,6 +371,7 @@ def test_enzyme_search_orders_source_matches_by_reviewed_temperature_and_activit
         organism="Bacillus subtilis",
         ec_number="3.2.1.1",
         uniprot_id="P00691",
+        uniprot_reviewed=True,
         source="uniprot",
         last_refreshed_at=datetime.utcnow(),
     )
@@ -1807,10 +1808,11 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
                     "R33333": "Aspergillus realensis",
                 }[accession],
                 ec_number="3.1.1.3",
-                sequence=f"M{accession}SEQUENCE",
-                mature_sequence=f"MATURE{accession}",
-                cross_references={"AlphaFoldDB": f"AF-{accession}-F1"},
-            )
+                    sequence=f"M{accession}SEQUENCE",
+                    mature_sequence=f"MATURE{accession}",
+                    reviewed=True,
+                    cross_references={"AlphaFoldDB": f"AF-{accession}-F1"},
+                )
 
         def fetch_fasta(self, accession: str):
             return f">sp|{accession}|REAL\nM{accession}SEQUENCE\n"
@@ -2455,6 +2457,74 @@ def test_enzyme_search_saves_rcsb_structure_from_uniprot_cross_reference(
     assert structure.pdb_id == "1ABC"
     assert structure.source == "rcsb_mock"
     assert structure.chain_summary["provenance"]["provider"] == "rcsb_mock"
+
+
+def test_enzyme_search_uses_real_uniprot_reviewed_status(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Unreviewed UniProt enzyme",
+                organism="Bacillus testingensis",
+                sequence="MNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+                reviewed=False,
+                cross_references={},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return f">tr|{accession}|UNREVIEWED\nMNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n"
+
+        def fetch_cross_references(self, accession: str):
+            return {}
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: FakeUniProtClient(),
+        raising=False,
+    )
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "unreviewed-uniprot@example.com",
+            "password": "search-password",
+            "display_name": "Unreviewed UniProt Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "unreviewed-uniprot@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "A0A999"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["enzyme"]["uniprot_reviewed"] is False
 
 
 def test_enzyme_search_skips_alphafold_structure_when_real_provider_fails_without_mock_fallback(

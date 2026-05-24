@@ -42,6 +42,7 @@ class UniProtEntry:
     ec_number: str | None = None
     sequence: str | None = None
     mature_sequence: str | None = None
+    reviewed: bool = False
     cross_references: dict[str, str] = field(default_factory=dict)
 
 
@@ -110,11 +111,12 @@ class MockUniProtClient:
             accession=accession,
             protein_name=protein_name,
             organism="Streptomyces mobaraensis",
-            ec_number=ec_number,
-            sequence=sequence,
-            mature_sequence=mature_sequence,
-            cross_references=self.fetch_cross_references(accession),
-        )
+        ec_number=ec_number,
+        sequence=sequence,
+        mature_sequence=mature_sequence,
+        reviewed=accession.upper() in {"P81453"},
+        cross_references=self.fetch_cross_references(accession),
+    )
 
     def fetch_fasta(self, accession: str) -> str:
         sequence = self.fetch_entry(accession).sequence or MOCK_MTGASE_SEQUENCE
@@ -156,6 +158,8 @@ def parse_uniprot_entry_payload(payload: dict) -> UniProtEntry:
         ec_number=_first_ec_number(description),
         sequence=sequence,
         mature_sequence=_mature_sequence_from_features(sequence, payload.get("features") or []),
+        reviewed="reviewed" in str(payload.get("entryType") or "").lower()
+        and "unreviewed" not in str(payload.get("entryType") or "").lower(),
         cross_references=cross_references,
     )
 

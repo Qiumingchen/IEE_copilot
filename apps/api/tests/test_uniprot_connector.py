@@ -106,6 +106,26 @@ def test_parse_uniprot_entry_payload_keeps_first_pdb_cross_reference():
     assert entry.cross_references["PDB"] == "1AAA"
 
 
+def test_parse_uniprot_entry_payload_extracts_reviewed_status():
+    reviewed_payload = {
+        "primaryAccession": "P12345",
+        "entryType": "UniProtKB reviewed (Swiss-Prot)",
+        "proteinDescription": {
+            "recommendedName": {"fullName": {"value": "Reviewed food enzyme"}},
+        },
+    }
+    unreviewed_payload = {
+        "primaryAccession": "A0A123",
+        "entryType": "UniProtKB unreviewed (TrEMBL)",
+        "proteinDescription": {
+            "recommendedName": {"fullName": {"value": "Unreviewed food enzyme"}},
+        },
+    }
+
+    assert parse_uniprot_entry_payload(reviewed_payload).reviewed is True
+    assert parse_uniprot_entry_payload(unreviewed_payload).reviewed is False
+
+
 def test_get_uniprot_client_returns_real_client_when_enabled(monkeypatch):
     from app.external.uniprot import get_uniprot_client
 
