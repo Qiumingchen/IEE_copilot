@@ -890,10 +890,12 @@ def _enzyme_scientific_rankings(
 def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSummary]:
     scientific_ranks = _enzyme_scientific_rankings(db, enzymes)
     record_counts = _enzyme_record_counts(db, [enzyme.id for enzyme in enzymes])
+    family_names = _enzyme_family_names(db, [enzyme.family_id for enzyme in enzymes])
     return [
         EnzymeSummary(
             id=enzyme.id,
             family_id=enzyme.family_id,
+            family_name=family_names.get(enzyme.family_id),
             name=enzyme.name,
             organism=enzyme.organism,
             ec_number=enzyme.ec_number,
@@ -912,6 +914,16 @@ def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSum
 
 def _enzyme_summary(db: Session, enzyme: EnzymeEntry) -> EnzymeSummary:
     return _enzyme_summaries(db, [enzyme])[0]
+
+
+def _enzyme_family_names(db: Session, family_ids: list[str]) -> dict[str, str]:
+    unique_family_ids = list({family_id for family_id in family_ids if family_id})
+    if not unique_family_ids:
+        return {}
+    rows = db.execute(
+        select(EnzymeFamily.id, EnzymeFamily.name).where(EnzymeFamily.id.in_(unique_family_ids))
+    ).all()
+    return {family_id: family_name for family_id, family_name in rows}
 
 
 def _enzyme_record_counts(db: Session, enzyme_ids: list[str]) -> dict[str, EnzymeRecordCounts]:

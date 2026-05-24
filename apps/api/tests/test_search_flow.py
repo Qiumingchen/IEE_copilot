@@ -1630,6 +1630,7 @@ def test_keyword_search_passes_source_organism_to_uniprot(client, db_session, mo
     assert response.status_code == 200
     body = response.json()
     assert body["enzyme"]["organism"] == "Bacillus realensis"
+    assert body["enzyme"]["family_name"] == "Bacillus food lipase"
     assert body["matches"][0]["uniprot_id"] == "B11111"
 
 

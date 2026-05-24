@@ -17,6 +17,7 @@ import {
 const enzyme = {
   id: "enzyme-1",
   family_id: "family-1",
+  family_name: "Mature microbial transglutaminases",
   name: "Microbial transglutaminase",
   organism: "Streptomyces mobaraensis",
   ec_number: "2.3.2.13",
@@ -65,11 +66,27 @@ test("searchResultMatches falls back to the primary enzyme and deduplicates matc
 test("formatSearchMatchSubtitle combines organism identifiers and source details", () => {
   assert.equal(
     formatSearchMatchSubtitle({ ...enzyme, pdb_id: "1ABC", alphafold_id: "AF-P81453-F1" }),
-    "Streptomyces mobaraensis | EC 2.3.2.13 | UniProt P81453 | RCSB PDB 1ABC | AlphaFold AF-P81453-F1"
+    "Family Mature microbial transglutaminases | Streptomyces mobaraensis | EC 2.3.2.13 | UniProt P81453 | RCSB PDB 1ABC | AlphaFold AF-P81453-F1"
   );
   assert.equal(
-    formatSearchMatchSubtitle({ ...enzyme, organism: null, ec_number: null, uniprot_id: null }),
+    formatSearchMatchSubtitle({
+      ...enzyme,
+      family_name: null,
+      organism: null,
+      ec_number: null,
+      uniprot_id: null
+    }),
     "Source details not reported"
+  );
+  assert.equal(
+    formatSearchMatchSubtitle({
+      ...enzyme,
+      family_name: "Microbial transglutaminase",
+      organism: "Streptomyces mobaraensis",
+      ec_number: null,
+      uniprot_id: null
+    }),
+    "Streptomyces mobaraensis"
   );
 });
 

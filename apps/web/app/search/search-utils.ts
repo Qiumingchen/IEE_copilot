@@ -22,6 +22,7 @@ export function searchResultMatches(result: SearchResponse): EnzymeSummary[] {
 
 export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
   return [
+    shouldShowFamily(match) ? `Family ${match.family_name}` : null,
     match.organism,
     match.ec_number ? `EC ${match.ec_number}` : null,
     match.uniprot_id ? `UniProt ${match.uniprot_id}` : null,
@@ -30,6 +31,14 @@ export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
   ]
     .filter(Boolean)
     .join(" | ") || "Source details not reported";
+}
+
+function shouldShowFamily(match: EnzymeSummary): boolean {
+  const familyName = match.family_name?.trim().toLowerCase();
+  if (!familyName) {
+    return false;
+  }
+  return familyName !== match.name.trim().toLowerCase();
 }
 
 export function sortSearchMatches(matches: EnzymeSummary[], sortMode: EnzymeSortMode): EnzymeSummary[] {

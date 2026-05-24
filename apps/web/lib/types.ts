@@ -1,6 +1,7 @@
 export type EnzymeSummary = {
   id: string;
   family_id: string;
+  family_name: string | null;
   name: string;
   organism: string | null;
   ec_number: string | null;

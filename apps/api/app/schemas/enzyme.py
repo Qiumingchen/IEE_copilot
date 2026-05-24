@@ -21,6 +21,7 @@ class EnzymeRecordCounts(BaseModel):
 class EnzymeSummary(BaseModel):
     id: str
     family_id: str
+    family_name: str | None = None
     name: str
     organism: str | None = None
     ec_number: str | None = None
