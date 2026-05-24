@@ -136,6 +136,40 @@ def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc(monkeypa
     assert ph_values[0].source == "europepmc"
 
 
+def test_real_enzyme_data_client_extracts_common_optimum_ph_temperature_phrasing(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Characterization of microbial transglutaminase",
+                            "abstractText": (
+                                "The pH and temperature optima were 7.0 and 55 °C, "
+                                "respectively. Maximum activity was observed at pH 7.0."
+                            ),
+                            "journalTitle": "Applied Food Enzymes",
+                            "pubYear": "2023",
+                            "doi": "10.1000/real-optima",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("microbial transglutaminase")
+    ph_values = client.fetch_opt_pH("microbial transglutaminase")
+
+    assert temperatures[0].value_original == "55"
+    assert temperatures[0].unit_original == "degC"
+    assert ph_values[0].value_original == "7.0"
+
+
 def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(monkeypatch):
     class Response:
         def raise_for_status(self):

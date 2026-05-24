@@ -198,20 +198,26 @@ def _evidence_label(item: dict) -> str:
 
 
 def _extract_temperature(text: str) -> str | None:
+    unit = r"(?:\u00b0\s*C|\u2103|degrees?\s*C|deg\s*C|degC|C)"
     patterns = [
-        r"optimum temperature(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)\s*(?:°\s*C|degrees?\s*C|degC|C)",
-        r"optimal temperature(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)\s*(?:°\s*C|degrees?\s*C|degC|C)",
+        rf"(?:optimum|optimal)\s+temperature(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
+        rf"temperature\s+(?:optimum|optimal|optima)(?:\s+(?:at|of|was|were))?\s*(?:is|was|were|at|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
+        rf"pH\s+and\s+temperature\s+optima\s+(?:were|was)\s+\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
+        rf"temperature\s+and\s+pH\s+optima\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s*{unit}\s+and\s+\d+(?:\.\d+)?",
     ]
     return _first_match(text, patterns)
 
 
 def _extract_ph(text: str) -> str | None:
+    unit = r"(?:\u00b0\s*C|\u2103|degrees?\s*C|deg\s*C|degC|C)"
     patterns = [
         r"optimum pH(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)",
         r"optimal pH(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)",
+        r"pH\s+and\s+temperature\s+optima\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s+and\s+\d+(?:\.\d+)?",
+        rf"temperature\s+and\s+pH\s+optima\s+(?:were|was)\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+(\d+(?:\.\d+)?)",
+        r"maximum activity(?:\s+\w+){0,6}\s+at\s+pH\s*(\d+(?:\.\d+)?)",
     ]
     return _first_match(text, patterns)
-
 
 def _extract_labeled_number(text: str, label: str) -> str | None:
     return _first_match(text, [rf"\b{label}\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)"])
