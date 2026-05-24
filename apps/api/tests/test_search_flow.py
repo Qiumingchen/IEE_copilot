@@ -979,6 +979,11 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     unit_original="degC",
                     source=self.source,
                     evidence="Europe PMC PMID:123 optimum temperature",
+                    reference_title="Real Europe PMC enzyme data",
+                    journal="Applied Food Enzymes",
+                    year=2025,
+                    doi="10.1000/europepmc-data",
+                    pubmed_id="123",
                 )
             ]
 
@@ -989,6 +994,11 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     value_original="7.5",
                     source=self.source,
                     evidence="Europe PMC PMID:123 optimum pH",
+                    reference_title="Real Europe PMC enzyme data",
+                    journal="Applied Food Enzymes",
+                    year=2025,
+                    doi="10.1000/europepmc-data",
+                    pubmed_id="123",
                 )
             ]
 
@@ -1001,6 +1011,11 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     unit_original="mM; s^-1",
                     source=self.source,
                     evidence="Europe PMC PMID:123 kinetic parameters",
+                    reference_title="Real Europe PMC enzyme data",
+                    journal="Applied Food Enzymes",
+                    year=2025,
+                    doi="10.1000/europepmc-data",
+                    pubmed_id="123",
                 )
             ]
 
@@ -1011,6 +1026,11 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     effect_summary="Real literature mention: A10V improved thermostability.",
                     source=self.source,
                     evidence="Europe PMC PMID:123 mutant",
+                    reference_title="Real Europe PMC enzyme data",
+                    journal="Applied Food Enzymes",
+                    year=2025,
+                    doi="10.1000/europepmc-data",
+                    pubmed_id="123",
                 )
             ]
 
@@ -1068,7 +1088,7 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["created"] == {"references": 1, "properties": 2, "kinetics": 1, "mutations": 1, "structures": 0}
+    assert body["created"] == {"references": 2, "properties": 2, "kinetics": 1, "mutations": 1, "structures": 0}
     assert body["sources"] == ["crossref", "europepmc"]
 
     properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
@@ -1078,7 +1098,108 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert {record.method for record in properties} == {"europepmc"}
     assert kinetics[0].method == "europepmc"
     assert mutations[0].assay_condition_summary["source"] == "europepmc"
-    assert references[0].source == "crossref"
+    europepmc_reference = next(reference for reference in references if reference.source == "europepmc")
+    assert {record.reference_id for record in properties} == {europepmc_reference.id}
+    assert kinetics[0].reference_id == europepmc_reference.id
+    assert mutations[0].reference_id == europepmc_reference.id
+
+
+def test_real_data_refresh_backfills_reference_for_existing_real_property(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="50",
+                    unit_original="degC",
+                    source=self.source,
+                    evidence="Europe PMC PMID:28193333 optimum temperature",
+                    reference_title="Characterization of microbial transglutaminase",
+                    journal="Enzyme and Microbial Technology",
+                    year=2017,
+                    doi="10.1016/j.enzmictec.2017.01.003",
+                    pubmed_id="28193333",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        PropertyRecord(
+            enzyme_entry_id=enzyme.id,
+            property_type="optimal_temperature",
+            value_original="50",
+            unit_original="degC",
+            method="europepmc",
+            reference_id=None,
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-data-backfill@example.com",
+            "password": "search-password",
+            "display_name": "Real Data Backfill",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-data-backfill@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["properties"] == 0
+    assert response.json()["created"]["references"] == 1
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    references = db_session.scalars(select(LiteratureReference)).all()
+    assert len(properties) == 1
+    assert properties[0].reference_id == references[0].id
 
 
 def test_real_data_refresh_saves_alphafold_structure_for_known_uniprot(client, db_session, monkeypatch):

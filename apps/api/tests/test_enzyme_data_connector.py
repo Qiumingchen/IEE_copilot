@@ -129,6 +129,11 @@ def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc(monkeypa
             organism=None,
             source="europepmc",
             evidence="Applied Enzymology 2025 doi:10.1000/real-enzyme pmid:12345678",
+            reference_title="Characterization of a food enzyme",
+            journal="Applied Enzymology",
+            year=2025,
+            doi="10.1000/real-enzyme",
+            pubmed_id="12345678",
         )
     ]
     assert ph_values[0].property_type == "optimal_pH"
@@ -209,6 +214,10 @@ def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(m
             organism=None,
             source="europepmc",
             evidence="Food Biocatalysis 2024 doi:10.1000/kinetic-mutant",
+            reference_title="Mutation and kinetic analysis of a food enzyme",
+            journal="Food Biocatalysis",
+            year=2024,
+            doi="10.1000/kinetic-mutant",
         )
     ]
     assert mutants == [
@@ -220,6 +229,10 @@ def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(m
             organism=None,
             source="europepmc",
             evidence="Food Biocatalysis 2024 doi:10.1000/kinetic-mutant",
+            reference_title="Mutation and kinetic analysis of a food enzyme",
+            journal="Food Biocatalysis",
+            year=2024,
+            doi="10.1000/kinetic-mutant",
         )
     ]
 

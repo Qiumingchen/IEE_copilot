@@ -30,7 +30,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.external.alphafold import AlphaFoldModelMetadata, get_alphafold_client
 from app.external.enzyme_data import get_enzyme_data_client
-from app.external.literature import create_literature_reference, get_literature_client
+from app.external.literature import LiteratureMetadata, create_literature_reference, get_literature_client
 from app.external.rcsb import RcsbStructureMetadata, get_rcsb_client
 from app.external.uniprot import (
     P81453_FULL_SEQUENCE,
@@ -524,7 +524,7 @@ def _save_external_enzyme_data(
     if require_real:
         _raise_if_mock_provider(source, "enzyme data")
     query = enzyme.name
-    created = {"properties": 0, "kinetics": 0, "mutations": 0}
+    created = {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0}
     if skip_mock and _is_mock_or_seed_source(source):
         return created, [source], [f"Enzyme data provider is configured as {source}; mock records were skipped."]
 
@@ -533,6 +533,9 @@ def _save_external_enzyme_data(
         *client.fetch_opt_pH(query),
     ]
     for datum in property_data:
+        reference, reference_created = _create_reference_for_external_datum(db, datum)
+        if reference_created:
+            created["references"] += 1
         existing = db.scalar(
             select(PropertyRecord).where(
                 PropertyRecord.enzyme_entry_id == enzyme.id,
@@ -542,6 +545,7 @@ def _save_external_enzyme_data(
             )
         )
         if existing is not None:
+            _backfill_external_reference(existing, reference, datum.evidence)
             continue
         db.add(
             PropertyRecord(
@@ -553,12 +557,16 @@ def _save_external_enzyme_data(
                 assay_temperature=datum.assay_temperature,
                 assay_pH=datum.assay_pH,
                 method=datum.source,
+                reference_id=reference.id if reference else None,
                 evidence_text=datum.evidence,
             )
         )
         created["properties"] += 1
 
     for parameter in client.fetch_kinetic_parameters(query):
+        reference, reference_created = _create_reference_for_external_datum(db, parameter)
+        if reference_created:
+            created["references"] += 1
         existing = db.scalar(
             select(KineticRecord).where(
                 KineticRecord.enzyme_entry_id == enzyme.id,
@@ -569,6 +577,7 @@ def _save_external_enzyme_data(
             )
         )
         if existing is not None:
+            _backfill_external_reference(existing, reference, parameter.evidence)
             continue
         db.add(
             KineticRecord(
@@ -581,12 +590,16 @@ def _save_external_enzyme_data(
                 assay_temperature=parameter.assay_temperature,
                 assay_pH=parameter.assay_pH,
                 method=parameter.source,
+                reference_id=reference.id if reference else None,
                 evidence_text=parameter.evidence,
             )
         )
         created["kinetics"] += 1
 
     for mutant in client.fetch_mutants(query):
+        reference, reference_created = _create_reference_for_external_datum(db, mutant)
+        if reference_created:
+            created["references"] += 1
         existing = db.scalar(
             select(MutationRecord).where(
                 MutationRecord.enzyme_entry_id == enzyme.id,
@@ -594,6 +607,7 @@ def _save_external_enzyme_data(
             )
         )
         if existing is not None:
+            _backfill_external_reference(existing, reference, mutant.evidence)
             continue
         db.add(
             MutationRecord(
@@ -607,10 +621,48 @@ def _save_external_enzyme_data(
                     "evidence": mutant.evidence,
                     "organism": mutant.organism,
                 },
+                reference_id=reference.id if reference else None,
             )
         )
         created["mutations"] += 1
     return created, [source], []
+
+
+def _backfill_external_reference(record, reference: LiteratureReference | None, evidence: str | None) -> None:
+    if reference is not None and getattr(record, "reference_id", None) is None:
+        record.reference_id = reference.id
+    if evidence and hasattr(record, "evidence_text") and getattr(record, "evidence_text", None) is None:
+        record.evidence_text = evidence
+    if evidence and isinstance(record, MutationRecord):
+        summary = dict(record.assay_condition_summary or {})
+        summary.setdefault("evidence", evidence)
+        record.assay_condition_summary = summary
+
+
+def _create_reference_for_external_datum(db: Session, datum) -> tuple[LiteratureReference | None, bool]:
+    if not any(
+        getattr(datum, field, None)
+        for field in ("reference_title", "doi", "pubmed_id", "journal", "year")
+    ):
+        return None, False
+    existed = _literature_reference_exists(
+        db,
+        getattr(datum, "doi", None),
+        getattr(datum, "pubmed_id", None),
+    )
+    title = getattr(datum, "reference_title", None) or getattr(datum, "evidence", None) or "External enzyme data evidence"
+    metadata = LiteratureMetadata(
+        title=title,
+        journal=getattr(datum, "journal", None),
+        year=getattr(datum, "year", None),
+        doi=getattr(datum, "doi", None),
+        pubmed_id=getattr(datum, "pubmed_id", None),
+        abstract=getattr(datum, "evidence", None),
+        source=getattr(datum, "source", None) or "external_enzyme_data",
+        metadata={"topics": ["enzyme_data"]},
+    )
+    reference = create_literature_reference(db, metadata)
+    return reference, not existed
 
 
 def _save_alphafold_structure_for_enzyme(

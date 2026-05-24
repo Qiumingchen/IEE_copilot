@@ -18,6 +18,11 @@ class ExternalPropertyDatum:
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
+    reference_title: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    pubmed_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,11 @@ class ExternalKineticParameter:
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
+    reference_title: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    pubmed_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +53,11 @@ class ExternalMutantRecord:
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
+    reference_title: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    pubmed_id: str | None = None
 
 
 class EnzymeDataClient(Protocol):
@@ -101,6 +116,7 @@ class RealEnzymeDataClient:
                     unit_original="degC",
                     source=self.source,
                     evidence=_evidence_label(item),
+                    **_reference_kwargs(item),
                 )
             )
         return records[:size]
@@ -117,6 +133,7 @@ class RealEnzymeDataClient:
                     value_original=value,
                     source=self.source,
                     evidence=_evidence_label(item),
+                    **_reference_kwargs(item),
                 )
             )
         return records[:size]
@@ -138,6 +155,7 @@ class RealEnzymeDataClient:
                     unit_original=_kinetic_unit_label(km=km, kcat=kcat, kcat_km=kcat_km),
                     source=self.source,
                     evidence=_evidence_label(item),
+                    **_reference_kwargs(item),
                 )
             )
         return records[:size]
@@ -153,6 +171,7 @@ class RealEnzymeDataClient:
                         effect_summary=f"Real literature mention: {_sentence_containing(text, mutation)}",
                         source=self.source,
                         evidence=_evidence_label(item),
+                        **_reference_kwargs(item),
                     )
                 )
                 if len(records) >= size:
@@ -195,6 +214,23 @@ def _evidence_label(item: dict) -> str:
         f"pmid:{item.get('pmid')}" if item.get("pmid") else None,
     ]
     return " ".join(str(part) for part in parts if part) or "Europe PMC literature metadata"
+
+
+def _reference_kwargs(item: dict) -> dict:
+    return {
+        "reference_title": item.get("title"),
+        "journal": item.get("journalTitle"),
+        "year": _parse_year(item.get("pubYear")),
+        "doi": item.get("doi"),
+        "pubmed_id": item.get("pmid"),
+    }
+
+
+def _parse_year(value) -> int | None:
+    try:
+        return int(str(value)[:4])
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_temperature(text: str) -> str | None:
