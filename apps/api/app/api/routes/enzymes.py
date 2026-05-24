@@ -187,11 +187,14 @@ def _should_repair_mtgase_seed_sequence(
     return bool(enzyme.uniprot_id and enzyme.uniprot_id.upper().startswith("MOCK"))
 
 
-def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | None, str | None, dict | None]:
+def _fetch_uniprot_entries(
+    resolved_query,
+    *,
+    limit: int,
+) -> list[tuple[UniProtEntry, str | None, str | None, dict | None]]:
     client = get_uniprot_client()
     try:
-        entry, fasta, source = _fetch_uniprot_entry_with_client(resolved_query, client)
-        return entry, fasta, source, _uniprot_retrieval_provenance(entry, source)
+        entries = _fetch_uniprot_entries_with_client(resolved_query, client, limit=limit)
     except (httpx.HTTPError, ValueError) as exc:
         if getattr(client, "source", "uniprot").endswith("_mock"):
             raise
@@ -199,24 +202,39 @@ def _fetch_uniprot_entry(resolved_query) -> tuple[UniProtEntry | None, str | Non
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"UniProt provider unavailable; no mock enzyme record was created. {exc}",
         ) from exc
+    return [
+        (entry, fasta, source, _uniprot_retrieval_provenance(entry, source))
+        for entry, fasta, source in entries
+        if entry is not None
+    ]
 
 
-def _fetch_uniprot_entry_with_client(resolved_query, client) -> tuple[UniProtEntry | None, str | None, str | None]:
+def _fetch_uniprot_entries_with_client(
+    resolved_query,
+    client,
+    *,
+    limit: int,
+) -> list[tuple[UniProtEntry, str | None, str | None]]:
+    source = getattr(client, "source", "uniprot")
     if resolved_query.kind == QueryKind.UNIPROT:
         entry = client.fetch_entry(resolved_query.normalized_query)
-        return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
+        return [(entry, client.fetch_fasta(entry.accession), source)]
 
     hits = []
     if resolved_query.kind == QueryKind.EC:
-        hits = client.search_by_ec(resolved_query.normalized_query)
+        hits = client.search_by_ec(resolved_query.normalized_query, size=limit)
     elif resolved_query.kind == QueryKind.KEYWORD:
-        hits = client.search_by_keyword(resolved_query.normalized_query)
+        hits = client.search_by_keyword(resolved_query.normalized_query, size=limit)
 
-    if not hits:
-        return None, None, None
-
-    entry = client.fetch_entry(hits[0].accession)
-    return entry, client.fetch_fasta(entry.accession), getattr(client, "source", "uniprot")
+    entries: list[tuple[UniProtEntry, str | None, str | None]] = []
+    seen_accessions: set[str] = set()
+    for hit in hits[:limit]:
+        if hit.accession in seen_accessions:
+            continue
+        seen_accessions.add(hit.accession)
+        entry = client.fetch_entry(hit.accession)
+        entries.append((entry, client.fetch_fasta(entry.accession), source))
+    return entries
 
 
 def _uniprot_retrieval_provenance(entry: UniProtEntry | None, source: str | None) -> dict | None:
@@ -285,6 +303,61 @@ def _create_enzyme_from_uniprot_entry(
                 source=alphafold_source,
                 provenance=alphafold_provenance,
             )
+    return enzyme
+
+
+def _upsert_enzyme_from_uniprot_entry(
+    db: Session,
+    *,
+    family: EnzymeFamily,
+    entry: UniProtEntry,
+    fasta: str | None,
+    source: str | None,
+) -> EnzymeEntry:
+    enzyme = db.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == entry.accession))
+    if enzyme is None:
+        return _create_enzyme_from_uniprot_entry(
+            db,
+            family=family,
+            entry=entry,
+            fasta=fasta,
+            source=source,
+        )
+
+    now = datetime.utcnow()
+    enzyme.family_id = family.id
+    enzyme.name = entry.protein_name
+    enzyme.organism = entry.organism
+    enzyme.ec_number = entry.ec_number
+    enzyme.alphafold_id = entry.cross_references.get("AlphaFoldDB")
+    enzyme.source = source or "uniprot"
+    enzyme.last_refreshed_at = now
+    enzyme.updated_at = now
+
+    sequence = entry.sequence or parse_fasta_sequence(fasta or "")
+    mature_sequence = entry.mature_sequence or sequence
+    if sequence and mature_sequence:
+        protein_sequence = db.scalar(
+            select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id)
+        )
+        checksum = hashlib.sha256(mature_sequence.encode("utf-8")).hexdigest()
+        if protein_sequence is None:
+            db.add(
+                ProteinSequence(
+                    enzyme_entry_id=enzyme.id,
+                    sequence=sequence,
+                    mature_sequence=mature_sequence,
+                    is_engineering_target=True,
+                    source=source or "uniprot",
+                    checksum=checksum,
+                )
+            )
+        else:
+            protein_sequence.sequence = sequence
+            protein_sequence.mature_sequence = mature_sequence
+            protein_sequence.is_engineering_target = True
+            protein_sequence.source = source or "uniprot"
+            protein_sequence.checksum = checksum
     return enzyme
 
 
@@ -622,7 +695,7 @@ def _search_result_matches(
     if get_settings().use_real_science_providers:
         candidates = [candidate for candidate in candidates if not _is_mock_or_seed_source(candidate.source)]
 
-    def score(candidate: EnzymeEntry) -> tuple[int, int]:
+    def score(candidate: EnzymeEntry) -> tuple[int, int, int]:
         haystack = " ".join(
             [
                 candidate.name or "",
@@ -635,7 +708,8 @@ def _search_result_matches(
         ).lower()
         term_score = sum(1 for term in query_terms if term in haystack)
         exact_score = 5 if query.lower() in haystack else 0
-        return (exact_score + term_score, 1)
+        primary_score = 20 if candidate.id == primary_enzyme.id else 0
+        return (primary_score + exact_score + term_score, 1, 0)
 
     scientific_ranks = _enzyme_scientific_rankings(db, candidates)
     ranked = sorted(
@@ -648,7 +722,7 @@ def _search_result_matches(
     for candidate in ranked:
         if candidate.id in seen:
             continue
-        candidate_score, _ = score(candidate)
+        candidate_score, _, _ = score(candidate)
         if candidate.id != primary_enzyme.id and candidate_score <= 0:
             continue
         matches.append(candidate)
@@ -1201,16 +1275,21 @@ def search_enzymes(
         cache_status = "miss_refreshed"
 
     if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.EC, QueryKind.KEYWORD}:
-        entry, fasta, source, entry_provenance = _fetch_uniprot_entry(resolved)
-        if entry is not None:
-            retrieval_provenance = entry_provenance
-            enzyme = _create_enzyme_from_uniprot_entry(
+        for entry, fasta, source, entry_provenance in _fetch_uniprot_entries(
+            resolved,
+            limit=request.result_limit,
+        ):
+            created_enzyme = _upsert_enzyme_from_uniprot_entry(
                 db,
                 family=family,
                 entry=entry,
                 fasta=fasta,
                 source=source,
             )
+            if enzyme is None:
+                retrieval_provenance = entry_provenance
+                enzyme = created_enzyme
+        if enzyme is not None:
             _save_literature_for_enzyme(db, enzyme)
             cache_status = "miss_refreshed"
 
@@ -1302,7 +1381,12 @@ def search_enzymes(
     db.refresh(enzyme)
     db.refresh(job)
     run_placeholder_analysis.delay(job.id)
-    matches = _search_result_matches(db, primary_enzyme=enzyme, query=request.query)
+    matches = _search_result_matches(
+        db,
+        primary_enzyme=enzyme,
+        query=request.query,
+        limit=request.result_limit,
+    )
 
     return EnzymeSearchResponse(
         enzyme=_enzyme_summary(db, enzyme),

@@ -64,7 +64,7 @@ export default function SearchPage() {
     setIsSearching(true);
 
     try {
-      const response = await searchEnzyme(query, token);
+      const response = await searchEnzyme(query, token, searchPageSize);
       setResult(response);
     } catch {
       setError("Search failed. Please confirm the API is running and your login is still valid.");
@@ -193,6 +193,16 @@ export default function SearchPage() {
               {isSearching ? "Searching..." : "Search"}
             </button>
           </form>
+          <div className="mt-3">
+            <PageSizeSelect
+              label="Requested results"
+              pageSize={searchPageSize}
+              onChange={(value) => {
+                setSearchPageSize(value);
+                setSearchPage(1);
+              }}
+            />
+          </div>
         </section>
 
         <section className="rounded-md border border-slate-200 bg-white p-5">

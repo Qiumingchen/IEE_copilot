@@ -1257,6 +1257,138 @@ def test_enzyme_search_uses_uniprot_connector_for_ec_refresh(client, db_session,
     assert sequence.sequence == "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVY"
 
 
+def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            raise AssertionError("keyword search should not call EC search")
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            assert keyword == "food lipase"
+            assert size == 3
+            return [
+                UniProtSearchHit(
+                    accession="R11111",
+                    protein_name="Food lipase alpha",
+                    organism="Bacillus realensis",
+                    ec_number="3.1.1.3",
+                    score=90.0,
+                ),
+                UniProtSearchHit(
+                    accession="R22222",
+                    protein_name="Food lipase beta",
+                    organism="Geobacillus realensis",
+                    ec_number="3.1.1.3",
+                    score=80.0,
+                ),
+                UniProtSearchHit(
+                    accession="R33333",
+                    protein_name="Food lipase gamma",
+                    organism="Aspergillus realensis",
+                    ec_number="3.1.1.3",
+                    score=70.0,
+                ),
+            ]
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise AssertionError("keyword search should not call organism search")
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name={
+                    "R11111": "Food lipase alpha",
+                    "R22222": "Food lipase beta",
+                    "R33333": "Food lipase gamma",
+                }[accession],
+                organism={
+                    "R11111": "Bacillus realensis",
+                    "R22222": "Geobacillus realensis",
+                    "R33333": "Aspergillus realensis",
+                }[accession],
+                ec_number="3.1.1.3",
+                sequence=f"M{accession}SEQUENCE",
+                mature_sequence=f"MATURE{accession}",
+                cross_references={"AlphaFoldDB": f"AF-{accession}-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return f">sp|{accession}|REAL\nM{accession}SEQUENCE\n"
+
+    class EmptyAlphaFoldClient:
+        source = "alphafold"
+
+        def fetch_model_by_uniprot(self, uniprot_id: str):
+            raise ValueError("no AlphaFold model in this test")
+
+    monkeypatch.setattr("app.api.routes.enzymes.run_placeholder_analysis", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "multi-real-search@example.com",
+            "password": "search-password",
+            "display_name": "Multi Real Search",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "multi-real-search@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "food lipase", "result_limit": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [match["uniprot_id"] for match in body["matches"]] == ["R11111", "R22222", "R33333"]
+    assert {match["source"] for match in body["matches"]} == {"uniprot"}
+    assert body["enzyme"]["uniprot_id"] == "R11111"
+    assert (
+        db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == "R33333"))
+        is not None
+    )
+
+
 def test_enzyme_search_fetches_uniprot_accession_when_not_local(client, db_session, monkeypatch):
     class PlaceholderTask:
         @staticmethod

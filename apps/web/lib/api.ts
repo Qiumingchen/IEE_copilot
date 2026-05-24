@@ -73,14 +73,14 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return response.json() as Promise<TokenResponse>;
 }
 
-export async function searchEnzyme(query: string, token: string): Promise<SearchResponse> {
+export async function searchEnzyme(query: string, token: string, resultLimit = 10): Promise<SearchResponse> {
   const response = await fetch(apiUrl("/enzymes/search"), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query, result_limit: resultLimit })
   });
 
   if (!response.ok) {
