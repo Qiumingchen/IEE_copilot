@@ -215,7 +215,7 @@ test("buildPropertyEvidenceCsv exports citation and assay fields", () => {
     csv,
     [
       "property_type,value_original,unit_original,value_standardized,unit_standardized,substrate,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
-      'optimal_temperature,58,degC,58,degC,casein,37,7.0,activity assay,"10.1000/mtgase · MTGase, thermal evidence · Biocatalysis Reports · 2024 · curated_literature",Table 1,public,approved'
+      'optimal_temperature,58,degC,58,degC,casein,37,7.0,activity assay,"10.1000/mtgase | MTGase, thermal evidence | Biocatalysis Reports | 2024 | curated_literature",Table 1,public,approved'
     ].join("\n")
   );
 });
@@ -253,7 +253,7 @@ test("buildKineticEvidenceCsv exports kinetic parameters and citation fields", (
     csv,
     [
       "substrate,km,kcat,kcat_km,unit_original,assay_temperature,assay_pH,method,reference,evidence_text,visibility,curation_status",
-      "CBZ-Gln-Gly,2.1,31,14.8,mM; s-1,37,7.0,HPLC assay,PMID 123456 · MTGase kinetics · Enzyme Reports · 2025 · curated_literature,Table 2,public,approved"
+      "CBZ-Gln-Gly,2.1,31,14.8,mM; s-1,37,7.0,HPLC assay,PMID 123456 | MTGase kinetics | Enzyme Reports | 2025 | curated_literature,Table 2,public,approved"
     ].join("\n")
   );
 });
@@ -294,7 +294,7 @@ test("buildExpressionEvidenceCsv exports expression records with condition and c
     csv,
     [
       "expression_host,vector,expression_level_original,expression_level_standardized,unit_original,unit_standardized,soluble_expression,assay_temperature,assay_pH,method,reference,visibility,curation_status",
-      "E. coli BL21(DE3),pET-28a,90,90,mg/L,mg/L,high soluble fraction,25,7.0,shake flask expression,10.1000/expression · Soluble MTGase expression · Expression Reports · 2025 · curated_literature,public,approved"
+      "E. coli BL21(DE3),pET-28a,90,90,mg/L,mg/L,high soluble fraction,25,7.0,shake flask expression,10.1000/expression | Soluble MTGase expression | Expression Reports | 2025 | curated_literature,public,approved"
     ].join("\n")
   );
 });
@@ -376,7 +376,7 @@ test("formatPropertyEvidence prefers readable DOI and title when reference metad
       visibility: "public",
       curation_status: "approved"
     }),
-    "10.1000/mtgase · Thermostability of MTGase · Biocatalysis Reports · 2024 · curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
+    "10.1000/mtgase | Thermostability of MTGase | Biocatalysis Reports | 2024 | curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
   );
   assert.equal(
     formatPropertyEvidence(
@@ -392,7 +392,7 @@ test("formatPropertyEvidence prefers readable DOI and title when reference metad
         }
       }
     ),
-    "10.1000/mtgase · Thermostability of MTGase · Biocatalysis Reports · 2024 · curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
+    "10.1000/mtgase | Thermostability of MTGase | Biocatalysis Reports | 2024 | curated_literature · Reported at pH 7.0 after 30 min assay. · public / approved"
   );
 });
 
@@ -414,7 +414,7 @@ test("formatKineticEvidence prefers embedded reference metadata", () => {
       visibility: "public",
       curation_status: "approved"
     }),
-    "PMID 123456 · MTGase kinetics · Biocatalysis Reports · 2024 · curated_literature · public / approved"
+    "PMID 123456 | MTGase kinetics | Biocatalysis Reports | 2024 | curated_literature · public / approved"
   );
 });
 

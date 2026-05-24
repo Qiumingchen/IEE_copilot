@@ -25,7 +25,7 @@ const referencesById = {
 test("formatReferenceForTable prefers readable literature metadata", () => {
   assert.equal(
     formatReferenceForTable("ref-1", referencesById),
-    "10.1000/detail · Curated MTGase thermostability · Biocatalysis Reports · 2024 · curated_literature"
+    "10.1000/detail | Curated MTGase thermostability | Biocatalysis Reports | 2024 | curated_literature"
   );
 });
 

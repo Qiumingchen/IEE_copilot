@@ -29,7 +29,7 @@ export function formatReferenceCitation(reference: LiteratureReferenceRecord): s
     reference.year ? String(reference.year) : null,
     reference.source
   ];
-  return parts.filter(Boolean).join(" · ") || reference.id;
+  return parts.filter(Boolean).join(" | ") || reference.id;
 }
 
 function normalizePubmedId(value: string | null | undefined): string {

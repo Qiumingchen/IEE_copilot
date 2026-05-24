@@ -44,6 +44,6 @@ test("formatReferenceCitation includes title journal year and source", () => {
       source: "curated_literature",
       provenance: { mode: "curated" }
     }),
-    "10.1000/traceable · Traceable MTGase evidence · Biocatalysis Reports · 2024 · curated_literature"
+    "10.1000/traceable | Traceable MTGase evidence | Biocatalysis Reports | 2024 | curated_literature"
   );
 });
