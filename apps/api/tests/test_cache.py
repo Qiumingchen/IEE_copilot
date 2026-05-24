@@ -4,6 +4,8 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    KineticRecord,
+    MutationRecord,
     ProteinSequence,
     PropertyRecord,
     SearchCacheRecord,
@@ -11,6 +13,7 @@ from app.db.models import (
 )
 from app.services.cache import (
     DATA_MODULE_MSA_CONSERVATION,
+    DATA_MODULE_MUTATION,
     DATA_MODULE_PROPERTY,
     DATA_MODULE_SEQUENCE,
     DATA_MODULE_STRUCTURE,
@@ -156,3 +159,52 @@ def test_stale_data_modules_lists_only_modules_that_need_partial_refresh(db_sess
     assert DATA_MODULE_STRUCTURE in modules
     assert DATA_MODULE_PROPERTY in modules
     assert DATA_MODULE_MSA_CONSERVATION in modules
+
+
+def test_real_freshness_ignores_recent_mock_property_and_mutation_records(db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(family_id=family.id, name="Mock freshness target", source="uniprot")
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme.id,
+                property_type="optimal_temperature",
+                value_original="99",
+                method="enzyme_data_mock",
+                created_at=datetime.utcnow() - timedelta(days=1),
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme.id,
+                substrate="casein",
+                km="9.9",
+                method="enzyme_data_mock",
+                created_at=datetime.utcnow() - timedelta(days=1),
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme.id,
+                mutation_string="A1V",
+                assay_condition_summary={"source": "enzyme_data_mock"},
+                created_at=datetime.utcnow() - timedelta(days=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    report = data_freshness_report(db_session, enzyme.id)
+    modules = stale_data_modules(db_session, enzyme.id)
+
+    assert report[DATA_MODULE_PROPERTY].is_fresh is False
+    assert report[DATA_MODULE_MUTATION].is_fresh is False
+    assert DATA_MODULE_PROPERTY in modules
+    assert DATA_MODULE_MUTATION in modules

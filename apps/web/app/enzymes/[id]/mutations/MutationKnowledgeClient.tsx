@@ -204,7 +204,7 @@ export default function MutationKnowledgeClient({ enzymeId }: MutationKnowledgeC
               <input
                 className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
                 onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
-                placeholder="literature, enzyme_data_mock"
+                placeholder="europepmc, crossref"
                 value={filters.source ?? ""}
               />
             </label>

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -17,6 +17,7 @@ from app.db.models import (
     SearchCacheRecord,
     StructureEntry,
 )
+from app.core.config import get_settings
 
 
 DATA_MODULE_SEQUENCE = "sequence"
@@ -59,13 +60,12 @@ def _latest_timestamp(
     model,
     column,
     enzyme_id: str,
+    extra_filter=None,
 ) -> datetime | None:
-    return db.scalar(
-        select(column)
-        .where(model.enzyme_entry_id == enzyme_id)
-        .order_by(column.desc())
-        .limit(1)
-    )
+    statement = select(column).where(model.enzyme_entry_id == enzyme_id)
+    if extra_filter is not None:
+        statement = statement.where(extra_filter)
+    return db.scalar(statement.order_by(column.desc()).limit(1))
 
 
 def _latest_of(*timestamps: datetime | None) -> datetime | None:
@@ -77,17 +77,47 @@ def _latest_of(*timestamps: datetime | None) -> datetime | None:
 
 def _latest_literature_timestamp(db: Session, enzyme_id: str) -> datetime | None:
     reference_ids = set()
-    for model in (PropertyRecord, KineticRecord, ExpressionRecord, MutationRecord):
-        reference_ids.update(
-            reference_id
-            for reference_id in db.scalars(
-                select(model.reference_id).where(
-                    model.enzyme_entry_id == enzyme_id,
-                    model.reference_id.is_not(None),
-                )
+    real_mode = get_settings().use_real_science_providers
+    property_query = select(PropertyRecord.reference_id).where(
+        PropertyRecord.enzyme_entry_id == enzyme_id,
+        PropertyRecord.reference_id.is_not(None),
+    )
+    kinetic_query = select(KineticRecord.reference_id).where(
+        KineticRecord.enzyme_entry_id == enzyme_id,
+        KineticRecord.reference_id.is_not(None),
+    )
+    if real_mode:
+        property_query = property_query.where(_non_mock_text_filter(PropertyRecord.method))
+        kinetic_query = kinetic_query.where(_non_mock_text_filter(KineticRecord.method))
+    for statement in (property_query, kinetic_query):
+        reference_ids.update(reference_id for reference_id in db.scalars(statement) if reference_id)
+    reference_ids.update(
+        reference_id
+        for reference_id in db.scalars(
+            select(ExpressionRecord.reference_id).where(
+                ExpressionRecord.enzyme_entry_id == enzyme_id,
+                ExpressionRecord.reference_id.is_not(None),
             )
-            if reference_id
         )
+        if reference_id
+    )
+    mutation_rows = db.execute(
+        select(MutationRecord.reference_id, MutationRecord.assay_condition_summary).where(
+            MutationRecord.enzyme_entry_id == enzyme_id,
+            MutationRecord.reference_id.is_not(None),
+        )
+    ).all()
+    reference_ids.update(
+        reference_id
+        for reference_id, assay_condition_summary in mutation_rows
+        if reference_id
+        and (
+            not real_mode
+            or not _is_mock_like_source(
+                assay_condition_summary.get("source") if isinstance(assay_condition_summary, dict) else None
+            )
+        )
+    )
     if not reference_ids:
         return None
     return db.scalar(
@@ -103,15 +133,34 @@ def data_freshness_report(
     enzyme_id: str,
     days: int = 15,
 ) -> dict[str, DataFreshness]:
+    real_mode = get_settings().use_real_science_providers
     timestamps = {
         DATA_MODULE_SEQUENCE: _latest_timestamp(db, ProteinSequence, ProteinSequence.created_at, enzyme_id),
-        DATA_MODULE_STRUCTURE: _latest_timestamp(db, StructureEntry, StructureEntry.updated_at, enzyme_id),
+        DATA_MODULE_STRUCTURE: _latest_timestamp(
+            db,
+            StructureEntry,
+            StructureEntry.updated_at,
+            enzyme_id,
+            _non_mock_text_filter(StructureEntry.source) if real_mode else None,
+        ),
         DATA_MODULE_PROPERTY: _latest_of(
-            _latest_timestamp(db, PropertyRecord, PropertyRecord.created_at, enzyme_id),
-            _latest_timestamp(db, KineticRecord, KineticRecord.created_at, enzyme_id),
+            _latest_timestamp(
+                db,
+                PropertyRecord,
+                PropertyRecord.created_at,
+                enzyme_id,
+                _non_mock_text_filter(PropertyRecord.method) if real_mode else None,
+            ),
+            _latest_timestamp(
+                db,
+                KineticRecord,
+                KineticRecord.created_at,
+                enzyme_id,
+                _non_mock_text_filter(KineticRecord.method) if real_mode else None,
+            ),
             _latest_timestamp(db, ExpressionRecord, ExpressionRecord.created_at, enzyme_id),
         ),
-        DATA_MODULE_MUTATION: _latest_timestamp(db, MutationRecord, MutationRecord.created_at, enzyme_id),
+        DATA_MODULE_MUTATION: _latest_mutation_timestamp(db, enzyme_id, ignore_mock=real_mode),
         DATA_MODULE_LITERATURE: _latest_literature_timestamp(db, enzyme_id),
         DATA_MODULE_MSA_CONSERVATION: db.scalar(
             select(AnalysisArtifact.created_at)
@@ -131,6 +180,30 @@ def data_freshness_report(
         )
         for module, timestamp in timestamps.items()
     }
+
+
+def _latest_mutation_timestamp(db: Session, enzyme_id: str, *, ignore_mock: bool) -> datetime | None:
+    rows = db.execute(
+        select(MutationRecord.created_at, MutationRecord.assay_condition_summary)
+        .where(MutationRecord.enzyme_entry_id == enzyme_id)
+        .order_by(MutationRecord.created_at.desc())
+    ).all()
+    for created_at, assay_condition_summary in rows:
+        if not ignore_mock:
+            return created_at
+        source = assay_condition_summary.get("source") if isinstance(assay_condition_summary, dict) else None
+        if not _is_mock_like_source(source):
+            return created_at
+    return None
+
+
+def _is_mock_like_source(source: str | None) -> bool:
+    value = (source or "").lower()
+    return value == "seed" or value.endswith("_mock") or "_mock" in value
+
+
+def _non_mock_text_filter(column):
+    return or_(column.is_(None), ~func.lower(column).contains("_mock"))
 
 
 def stale_data_modules(db: Session, enzyme_id: str, days: int = 15) -> list[str]:
