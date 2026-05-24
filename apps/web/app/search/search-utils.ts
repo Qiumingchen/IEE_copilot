@@ -40,6 +40,25 @@ export function sortPdbDiscoveryHits(hits: PdbDiscoveryHit[], sortMode: EnzymeSo
   return [...hits].sort((left, right) => compareEnzymeSummaries(left.enzyme, right.enzyme, sortMode));
 }
 
+export function formatRecordCoverageBadges(enzyme: EnzymeSummary): string[] {
+  const counts = enzyme.record_counts ?? {
+    properties: 0,
+    kinetics: 0,
+    mutations: 0,
+    structures: 0,
+    expression: 0
+  };
+  const badges = [
+    counts.properties > 0 ? `${counts.properties} propert${counts.properties === 1 ? "y" : "ies"}` : null,
+    counts.kinetics > 0 ? `${counts.kinetics} kinetics` : null,
+    counts.mutations > 0 ? `${counts.mutations} mutant${counts.mutations === 1 ? "" : "s"}` : null,
+    counts.structures > 0 ? `${counts.structures} structure${counts.structures === 1 ? "" : "s"}` : null,
+    counts.expression > 0 ? `${counts.expression} expression` : null
+  ].filter((badge): badge is string => Boolean(badge));
+
+  return badges.length > 0 ? badges : ["Real data not fetched"];
+}
+
 export function paginateItems<T>(
   items: T[],
   requestedPage: number,

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildStructureAnalysisHref,
+  formatRecordCoverageBadges,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
   formatSearchMatchSubtitle,
@@ -25,7 +26,14 @@ const enzyme = {
   source: "uniprot",
   uniprot_reviewed: true,
   optimal_temperature: null,
-  specific_activity: null
+  specific_activity: null,
+  record_counts: {
+    properties: 0,
+    kinetics: 0,
+    mutations: 0,
+    structures: 0,
+    expression: 0
+  }
 };
 
 test("searchResultMatches falls back to the primary enzyme and deduplicates matches", () => {
@@ -99,6 +107,23 @@ test("sortSearchMatches supports reviewed temperature and activity ranking modes
     "hot",
     "reviewed"
   ]);
+});
+
+test("formatRecordCoverageBadges summarizes fetched real data coverage", () => {
+  assert.deepEqual(formatRecordCoverageBadges(enzyme), ["Real data not fetched"]);
+  assert.deepEqual(
+    formatRecordCoverageBadges({
+      ...enzyme,
+      record_counts: {
+        properties: 2,
+        kinetics: 1,
+        mutations: 3,
+        structures: 1,
+        expression: 0
+      }
+    }),
+    ["2 properties", "1 kinetics", "3 mutants", "1 structure"]
+  );
 });
 
 test("sortPdbDiscoveryHits sorts by enzyme-level ranking fields without changing match metrics", () => {

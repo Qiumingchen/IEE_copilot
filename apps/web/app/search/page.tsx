@@ -11,6 +11,7 @@ import {
   type EnzymeSortMode,
   formatPdbDiscoveryMatchReason,
   formatPdbDiscoveryHitSubtitle,
+  formatRecordCoverageBadges,
   formatSearchMatchSubtitle,
   paginateItems,
   pdbDiscoveryErrorMessage,
@@ -551,7 +552,8 @@ function MetricBadges({ enzyme }: { enzyme: SearchResponse["enzyme"] }) {
   const badges = [
     enzyme.uniprot_reviewed ? "Reviewed UniProt" : null,
     enzyme.optimal_temperature !== null ? `Topt ${enzyme.optimal_temperature} degC` : null,
-    enzyme.specific_activity !== null ? `Activity ${enzyme.specific_activity}` : null
+    enzyme.specific_activity !== null ? `Activity ${enzyme.specific_activity}` : null,
+    ...formatRecordCoverageBadges(enzyme)
   ].filter(Boolean);
 
   if (badges.length === 0) {

@@ -8,6 +8,7 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    ExpressionRecord,
     KineticRecord,
     LiteratureReference,
     MutationRecord,
@@ -267,6 +268,23 @@ def test_enzyme_search_returns_clickable_source_matches(client, db_session, monk
         raising=False,
     )
 
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
     family = EnzymeFamily(
         module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
         name="Mature microbial transglutaminases",
@@ -431,6 +449,125 @@ def test_enzyme_search_orders_source_matches_by_reviewed_temperature_and_activit
     assert matches[0]["uniprot_reviewed"] is True
     assert matches[1]["optimal_temperature"] == 85.0
     assert matches[2]["specific_activity"] == 900.0
+
+
+def test_enzyme_search_summarizes_available_real_records(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_placeholder_analysis",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food beta amylases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food beta amylase record rich",
+        organism="Bacillus subtilis",
+        ec_number="3.2.1.2",
+        uniprot_id="P00002",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PropertyRecord(
+                enzyme_entry_id=enzyme.id,
+                property_type="optimal_temperature",
+                value_original="70",
+                unit_original="degC",
+                value_standardized="70",
+                unit_standardized="degC",
+                standardization_status="standardized",
+            ),
+            KineticRecord(
+                enzyme_entry_id=enzyme.id,
+                substrate="starch",
+                km="1.2",
+                kcat="50",
+                kcat_km="41.7",
+                unit_original="s-1 mM-1",
+            ),
+            MutationRecord(
+                enzyme_entry_id=enzyme.id,
+                mutation_string="A10V",
+                mutation_positions={"positions": [{"wildtype": "A", "position": 10, "mutant": "V"}]},
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme.id,
+                structure_type="alphafold_model",
+                complex_state="apo",
+                pdb_id=None,
+                chain_summary={"provenance": {"provider": "alphafold"}},
+                ligand_summary=None,
+                source="alphafold",
+            ),
+            ExpressionRecord(
+                enzyme_entry_id=enzyme.id,
+                expression_host="Escherichia coli",
+                expression_level_original="20 mg/L",
+                soluble_expression="high",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "record-count-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Record Count Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "record-count-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "food beta amylase"},
+    )
+
+    assert response.status_code == 200
+    match = next(item for item in response.json()["matches"] if item["id"] == enzyme.id)
+    assert match["record_counts"] == {
+        "properties": 1,
+        "kinetics": 1,
+        "mutations": 1,
+        "structures": 1,
+        "expression": 1,
+    }
 
 
 def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client, db_session, monkeypatch):

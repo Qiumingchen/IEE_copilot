@@ -15,6 +15,7 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    ExpressionRecord,
     JobStatus,
     KineticRecord,
     LiteratureReference,
@@ -39,6 +40,7 @@ from app.external.uniprot import (
     parse_fasta_sequence,
 )
 from app.schemas.enzyme import (
+    EnzymeRecordCounts,
     EnzymeSearchRequest,
     EnzymeSearchResponse,
     EnzymeRealDataRefreshResponse,
@@ -853,6 +855,7 @@ def _enzyme_scientific_rankings(
 
 def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSummary]:
     scientific_ranks = _enzyme_scientific_rankings(db, enzymes)
+    record_counts = _enzyme_record_counts(db, [enzyme.id for enzyme in enzymes])
     return [
         EnzymeSummary(
             id=enzyme.id,
@@ -867,6 +870,7 @@ def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSum
             uniprot_reviewed=bool(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[0]),
             optimal_temperature=_none_if_zero(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[1]),
             specific_activity=_none_if_zero(scientific_ranks.get(enzyme.id, (0, 0.0, 0.0))[2]),
+            record_counts=record_counts.get(enzyme.id, EnzymeRecordCounts()),
         )
         for enzyme in enzymes
     ]
@@ -874,6 +878,29 @@ def _enzyme_summaries(db: Session, enzymes: list[EnzymeEntry]) -> list[EnzymeSum
 
 def _enzyme_summary(db: Session, enzyme: EnzymeEntry) -> EnzymeSummary:
     return _enzyme_summaries(db, [enzyme])[0]
+
+
+def _enzyme_record_counts(db: Session, enzyme_ids: list[str]) -> dict[str, EnzymeRecordCounts]:
+    if not enzyme_ids:
+        return {}
+
+    counts = {enzyme_id: EnzymeRecordCounts() for enzyme_id in enzyme_ids}
+    count_specs = [
+        ("properties", PropertyRecord),
+        ("kinetics", KineticRecord),
+        ("mutations", MutationRecord),
+        ("structures", StructureEntry),
+        ("expression", ExpressionRecord),
+    ]
+    for field_name, model in count_specs:
+        rows = db.execute(
+            select(model.enzyme_entry_id, func.count(model.id))
+            .where(model.enzyme_entry_id.in_(enzyme_ids))
+            .group_by(model.enzyme_entry_id)
+        ).all()
+        for enzyme_id, count in rows:
+            setattr(counts[enzyme_id], field_name, count)
+    return counts
 
 
 def _none_if_zero(value: float) -> float | None:

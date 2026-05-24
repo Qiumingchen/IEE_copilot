@@ -10,6 +10,14 @@ class EnzymeSearchRequest(BaseModel):
     result_limit: int = Field(default=10, ge=1, le=50)
 
 
+class EnzymeRecordCounts(BaseModel):
+    properties: int = 0
+    kinetics: int = 0
+    mutations: int = 0
+    structures: int = 0
+    expression: int = 0
+
+
 class EnzymeSummary(BaseModel):
     id: str
     family_id: str
@@ -23,6 +31,7 @@ class EnzymeSummary(BaseModel):
     uniprot_reviewed: bool = False
     optimal_temperature: float | None = None
     specific_activity: float | None = None
+    record_counts: EnzymeRecordCounts = Field(default_factory=EnzymeRecordCounts)
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -11,6 +11,15 @@ export type EnzymeSummary = {
   uniprot_reviewed: boolean;
   optimal_temperature: number | null;
   specific_activity: number | null;
+  record_counts: EnzymeRecordCounts;
+};
+
+export type EnzymeRecordCounts = {
+  properties: number;
+  kinetics: number;
+  mutations: number;
+  structures: number;
+  expression: number;
 };
 
 export type SearchResponse = {
