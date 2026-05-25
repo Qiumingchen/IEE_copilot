@@ -50,6 +50,7 @@ from app.schemas.enzyme import (
     PdbDiscoveryMetadata,
     PdbDiscoveryResponse,
 )
+from app.schemas.job import JobResponse
 from app.services.cache import (
     find_fresh_search_cache,
     find_fresh_uniprot_hit,
@@ -66,7 +67,7 @@ from app.services.structure_identifiers import (
     extract_structure_database_identifiers,
 )
 from app.services.structure_parser import StructureParseError, parse_structure_text
-from worker.jobs import run_homology_collection
+from worker.jobs import run_homology_collection, run_real_data_refresh
 
 
 router = APIRouter(prefix="/enzymes", tags=["enzymes"])
@@ -2238,6 +2239,15 @@ def refresh_enzyme_real_data(
     )
 
 
+@router.post("/{enzyme_id}/real-data/refresh-job", response_model=JobResponse)
+def enqueue_enzyme_real_data_refresh(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    return _enqueue_real_data_refresh_job(db, enzyme_id=enzyme_id, user=user, scope="enzyme")
+
+
 @router.post("/{enzyme_id}/family-real-data/refresh", response_model=EnzymeRealDataRefreshResponse)
 def refresh_enzyme_family_real_data(
     enzyme_id: str,
@@ -2267,6 +2277,35 @@ def refresh_enzyme_family_real_data(
         sources=_unique_strings(sources),
         warnings=warnings,
     )
+
+
+@router.post("/{enzyme_id}/family-real-data/refresh-job", response_model=JobResponse)
+def enqueue_enzyme_family_real_data_refresh(
+    enzyme_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    return _enqueue_real_data_refresh_job(db, enzyme_id=enzyme_id, user=user, scope="family")
+
+
+def _enqueue_real_data_refresh_job(db: Session, *, enzyme_id: str, user: User, scope: str) -> AnalysisJob:
+    enzyme = db.get(EnzymeEntry, enzyme_id)
+    if enzyme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="enzyme not found")
+
+    job = AnalysisJob(
+        project_id=None,
+        enzyme_entry_id=enzyme.id,
+        job_type="real_data_refresh",
+        status=JobStatus.QUEUED,
+        parameters_json={"scope": scope},
+        created_by=user.id,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    run_real_data_refresh.delay(job.id)
+    return job
 
 
 def _refresh_real_data_for_enzyme(

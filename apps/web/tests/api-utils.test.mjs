@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   apiUrl,
+  cancelJob,
   discoverEnzymeFromPdb,
   getEnzymeRecordBundle,
   refreshEnzymeFamilyRealData,
@@ -135,7 +136,7 @@ test("getEnzymeRecordBundle fetches same-family enzyme entries", async () => {
   assert.ok(requestedUrls.includes("/api/backend/enzymes/enzyme-1/family-entries"));
 });
 
-test("refreshEnzymeFamilyRealData posts to the family refresh endpoint", async () => {
+test("refreshEnzymeFamilyRealData posts to the async family refresh job endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let requestedUrl;
   let requestedMethod;
@@ -144,10 +145,18 @@ test("refreshEnzymeFamilyRealData posts to the family refresh endpoint", async (
     requestedMethod = init.method;
     return new Response(
       JSON.stringify({
-        enzyme: {},
-        created: { references: 2, properties: 2, kinetics: 0, mutations: 0, structures: 0 },
-        sources: ["crossref", "europepmc"],
-        warnings: []
+        id: "job-1",
+        project_id: null,
+        enzyme_entry_id: "enzyme-1",
+        job_type: "real_data_refresh",
+        status: "queued",
+        parameters_json: { scope: "family" },
+        result_summary_json: null,
+        error_message: null,
+        created_by: "user-1",
+        created_at: "2026-05-25T00:00:00",
+        started_at: null,
+        finished_at: null
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
@@ -159,6 +168,42 @@ test("refreshEnzymeFamilyRealData posts to the family refresh endpoint", async (
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(requestedUrl, "/api/backend/enzymes/enzyme-1/family-real-data/refresh");
+  assert.equal(requestedUrl, "/api/backend/enzymes/enzyme-1/family-real-data/refresh-job");
+  assert.equal(requestedMethod, "POST");
+});
+
+test("cancelJob posts to the job cancellation endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  let requestedMethod;
+  globalThis.fetch = async (url, init) => {
+    requestedUrl = url;
+    requestedMethod = init.method;
+    return new Response(
+      JSON.stringify({
+        id: "job-2",
+        project_id: null,
+        enzyme_entry_id: "enzyme-1",
+        job_type: "real_data_refresh",
+        status: "cancelled",
+        parameters_json: { scope: "family" },
+        result_summary_json: null,
+        error_message: null,
+        created_by: "user-1",
+        created_at: "2026-05-25T00:00:00",
+        started_at: "2026-05-25T00:01:00",
+        finished_at: "2026-05-25T00:02:00"
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  try {
+    await cancelJob("job-2", "token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedUrl, "/api/backend/jobs/job-2/cancel");
   assert.equal(requestedMethod, "POST");
 });

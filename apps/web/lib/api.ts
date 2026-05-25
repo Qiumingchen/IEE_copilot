@@ -5,7 +5,6 @@ import type {
   CuratedEvidenceImportResponse,
   CuratedEvidencePreviewResponse,
   EnzymeRecordBundle,
-  EnzymeRealDataRefreshResponse,
   EnzymeSummary,
   ExpressionRecord,
   ExperimentImportPreview,
@@ -201,9 +200,9 @@ export async function getEnzymeRecordBundle(
 export async function refreshEnzymeRealData(
   enzymeId: string,
   token: string
-): Promise<EnzymeRealDataRefreshResponse> {
-  return fetchWithTokenAndErrorMessage<EnzymeRealDataRefreshResponse>(
-    `/enzymes/${enzymeId}/real-data/refresh`,
+): Promise<JobResponse> {
+  return fetchWithTokenAndErrorMessage<JobResponse>(
+    `/enzymes/${enzymeId}/real-data/refresh-job`,
     token,
     { method: "POST" }
   );
@@ -212,9 +211,9 @@ export async function refreshEnzymeRealData(
 export async function refreshEnzymeFamilyRealData(
   enzymeId: string,
   token: string
-): Promise<EnzymeRealDataRefreshResponse> {
-  return fetchWithTokenAndErrorMessage<EnzymeRealDataRefreshResponse>(
-    `/enzymes/${enzymeId}/family-real-data/refresh`,
+): Promise<JobResponse> {
+  return fetchWithTokenAndErrorMessage<JobResponse>(
+    `/enzymes/${enzymeId}/family-real-data/refresh-job`,
     token,
     { method: "POST" }
   );
@@ -266,6 +265,12 @@ export async function listJobs(token: string): Promise<JobResponse[]> {
 
 export async function getJob(jobId: string, token: string): Promise<JobResponse> {
   return fetchWithToken<JobResponse>(`/jobs/${jobId}`, token);
+}
+
+export async function cancelJob(jobId: string, token: string): Promise<JobResponse> {
+  return fetchWithToken<JobResponse>(`/jobs/${jobId}/cancel`, token, {
+    method: "POST"
+  });
 }
 
 export async function retryJob(jobId: string, token: string): Promise<JobResponse> {

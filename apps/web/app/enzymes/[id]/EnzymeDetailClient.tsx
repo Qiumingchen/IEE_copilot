@@ -6,26 +6,29 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
+  cancelJob,
   createExpressionRecord,
   createKineticRecord,
   createPropertyRecord,
   createStructureRecord,
   createSubstrate,
   getEnzymeRecordBundle,
+  getJob,
   listEnzymeReferences,
   refreshEnzymeFamilyRealData,
   refreshEnzymeRealData,
   uploadStructureFile
 } from "../../../lib/api";
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
-import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
+import type { EnzymeRecordBundle, JobResponse, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
 import {
   buildFamilyComparisonRow,
+  buildRealDataRefreshProgress,
   type FamilyComparisonMetric,
   type FamilyComparisonRow,
+  type RealDataRefreshProgress,
   formatConditionEvidence,
   formatFamilyComparisonMetric,
-  formatRealDataRefreshSummary,
   formatReferenceForTable,
   formatVisibilityStatus,
   overviewTableEmptyLabel,
@@ -254,6 +257,9 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   const [isFetchingFamilyRealData, setIsFetchingFamilyRealData] = useState(false);
   const [isComparingFamilyEntries, setIsComparingFamilyEntries] = useState(false);
   const [realDataNotice, setRealDataNotice] = useState<string | null>(null);
+  const [realDataJob, setRealDataJob] = useState<JobResponse | null>(null);
+  const [realDataProgress, setRealDataProgress] = useState<RealDataRefreshProgress | null>(null);
+  const [isPausingRealData, setIsPausingRealData] = useState(false);
   const [familyComparisonError, setFamilyComparisonError] = useState<string | null>(null);
   const [selectedFamilyEntryIds, setSelectedFamilyEntryIds] = useState<string[]>([]);
   const [selectedComparisonMetrics, setSelectedComparisonMetrics] = useState<FamilyComparisonMetric[]>([
@@ -491,10 +497,11 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     setIsFetchingRealData(true);
     setError(null);
     setRealDataNotice(null);
+    setRealDataJob(null);
+    setRealDataProgress(null);
     try {
-      const response = await refreshEnzymeRealData(enzymeId, token);
-      setRealDataNotice(formatRealDataRefreshSummary(response.created, response.sources));
-      await loadBundle(token);
+      const job = await refreshEnzymeRealData(enzymeId, token);
+      await pollRealDataRefreshJob(job, token);
     } catch (caught) {
       setError(
         caught instanceof Error && caught.message
@@ -514,10 +521,11 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     setIsFetchingFamilyRealData(true);
     setError(null);
     setRealDataNotice(null);
+    setRealDataJob(null);
+    setRealDataProgress(null);
     try {
-      const response = await refreshEnzymeFamilyRealData(enzymeId, token);
-      setRealDataNotice(formatRealDataRefreshSummary(response.created, response.sources));
-      await loadBundle(token);
+      const job = await refreshEnzymeFamilyRealData(enzymeId, token);
+      await pollRealDataRefreshJob(job, token);
     } catch (caught) {
       setError(
         caught instanceof Error && caught.message
@@ -587,6 +595,72 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     }
   }
 
+  async function handlePauseRealDataRefresh() {
+    if (!token || !realDataJob || !realDataProgress?.canPause || isPausingRealData) {
+      return;
+    }
+
+    setIsPausingRealData(true);
+    setError(null);
+    try {
+      const pausedJob = await cancelJob(realDataJob.id, token);
+      const progress = buildRealDataRefreshProgress(pausedJob);
+      setRealDataJob(pausedJob);
+      setRealDataProgress(progress);
+      setRealDataNotice(progress.summary);
+      await loadBundle(token);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Unable to pause real data search.");
+    } finally {
+      setIsPausingRealData(false);
+    }
+  }
+
+  async function pollRealDataRefreshJob(initialJob: JobResponse, nextToken: string) {
+    let currentJob = initialJob;
+    setRealDataJob(currentJob);
+    setRealDataProgress(buildRealDataRefreshProgress(currentJob));
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      if (currentJob.status === "finished") {
+        const progress = buildRealDataRefreshProgress(currentJob);
+        setRealDataJob(currentJob);
+        setRealDataProgress(progress);
+        setRealDataNotice(progress.summary);
+        await loadBundle(nextToken);
+        return;
+      }
+      if (currentJob.status === "cancelled") {
+        const progress = buildRealDataRefreshProgress(currentJob);
+        setRealDataJob(currentJob);
+        setRealDataProgress(progress);
+        setRealDataNotice(progress.summary);
+        await loadBundle(nextToken);
+        return;
+      }
+      if (currentJob.status === "failed") {
+        throw new Error(currentJob.error_message || "Real data refresh job failed.");
+      }
+      await wait(2000);
+      currentJob = await getJob(currentJob.id, nextToken);
+      setRealDataJob(currentJob);
+      setRealDataProgress(buildRealDataRefreshProgress(currentJob));
+    }
+    setRealDataProgress({
+      percent: 85,
+      title: "Fetch real data still running",
+      detail: `Real data refresh job ${initialJob.id} is still running. Check the Jobs page for progress.`,
+      summary: null,
+      warnings: [],
+      checkedSources: 0,
+      foundRecords: 0,
+      notFoundSources: 0,
+      processedEnzymes: 0,
+      totalEnzymes: 0,
+      stage: null,
+      canPause: true
+    });
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="border-b border-slate-200 pb-6">
@@ -651,6 +725,14 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
         <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           {realDataNotice}
         </p>
+      ) : null}
+
+      {realDataProgress ? (
+        <RealDataProgressPanel
+          isPausing={isPausingRealData}
+          onPause={() => void handlePauseRealDataRefresh()}
+          progress={realDataProgress}
+        />
       ) : null}
 
       {isLoading ? (
@@ -1357,6 +1439,89 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
         </>
       ) : null}
     </main>
+  );
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+function RealDataProgressPanel({
+  isPausing,
+  onPause,
+  progress
+}: {
+  isPausing: boolean;
+  onPause: () => void;
+  progress: RealDataRefreshProgress;
+}) {
+  return (
+    <section className="mt-4 rounded-md border border-sky-200 bg-sky-50 p-4 text-sm text-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-950">{progress.title}</h2>
+          <p className="mt-1 text-slate-600">{progress.detail}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {progress.canPause ? (
+            <button
+              className="rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-800 disabled:cursor-not-allowed disabled:text-slate-400"
+              disabled={isPausing}
+              onClick={onPause}
+              type="button"
+            >
+              {isPausing ? "Pausing..." : "Pause search"}
+            </button>
+          ) : null}
+          <span className="rounded-md bg-white px-2 py-1 text-xs font-medium text-sky-800">
+            {progress.percent}%
+          </span>
+        </div>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-sky-700 transition-all"
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Sources checked</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.checkedSources}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Records found</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.foundRecords}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Not found</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.notFoundSources}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Entries done</dt>
+          <dd className="mt-1 font-semibold text-slate-950">
+            {progress.processedEnzymes}/{progress.totalEnzymes}
+          </dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Current step</dt>
+          <dd className="mt-1 break-words font-semibold text-slate-950">{progress.stage ?? "-"}</dd>
+        </div>
+      </dl>
+      {progress.summary ? <p className="mt-3 text-emerald-800">{progress.summary}</p> : null}
+      {progress.warnings.length > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+          <p className="font-medium">Warnings</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {progress.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

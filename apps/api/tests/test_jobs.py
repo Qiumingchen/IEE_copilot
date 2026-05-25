@@ -70,3 +70,50 @@ def test_retry_rejects_non_failed_job(client, db_session, monkeypatch):
 
     assert response.status_code == 409
     assert "only failed jobs can be retried" in response.json()["error"]["message"]
+
+
+def test_cancel_running_real_data_refresh_job(client, db_session):
+    headers = _auth_headers(client, email="cancel-real-data@example.com")
+    user = db_session.scalar(select(User).where(User.email == "cancel-real-data@example.com"))
+    assert user is not None
+    job = AnalysisJob(
+        job_type="real_data_refresh",
+        status=JobStatus.RUNNING,
+        parameters_json={
+            "scope": "enzyme",
+            "progress": {
+                "checked_sources": 2,
+                "found_records": 1,
+                "not_found_sources": 1,
+            },
+        },
+        created_by=user.id,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    response = client.post(f"/jobs/{job.id}/cancel", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "cancelled"
+    assert body["result_summary_json"]["message"] == "real data refresh cancellation requested"
+    assert body["result_summary_json"]["progress"] == {
+        "checked_sources": 2,
+        "found_records": 1,
+        "not_found_sources": 1,
+    }
+
+
+def test_cancel_rejects_finished_job(client, db_session):
+    headers = _auth_headers(client, email="cancel-finished@example.com")
+    user = db_session.scalar(select(User).where(User.email == "cancel-finished@example.com"))
+    assert user is not None
+    job = AnalysisJob(job_type="real_data_refresh", status=JobStatus.FINISHED, created_by=user.id)
+    db_session.add(job)
+    db_session.commit()
+
+    response = client.post(f"/jobs/{job.id}/cancel", headers=headers)
+
+    assert response.status_code == 409
+    assert "only queued or running jobs can be cancelled" in response.json()["error"]["message"]

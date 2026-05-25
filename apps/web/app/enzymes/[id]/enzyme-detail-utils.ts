@@ -1,5 +1,6 @@
 import type {
   EnzymeSummary,
+  JobResponse,
   KineticRecord,
   LiteratureReferenceRecord,
   PropertyRecord
@@ -26,6 +27,20 @@ export type ParsedEvidenceText = {
   source: string;
   quality: string | null;
   excerpt: string | null;
+};
+export type RealDataRefreshProgress = {
+  percent: number;
+  title: string;
+  detail: string;
+  summary: string | null;
+  warnings: string[];
+  checkedSources: number;
+  foundRecords: number;
+  notFoundSources: number;
+  processedEnzymes: number;
+  totalEnzymes: number;
+  stage: string | null;
+  canPause: boolean;
 };
 
 export function formatReferenceForTable(
@@ -81,6 +96,72 @@ export function formatRealDataRefreshSummary(
     .join(", ");
   const sourceText = sources.length > 0 ? sources.join(", ") : "real providers";
   return `Fetched real data: ${counts}. Sources: ${sourceText}.`;
+}
+
+export function buildRealDataRefreshProgress(
+  job: Pick<JobResponse, "id" | "status" | "job_type" | "parameters_json" | "result_summary_json" | "error_message">
+): RealDataRefreshProgress {
+  const scope = job.parameters_json?.scope === "family" ? "Family" : "Enzyme";
+  const progress = realDataRefreshProgressDetails(job);
+  const created = isRecordCountMap(job.result_summary_json?.created) ? job.result_summary_json.created : {};
+  const sources = stringArray(job.result_summary_json?.sources);
+  const summary =
+    Object.values(created).some((count) => count > 0) || sources.length > 0
+      ? formatRealDataRefreshSummary(created, sources)
+      : null;
+  if (job.status === "finished") {
+    return {
+      percent: 100,
+      title: "Fetch real data complete",
+      detail: `${scope} real-data refresh job ${job.id} finished.`,
+      summary: formatRealDataRefreshSummary(created, sources),
+      warnings: stringArray(job.result_summary_json?.warnings),
+      ...progress,
+      canPause: false
+    };
+  }
+  if (job.status === "failed") {
+    return {
+      percent: 100,
+      title: "Fetch real data failed",
+      detail: job.error_message || `Real-data refresh job ${job.id} failed.`,
+      summary: null,
+      warnings: [],
+      ...progress,
+      canPause: false
+    };
+  }
+  if (job.status === "cancelled") {
+    return {
+      percent: 100,
+      title: "Fetch real data paused",
+      detail: `${scope} real-data refresh job ${job.id} was paused. Saved records can be reviewed now.`,
+      summary,
+      warnings: stringArray(job.result_summary_json?.warnings),
+      ...progress,
+      canPause: false
+    };
+  }
+  if (job.status === "running") {
+    return {
+      percent: realDataRefreshPercent(job.status, progress),
+      title: "Fetching real data",
+      detail: `${scope} real-data refresh job ${job.id} is collecting external records.`,
+      summary,
+      warnings: stringArray(job.result_summary_json?.warnings),
+      ...progress,
+      canPause: true
+    };
+  }
+  return {
+    percent: 15,
+    title: "Fetch real data queued",
+    detail: `${scope} real-data refresh job ${job.id} is waiting for the worker.`,
+    summary: null,
+    warnings: [],
+    ...progress,
+    canPause: true
+  };
 }
 
 export function shouldShowOverviewTable(kind: OverviewTableKind, recordCount: number): boolean {
@@ -152,4 +233,55 @@ function comparisonMetricValue(
 
 function hasText(value: string | null | undefined): value is string {
   return Boolean(value?.trim());
+}
+
+function realDataRefreshProgressDetails(
+  job: Pick<JobResponse, "parameters_json" | "result_summary_json">
+): Omit<RealDataRefreshProgress, "percent" | "title" | "detail" | "summary" | "warnings" | "canPause"> {
+  const progress =
+    isProgressRecord(job.result_summary_json?.progress) ? job.result_summary_json.progress
+    : isProgressRecord(job.parameters_json?.progress) ? job.parameters_json.progress
+    : null;
+  return {
+    checkedSources: numberFromProgress(progress?.checked_sources),
+    foundRecords: numberFromProgress(progress?.found_records),
+    notFoundSources: numberFromProgress(progress?.not_found_sources),
+    processedEnzymes: numberFromProgress(progress?.processed_enzymes),
+    totalEnzymes: numberFromProgress(progress?.total_enzymes),
+    stage: typeof progress?.stage === "string" ? progress.stage : null
+  };
+}
+
+function realDataRefreshPercent(
+  status: string,
+  progress: Pick<RealDataRefreshProgress, "checkedSources" | "totalEnzymes">
+): number {
+  if (status !== "running") {
+    return status === "queued" ? 15 : 100;
+  }
+  const expectedChecks = Math.max(1, progress.totalEnzymes * 3);
+  if (progress.checkedSources <= 0) {
+    return 25;
+  }
+  return Math.min(95, Math.max(25, Math.round(20 + (progress.checkedSources / expectedChecks) * 90)));
+}
+
+function isProgressRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function numberFromProgress(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isRecordCountMap(value: unknown): value is Record<string, number> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.values(value).every((item) => typeof item === "number")
+  );
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }

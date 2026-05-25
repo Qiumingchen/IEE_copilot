@@ -24,6 +24,7 @@ from worker.jobs import (
     finish_mutation_recommendation_job,
     finish_msa_job,
     finish_placeholder_job,
+    finish_real_data_refresh_job,
     finish_rosetta_ddg_job,
     mark_job_failed,
 )
@@ -157,6 +158,135 @@ def test_finish_placeholder_job_builds_real_local_family_profile_summary():
     assert artifact is not None
     assert artifact.artifact_type == "family_profile_summary"
     assert artifact.size_bytes > 0
+
+
+def test_finish_real_data_refresh_job_updates_status_and_summary(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def fake_save_literature(_db, _enzyme, *, require_real):
+        assert require_real is True
+        return 1, ["crossref"], []
+
+    def fake_save_external_data(_db, _enzyme, *, require_real):
+        assert require_real is True
+        return {"properties": 2, "kinetics": 0, "mutations": 0}, ["europepmc", "europepmc"], [
+            "one source was temporarily unavailable"
+        ]
+
+    def fake_save_alphafold(_db, _enzyme, *, require_real):
+        assert require_real is True
+        return 0, [], []
+
+    monkeypatch.setattr("app.api.routes.enzymes._save_literature_for_enzyme", fake_save_literature)
+    monkeypatch.setattr("app.api.routes.enzymes._save_external_enzyme_data", fake_save_external_data)
+    monkeypatch.setattr("app.api.routes.enzymes._save_alphafold_structure_for_enzyme", fake_save_alphafold)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Worker real data enzyme",
+            organism="Streptomyces mobaraensis",
+            uniprot_id="P81453",
+            source="uniprot",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="real_data_refresh",
+            status=JobStatus.QUEUED,
+            parameters_json={"scope": "enzyme"},
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        finish_real_data_refresh_job(db, job.id)
+
+        db.refresh(job)
+
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json == {
+        "message": "real data refresh completed",
+        "scope": "enzyme",
+        "created": {"references": 1, "properties": 2, "kinetics": 0, "mutations": 0, "structures": 0},
+        "sources": ["crossref", "europepmc"],
+        "warnings": ["one source was temporarily unavailable"],
+        "progress": {
+            "checked_sources": 3,
+            "found_records": 3,
+            "not_found_sources": 1,
+            "processed_enzymes": 1,
+            "total_enzymes": 1,
+            "stage": "completed",
+        },
+    }
+
+
+def test_finish_real_data_refresh_job_stops_after_cancel_request(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    calls = []
+
+    def fake_save_literature(db, _enzyme, *, require_real):
+        assert require_real is True
+        calls.append("literature")
+        job = db.scalar(select(AnalysisJob).where(AnalysisJob.job_type == "real_data_refresh"))
+        job.status = JobStatus.CANCELLED
+        db.commit()
+        return 1, ["crossref"], []
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("cancelled real data refresh should not continue to next source")
+
+    monkeypatch.setattr("app.api.routes.enzymes._save_literature_for_enzyme", fake_save_literature)
+    monkeypatch.setattr("app.api.routes.enzymes._save_external_enzyme_data", fail_if_called)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Cancellable real data enzyme",
+            organism="Streptomyces mobaraensis",
+            uniprot_id="P81453",
+            source="uniprot",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="real_data_refresh",
+            status=JobStatus.QUEUED,
+            parameters_json={"scope": "enzyme"},
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        finish_real_data_refresh_job(db, job.id)
+
+        db.refresh(job)
+
+    assert calls == ["literature"]
+    assert job.status == JobStatus.CANCELLED
+    assert job.result_summary_json["message"] == "real data refresh cancelled"
+    assert job.result_summary_json["created"]["references"] == 1
+    assert job.result_summary_json["progress"]["checked_sources"] == 1
+    assert job.result_summary_json["progress"]["found_records"] == 1
 
 
 def test_finish_homology_collection_job_creates_homolog_sequence_artifact(monkeypatch):

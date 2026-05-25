@@ -3263,6 +3263,114 @@ def test_real_data_refresh_rejects_mock_provider(client, db_session):
     assert db_session.scalar(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)) is None
 
 
+def test_real_data_refresh_job_endpoint_enqueues_without_fetching_inline(client, db_session, monkeypatch):
+    enqueued_job_ids = []
+
+    class RealDataRefreshTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    def fail_if_called():
+        raise AssertionError("real data refresh should run in the worker, not in the request")
+
+    monkeypatch.setattr("app.api.routes.enzymes.run_real_data_refresh", RealDataRefreshTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", fail_if_called)
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Async real data mTGase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "async-real-data@example.com",
+            "password": "search-password",
+            "display_name": "Async Real Data",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "async-real-data@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh-job",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_type"] == "real_data_refresh"
+    assert body["status"] == "queued"
+    assert body["enzyme_entry_id"] == enzyme.id
+    assert body["parameters_json"] == {"scope": "enzyme"}
+    assert enqueued_job_ids == [body["id"]]
+
+
+def test_family_real_data_refresh_job_endpoint_enqueues_family_scope(client, db_session, monkeypatch):
+    enqueued_job_ids = []
+
+    class RealDataRefreshTask:
+        @staticmethod
+        def delay(job_id):
+            enqueued_job_ids.append(job_id)
+
+    monkeypatch.setattr("app.api.routes.enzymes.run_real_data_refresh", RealDataRefreshTask, raising=False)
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Async family real data mTGase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "async-family-real-data@example.com",
+            "password": "search-password",
+            "display_name": "Async Family Real Data",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "async-family-real-data@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/family-real-data/refresh-job",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_type"] == "real_data_refresh"
+    assert body["parameters_json"] == {"scope": "family"}
+    assert enqueued_job_ids == [body["id"]]
+
+
 def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch):
     enqueued_job_ids = []
 

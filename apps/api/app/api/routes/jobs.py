@@ -64,3 +64,31 @@ def retry_job(
     db.refresh(job)
     run_rosetta_ddg.delay(job.id)
     return job
+
+
+@router.post("/{job_id}/cancel", response_model=JobResponse)
+def cancel_job(
+    job_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    job = db.scalar(
+        select(AnalysisJob).where(AnalysisJob.id == job_id, AnalysisJob.created_by == user.id)
+    )
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    if job.status not in {JobStatus.QUEUED, JobStatus.RUNNING}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="only queued or running jobs can be cancelled",
+        )
+
+    summary = dict(job.result_summary_json or {})
+    summary["message"] = "real data refresh cancellation requested"
+    if job.parameters_json and "progress" in job.parameters_json:
+        summary["progress"] = job.parameters_json["progress"]
+    job.status = JobStatus.CANCELLED
+    job.result_summary_json = summary
+    db.commit()
+    db.refresh(job)
+    return job

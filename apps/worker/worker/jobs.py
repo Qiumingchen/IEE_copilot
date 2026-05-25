@@ -790,6 +790,233 @@ def finish_library_design_job(db: Session, job_id: str, bucket: str) -> Analysis
     return job
 
 
+def finish_real_data_refresh_job(db: Session, job_id: str) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise ValueError(f"analysis job not found: {job_id}")
+    if job.enzyme_entry_id is None:
+        raise ValueError(f"analysis job has no enzyme entry: {job_id}")
+
+    enzyme = db.get(EnzymeEntry, job.enzyme_entry_id)
+    if enzyme is None:
+        raise ValueError(f"enzyme entry not found: {job.enzyme_entry_id}")
+
+    from app.api.routes import enzymes as enzyme_routes
+
+    created = {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0, "structures": 0}
+    sources: list[str] = []
+    warnings: list[str] = []
+    scope = (job.parameters_json or {}).get("scope", "enzyme")
+    if scope == "family":
+        family_entries = list(db.scalars(select(EnzymeEntry).where(EnzymeEntry.family_id == enzyme.family_id)))
+        target_enzymes = enzyme_routes._related_family_entries(db, enzyme, family_entries)
+    else:
+        target_enzymes = [enzyme]
+
+    progress = {
+        "checked_sources": 0,
+        "found_records": 0,
+        "not_found_sources": 0,
+        "processed_enzymes": 0,
+        "total_enzymes": len(target_enzymes),
+        "stage": "starting",
+    }
+
+    job.status = JobStatus.RUNNING
+    job.started_at = datetime.utcnow()
+    _update_real_data_refresh_progress(db, job, scope, created, sources, warnings, progress)
+
+    for target_enzyme in target_enzymes:
+        if _real_data_refresh_cancelled(db, job):
+            return _finish_cancelled_real_data_refresh_job(db, job, scope, created, sources, warnings, progress)
+
+        reference_count, reference_sources, reference_warnings = enzyme_routes._save_literature_for_enzyme(
+            db,
+            target_enzyme,
+            require_real=True,
+        )
+        _record_real_data_refresh_stage(
+            db,
+            job,
+            scope,
+            created,
+            sources,
+            warnings,
+            progress,
+            stage=f"literature: {target_enzyme.name}",
+            created_delta={"references": reference_count},
+            stage_sources=reference_sources,
+            stage_warnings=reference_warnings,
+        )
+        if _real_data_refresh_cancelled(db, job):
+            return _finish_cancelled_real_data_refresh_job(db, job, scope, created, sources, warnings, progress)
+
+        data_counts, data_sources, data_warnings = enzyme_routes._save_external_enzyme_data(
+            db,
+            target_enzyme,
+            require_real=True,
+        )
+        _record_real_data_refresh_stage(
+            db,
+            job,
+            scope,
+            created,
+            sources,
+            warnings,
+            progress,
+            stage=f"properties and kinetics: {target_enzyme.name}",
+            created_delta=data_counts,
+            stage_sources=data_sources,
+            stage_warnings=data_warnings,
+        )
+        if _real_data_refresh_cancelled(db, job):
+            return _finish_cancelled_real_data_refresh_job(db, job, scope, created, sources, warnings, progress)
+
+        structure_count, structure_sources, structure_warnings = enzyme_routes._save_alphafold_structure_for_enzyme(
+            db,
+            target_enzyme,
+            require_real=True,
+        )
+        _record_real_data_refresh_stage(
+            db,
+            job,
+            scope,
+            created,
+            sources,
+            warnings,
+            progress,
+            stage=f"AlphaFold structure: {target_enzyme.name}",
+            created_delta={"structures": structure_count},
+            stage_sources=structure_sources,
+            stage_warnings=structure_warnings,
+        )
+        if _real_data_refresh_cancelled(db, job):
+            return _finish_cancelled_real_data_refresh_job(db, job, scope, created, sources, warnings, progress)
+
+        if target_enzyme.pdb_id:
+            rcsb_count, rcsb_sources, rcsb_warnings = enzyme_routes._save_rcsb_structure_for_enzyme(
+                db,
+                target_enzyme,
+                pdb_id=target_enzyme.pdb_id,
+                require_real=True,
+            )
+            _record_real_data_refresh_stage(
+                db,
+                job,
+                scope,
+                created,
+                sources,
+                warnings,
+                progress,
+                stage=f"RCSB structure: {target_enzyme.name}",
+                created_delta={"structures": rcsb_count},
+                stage_sources=rcsb_sources,
+                stage_warnings=rcsb_warnings,
+            )
+
+        target_enzyme.last_refreshed_at = datetime.utcnow()
+        progress["processed_enzymes"] += 1
+        _update_real_data_refresh_progress(db, job, scope, created, sources, warnings, progress)
+
+    job.status = JobStatus.FINISHED
+    job.finished_at = datetime.utcnow()
+    progress["stage"] = "completed"
+    _update_real_data_refresh_progress(
+        db,
+        job,
+        scope,
+        created,
+        sources,
+        warnings,
+        progress,
+        message="real data refresh completed",
+    )
+    db.refresh(job)
+    return job
+
+
+def _record_real_data_refresh_stage(
+    db: Session,
+    job: AnalysisJob,
+    scope: str,
+    created: dict[str, int],
+    sources: list[str],
+    warnings: list[str],
+    progress: dict[str, int | str],
+    *,
+    stage: str,
+    created_delta: dict[str, int],
+    stage_sources: list[str],
+    stage_warnings: list[str],
+) -> None:
+    found_records = sum(created_delta.values())
+    for key, count in created_delta.items():
+        created[key] = created.get(key, 0) + count
+    sources.extend(stage_sources)
+    warnings.extend(stage_warnings)
+    progress["checked_sources"] += 1
+    progress["found_records"] += found_records
+    if found_records == 0:
+        progress["not_found_sources"] += 1
+    progress["stage"] = stage
+    _update_real_data_refresh_progress(db, job, scope, created, sources, warnings, progress)
+
+
+def _real_data_refresh_cancelled(db: Session, job: AnalysisJob) -> bool:
+    db.refresh(job)
+    return job.status == JobStatus.CANCELLED
+
+
+def _finish_cancelled_real_data_refresh_job(
+    db: Session,
+    job: AnalysisJob,
+    scope: str,
+    created: dict[str, int],
+    sources: list[str],
+    warnings: list[str],
+    progress: dict[str, int | str],
+) -> AnalysisJob:
+    job.status = JobStatus.CANCELLED
+    job.finished_at = datetime.utcnow()
+    progress["stage"] = "cancelled"
+    _update_real_data_refresh_progress(
+        db,
+        job,
+        scope,
+        created,
+        sources,
+        warnings,
+        progress,
+        message="real data refresh cancelled",
+    )
+    db.refresh(job)
+    return job
+
+
+def _update_real_data_refresh_progress(
+    db: Session,
+    job: AnalysisJob,
+    scope: str,
+    created: dict[str, int],
+    sources: list[str],
+    warnings: list[str],
+    progress: dict[str, int | str],
+    *,
+    message: str = "real data refresh in progress",
+) -> None:
+    progress_snapshot = dict(progress)
+    job.parameters_json = {**(job.parameters_json or {}), "progress": progress_snapshot}
+    job.result_summary_json = {
+        "message": message,
+        "scope": scope,
+        "created": dict(created),
+        "sources": sorted(set(sources)),
+        "warnings": list(warnings),
+        "progress": progress_snapshot,
+    }
+    db.commit()
+
+
 def mark_job_failed(db: Session, job_id: str, error_message: str) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -808,6 +1035,18 @@ def run_placeholder_analysis(_task, job_id: str) -> str:
     try:
         with SessionLocal() as db:
             job = finish_placeholder_job(db, job_id, bucket=get_settings().minio_bucket)
+            return job.id
+    except Exception as exc:
+        with SessionLocal() as db:
+            mark_job_failed(db, job_id, str(exc))
+        raise
+
+
+@celery_app.task(bind=True, name="worker.jobs.run_real_data_refresh")
+def run_real_data_refresh(_task, job_id: str) -> str:
+    try:
+        with SessionLocal() as db:
+            job = finish_real_data_refresh_job(db, job_id)
             return job.id
     except Exception as exc:
         with SessionLocal() as db:

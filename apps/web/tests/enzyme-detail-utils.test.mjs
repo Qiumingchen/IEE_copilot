@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildFamilyComparisonRow,
   formatConditionEvidence,
+  buildRealDataRefreshProgress,
   parseEvidenceText,
   formatRealDataRefreshSummary,
   formatReferenceForTable,
@@ -82,6 +83,170 @@ test("formatRealDataRefreshSummary reports created records and sources", () => {
       ["crossref", "europepmc"]
     ),
     "Fetched real data: references 1, properties 2, kinetics 1, mutations 1, structures 0. Sources: crossref, europepmc."
+  );
+});
+
+test("buildRealDataRefreshProgress maps queued and running jobs to progress messages", () => {
+  assert.deepEqual(
+    buildRealDataRefreshProgress({
+      id: "job-1",
+      status: "queued",
+      job_type: "real_data_refresh",
+      parameters_json: { scope: "family" },
+      result_summary_json: null,
+      error_message: null
+    }),
+    {
+      percent: 15,
+      title: "Fetch real data queued",
+      detail: "Family real-data refresh job job-1 is waiting for the worker.",
+      summary: null,
+      warnings: [],
+      checkedSources: 0,
+      foundRecords: 0,
+      notFoundSources: 0,
+      processedEnzymes: 0,
+      totalEnzymes: 0,
+      stage: null,
+      canPause: true
+    }
+  );
+  assert.deepEqual(
+    buildRealDataRefreshProgress({
+      id: "job-2",
+      status: "running",
+      job_type: "real_data_refresh",
+      parameters_json: { scope: "enzyme" },
+      result_summary_json: {
+        created: { references: 1, properties: 1, kinetics: 0, mutations: 0, structures: 0 },
+        sources: ["crossref", "europepmc"],
+        progress: {
+          checked_sources: 2,
+          found_records: 2,
+          not_found_sources: 0,
+          processed_enzymes: 0,
+          total_enzymes: 1,
+          stage: "properties and kinetics: TGase"
+        }
+      },
+      error_message: null
+    }),
+    {
+      percent: 80,
+      title: "Fetching real data",
+      detail: "Enzyme real-data refresh job job-2 is collecting external records.",
+      summary:
+        "Fetched real data: references 1, properties 1, kinetics 0, mutations 0, structures 0. Sources: crossref, europepmc.",
+      warnings: [],
+      checkedSources: 2,
+      foundRecords: 2,
+      notFoundSources: 0,
+      processedEnzymes: 0,
+      totalEnzymes: 1,
+      stage: "properties and kinetics: TGase",
+      canPause: true
+    }
+  );
+});
+
+test("buildRealDataRefreshProgress reports finished job counts and warnings", () => {
+  assert.deepEqual(
+    buildRealDataRefreshProgress({
+      id: "job-3",
+      status: "finished",
+      job_type: "real_data_refresh",
+      parameters_json: { scope: "enzyme" },
+      result_summary_json: {
+        created: { references: 2, properties: 3, kinetics: 1, mutations: 0, structures: 1 },
+        sources: ["crossref", "europepmc"],
+        warnings: ["Semantic Scholar unavailable"]
+      },
+      error_message: null
+    }),
+    {
+      percent: 100,
+      title: "Fetch real data complete",
+      detail: "Enzyme real-data refresh job job-3 finished.",
+      summary:
+        "Fetched real data: references 2, properties 3, kinetics 1, mutations 0, structures 1. Sources: crossref, europepmc.",
+      warnings: ["Semantic Scholar unavailable"],
+      checkedSources: 0,
+      foundRecords: 0,
+      notFoundSources: 0,
+      processedEnzymes: 0,
+      totalEnzymes: 0,
+      stage: null,
+      canPause: false
+    }
+  );
+});
+
+test("buildRealDataRefreshProgress reports failed job error", () => {
+  assert.deepEqual(
+    buildRealDataRefreshProgress({
+      id: "job-4",
+      status: "failed",
+      job_type: "real_data_refresh",
+      parameters_json: { scope: "family" },
+      result_summary_json: null,
+      error_message: "Europe PMC timed out"
+    }),
+    {
+      percent: 100,
+      title: "Fetch real data failed",
+      detail: "Europe PMC timed out",
+      summary: null,
+      warnings: [],
+      checkedSources: 0,
+      foundRecords: 0,
+      notFoundSources: 0,
+      processedEnzymes: 0,
+      totalEnzymes: 0,
+      stage: null,
+      canPause: false
+    }
+  );
+});
+
+test("buildRealDataRefreshProgress reports paused job progress", () => {
+  assert.deepEqual(
+    buildRealDataRefreshProgress({
+      id: "job-5",
+      status: "cancelled",
+      job_type: "real_data_refresh",
+      parameters_json: {
+        scope: "family",
+        progress: {
+          checked_sources: 4,
+          found_records: 2,
+          not_found_sources: 2,
+          processed_enzymes: 1,
+          total_enzymes: 3,
+          stage: "cancelled"
+        }
+      },
+      result_summary_json: {
+        created: { references: 1, properties: 1, kinetics: 0, mutations: 0, structures: 0 },
+        sources: ["crossref"],
+        warnings: ["OpenAlex unavailable"]
+      },
+      error_message: null
+    }),
+    {
+      percent: 100,
+      title: "Fetch real data paused",
+      detail: "Family real-data refresh job job-5 was paused. Saved records can be reviewed now.",
+      summary:
+        "Fetched real data: references 1, properties 1, kinetics 0, mutations 0, structures 0. Sources: crossref.",
+      warnings: ["OpenAlex unavailable"],
+      checkedSources: 4,
+      foundRecords: 2,
+      notFoundSources: 2,
+      processedEnzymes: 1,
+      totalEnzymes: 3,
+      stage: "cancelled",
+      canPause: false
+    }
   );
 });
 
