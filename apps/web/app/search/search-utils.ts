@@ -22,16 +22,17 @@ export function searchResultMatches(result: SearchResponse): EnzymeSummary[] {
 }
 
 export function formatSearchMatchSubtitle(match: EnzymeSummary): string {
-  return [
+  const subtitle = [
     shouldShowFamily(match) ? `Family ${match.family_name}` : null,
     match.organism,
     match.ec_number ? `EC ${match.ec_number}` : null,
     match.uniprot_id ? `UniProt ${match.uniprot_id}` : null,
     match.pdb_id ? `RCSB PDB ${match.pdb_id}` : null,
     match.alphafold_id ? `AlphaFold ${match.alphafold_id}` : null
-  ]
+    ]
     .filter(Boolean)
-    .join(" | ") || "Source details not reported";
+    .join(" | ");
+  return subtitle;
 }
 
 function shouldShowFamily(match: EnzymeSummary): boolean {
@@ -66,7 +67,7 @@ export function formatRecordCoverageBadges(enzyme: EnzymeSummary): string[] {
     counts.expression > 0 ? `${counts.expression} expression` : null
   ].filter((badge): badge is string => Boolean(badge));
 
-  return badges.length > 0 ? badges : ["Real data not fetched"];
+  return badges;
 }
 
 export function formatSearchProvenanceSummary(provenance: ProvenanceRecord | null | undefined): string {

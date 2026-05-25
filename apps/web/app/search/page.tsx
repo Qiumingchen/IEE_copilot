@@ -453,22 +453,7 @@ export default function SearchPage() {
 
           <div className="mt-5 grid gap-3">
             {pagedSearchMatches.items.map((match) => (
-              <Link
-                className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
-                href={`/enzymes/${match.id}`}
-                key={match.id}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-950">{match.name}</h3>
-                    <p className="mt-1 text-sm text-slate-600">{formatSearchMatchSubtitle(match)}</p>
-                    <MetricBadges enzyme={match} />
-                  </div>
-                  <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-                    {match.source}
-                  </span>
-                </div>
-              </Link>
+              <SearchMatchCard key={match.id} match={match} />
             ))}
           </div>
           <PaginationControls
@@ -589,5 +574,27 @@ function MetricBadges({ enzyme }: { enzyme: SearchResponse["enzyme"] }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function SearchMatchCard({ match }: { match: SearchResponse["matches"][number] }) {
+  const subtitle = formatSearchMatchSubtitle(match);
+
+  return (
+    <Link
+      className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
+      href={`/enzymes/${match.id}`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">{match.name}</h3>
+          {subtitle ? <p className="mt-1 text-sm text-slate-600">{subtitle}</p> : null}
+          <MetricBadges enzyme={match} />
+        </div>
+        <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+          {match.source}
+        </span>
+      </div>
+    </Link>
   );
 }

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     allow_science_fallbacks: bool = False
     use_real_science_providers: bool = True
     homolog_provider_fetch_size: int = 25
+    enzyme_data_provider_fetch_size: int = 10
     sequence_similarity_fasta_path: str | None = None
     sequence_similarity_command: str | None = None
     mafft_bin: str | None = None

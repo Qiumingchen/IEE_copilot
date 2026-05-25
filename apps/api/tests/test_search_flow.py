@@ -9,6 +9,7 @@ from app.db.models import (
     EnzymeFamily,
     EnzymeModule,
     ExpressionRecord,
+    JobStatus,
     KineticRecord,
     LiteratureReference,
     MutationRecord,
@@ -132,7 +133,7 @@ def test_cached_mock_mtgase_search_repairs_old_uniprot_mock_sequence(
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -217,7 +218,7 @@ def test_enzyme_search_creates_family_profile_job(client, monkeypatch):
             enqueued_job_ids.append(job_id)
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -270,7 +271,7 @@ def test_enzyme_search_returns_clickable_source_matches(client, db_session, monk
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -359,7 +360,7 @@ def test_enzyme_search_orders_source_matches_by_reviewed_temperature_and_activit
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -466,7 +467,7 @@ def test_enzyme_search_summarizes_available_real_records(client, db_session, mon
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -731,7 +732,7 @@ def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -809,7 +810,7 @@ def test_real_provider_search_excludes_mock_and_seed_entries_from_matches(client
     db_session.commit()
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -889,7 +890,7 @@ def test_real_provider_search_does_not_persist_mock_enrichment_data(client, db_s
             return f">sp|{accession}|MTG_STREMO\n{P81453_FULL_SEQUENCE}\n"
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -947,7 +948,7 @@ def test_real_provider_search_summary_ignores_existing_mock_records(client, db_s
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1054,6 +1055,7 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     property_type="optimal_temperature",
                     value_original="62",
                     unit_original="degC",
+                    organism="Streptomyces mobaraensis",
                     source=self.source,
                     evidence="Europe PMC PMID:123 optimum temperature",
                     reference_title="Real Europe PMC enzyme data",
@@ -1069,6 +1071,7 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                 ExternalPropertyDatum(
                     property_type="optimal_pH",
                     value_original="7.5",
+                    organism="Streptomyces mobaraensis",
                     source=self.source,
                     evidence="Europe PMC PMID:123 optimum pH",
                     reference_title="Real Europe PMC enzyme data",
@@ -1086,6 +1089,7 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                     km="1.8",
                     kcat="24.0",
                     unit_original="mM; s^-1",
+                    organism="Streptomyces mobaraensis",
                     source=self.source,
                     evidence="Europe PMC PMID:123 kinetic parameters",
                     reference_title="Real Europe PMC enzyme data",
@@ -1101,6 +1105,7 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
                 ExternalMutantRecord(
                     mutation_string="A10V",
                     effect_summary="Real literature mention: A10V improved thermostability.",
+                    organism="Streptomyces mobaraensis",
                     source=self.source,
                     evidence="Europe PMC PMID:123 mutant",
                     reference_title="Real Europe PMC enzyme data",
@@ -1181,6 +1186,343 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert mutations[0].reference_id == europepmc_reference.id
 
 
+def test_real_data_refresh_skips_weak_literature_records_without_organism(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class AmbiguousDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="70",
+                    unit_original="degC",
+                    source=self.source,
+                    evidence="Europe PMC abstract did not identify organism",
+                    reference_title="Ambiguous enzyme paper",
+                    pubmed_id="999",
+                ),
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="68",
+                    unit_original="degC",
+                    source="openalex",
+                    evidence="OpenAlex abstract did not identify organism",
+                    reference_title="Ambiguous OpenAlex enzyme paper",
+                    doi="10.1000/ambiguous-openalex",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="casein",
+                    km="3.0",
+                    source="pubmed",
+                    evidence="PubMed abstract did not identify organism",
+                    reference_title="Ambiguous kinetic paper",
+                    pubmed_id="998",
+                ),
+                ExternalKineticParameter(
+                    substrate="gelatin",
+                    km="2.0",
+                    source="semanticscholar",
+                    evidence="Semantic Scholar abstract did not identify organism",
+                    reference_title="Ambiguous Semantic Scholar kinetic paper",
+                    doi="10.1000/ambiguous-semanticscholar",
+                )
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: AmbiguousDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Real microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "ambiguous-real-data@example.com",
+            "password": "search-password",
+            "display_name": "Ambiguous Real Data",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "ambiguous-real-data@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] == {"references": 0, "properties": 0, "kinetics": 0, "mutations": 0, "structures": 0}
+    assert any("no organism was extracted" in warning for warning in body["warnings"])
+    assert db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all() == []
+    assert db_session.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)).all() == []
+
+
+def test_real_data_refresh_routes_external_records_to_matching_family_organism(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class OrganismSpecificDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="60",
+                    unit_original="degC",
+                    organism="Bacillus licheniformis DSM 13",
+                    source=self.source,
+                    evidence="Europe PMC Bacillus licheniformis DSM 13 optimum temperature",
+                    reference_title="Bacillus licheniformis transglutaminase",
+                    journal="Food Enzymes",
+                    year=2024,
+                    doi="10.1000/bacillus-lgtgase",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="casein",
+                    km="2.0",
+                    organism="Bacillus licheniformis DSM 13",
+                    source=self.source,
+                    evidence="Europe PMC Bacillus licheniformis DSM 13 Km",
+                    reference_title="Bacillus licheniformis transglutaminase",
+                    journal="Food Enzymes",
+                    year=2024,
+                    doi="10.1000/bacillus-lgtgase",
+                )
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: OrganismSpecificDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferase",
+    )
+    db_session.add(family)
+    db_session.flush()
+    streptomyces = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    bacillus = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Bacillus licheniformis",
+        ec_number="2.3.2.13",
+        source="uniprot",
+        uniprot_id="A0A415J715",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add_all([streptomyces, bacillus])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "organism-routing@example.com",
+            "password": "search-password",
+            "display_name": "Organism Routing",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "organism-routing@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{streptomyces.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["properties"] == 1
+    assert response.json()["created"]["kinetics"] == 1
+    streptomyces_properties = db_session.scalars(
+        select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == streptomyces.id)
+    ).all()
+    bacillus_properties = db_session.scalars(
+        select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == bacillus.id)
+    ).all()
+    bacillus_kinetics = db_session.scalars(
+        select(KineticRecord).where(KineticRecord.enzyme_entry_id == bacillus.id)
+    ).all()
+    assert streptomyces_properties == []
+    assert [(record.property_type, record.value_original) for record in bacillus_properties] == [
+        ("optimal_temperature", "60")
+    ]
+    assert bacillus_kinetics[0].km == "2.0"
+
+
+def test_real_data_refresh_reports_multiple_enzyme_data_sources(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class MultiSourceDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="52",
+                    unit_original="degC",
+                    source="europepmc",
+                    evidence="Europe PMC optimum temperature",
+                    reference_title="Europe PMC enzyme paper",
+                    journal="Applied Enzymology",
+                    year=2024,
+                    doi="10.1000/europepmc-source",
+                ),
+                ExternalPropertyDatum(
+                    property_type="optimal_pH",
+                    value_original="8.0",
+                    source="pubmed",
+                    evidence="PubMed optimum pH",
+                    reference_title="PubMed enzyme paper",
+                    journal="Journal of Enzymes",
+                    year=2023,
+                    pubmed_id="45678901",
+                ),
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_specific_activity(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="CBZ-Gln-Gly",
+                    km="2.4",
+                    kcat="31",
+                    source="sabiork",
+                    evidence="SABIO-RK EntryID 12345 pmid:28193333",
+                    reference_title="SABIO-RK kinetic law",
+                    pubmed_id="28193333",
+                )
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: MultiSourceDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food enzymes",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food enzyme",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "multi-source-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Multi Source Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "multi-source-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert "europepmc" in response.json()["sources"]
+    assert "pubmed" in response.json()["sources"]
+    assert "sabiork" in response.json()["sources"]
+
+
 def test_real_data_refresh_backfills_reference_for_existing_real_property(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings
@@ -1196,6 +1538,7 @@ def test_real_data_refresh_backfills_reference_for_existing_real_property(client
                     property_type="optimal_temperature",
                     value_original="50",
                     unit_original="degC",
+                    organism="Streptomyces mobaraensis",
                     source=self.source,
                     evidence="Europe PMC PMID:28193333 optimum temperature",
                     reference_title="Characterization of microbial transglutaminase",
@@ -1463,6 +1806,7 @@ def test_family_real_data_refresh_updates_same_family_entries(client, db_session
                     property_type="optimal_temperature",
                     value_original=f"{query} 62",
                     unit_original="degC",
+                    organism=_organism_from_query(query),
                     source=self.source,
                     evidence=f"Europe PMC family property for {query}",
                 )
@@ -1476,6 +1820,11 @@ def test_family_real_data_refresh_updates_same_family_entries(client, db_session
 
         def fetch_mutants(self, query: str, size: int = 5):
             return []
+
+    def _organism_from_query(query: str):
+        if "Geobacillus stearothermophilus" in query:
+            return "Geobacillus stearothermophilus"
+        return "Bacillus subtilis"
 
     class RealLiteratureClient:
         source = "crossref"
@@ -1593,7 +1942,7 @@ def test_enzyme_search_reuses_fresh_search_cache(client, db_session, monkeypatch
             enqueued_job_ids.append(job_id)
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1645,7 +1994,7 @@ def test_enzyme_search_marks_stale_data_modules_for_partial_refresh(client, db_s
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1712,7 +2061,7 @@ def test_enzyme_search_refreshes_stale_search_cache(client, db_session, monkeypa
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1765,7 +2114,7 @@ def test_enzyme_search_hits_local_entry_by_pdb_id(client, db_session, monkeypatc
             enqueued_job_ids.append(job_id)
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1824,7 +2173,7 @@ def test_enzyme_search_hits_local_entry_by_alphafold_id(client, db_session, monk
             enqueued_job_ids.append(job_id)
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1875,6 +2224,73 @@ def test_enzyme_search_hits_local_entry_by_alphafold_id(client, db_session, monk
     assert enqueued_job_ids == [body["job_id"]]
 
 
+def test_enzyme_search_enqueues_real_homology_collection_job(client, db_session, monkeypatch):
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_homology_collection",
+        PlaceholderTask,
+        raising=False,
+    )
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Real job mTGase",
+        organism="Streptomyces mobaraensis",
+        uniprot_id="P81453",
+        source="local",
+        last_refreshed_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence=P81453_FULL_SEQUENCE,
+            mature_sequence=P81453_MATURE_SEQUENCE,
+            source="local",
+            checksum="real-job-sequence",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "homology-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Homology Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "homology-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "P81453"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"]
+
+    job = db_session.scalar(select(AnalysisJob).where(AnalysisJob.id == body["job_id"]))
+    assert job is not None
+    assert job.job_type == "homolog_collection"
+
+
 def test_enzyme_search_fetches_uniprot_entry_from_alphafold_id_when_not_local(
     client,
     db_session,
@@ -1914,7 +2330,7 @@ def test_enzyme_search_fetches_uniprot_entry_from_alphafold_id_when_not_local(
             return {"AlphaFoldDB": "AF-P81453-F1"}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -1958,7 +2374,7 @@ def test_enzyme_search_refreshes_stale_local_pdb_match(client, db_session, monke
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2013,7 +2429,7 @@ def test_enzyme_search_fetches_rcsb_metadata_when_pdb_not_local(client, db_sessi
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2075,7 +2491,7 @@ def test_enzyme_search_reports_rcsb_provider_failure_without_mock_fallback(
             raise httpx.ConnectError("rcsb offline")
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2116,7 +2532,7 @@ def test_enzyme_search_hits_level_two_sequence_similarity(client, db_session, mo
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2218,7 +2634,7 @@ def test_enzyme_search_uses_uniprot_connector_for_ec_refresh(client, db_session,
             return {"AlphaFoldDB": "AF-U11111-F1"}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2273,29 +2689,30 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
         def delay(job_id):
             return None
 
-    class EmptyLiteratureClient:
+    class UnexpectedLiteratureClient:
         source = "crossref"
 
         def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
-            return []
+            raise AssertionError("real search should not synchronously fetch literature")
 
-    class EmptyEnzymeDataClient:
+    class UnexpectedEnzymeDataClient:
         source = "europepmc"
 
         def fetch_opt_temperature(self, query: str, size: int = 5):
-            return []
+            raise AssertionError("real search should not synchronously fetch enzyme data")
 
         def fetch_opt_pH(self, query: str, size: int = 5):
-            return []
+            raise AssertionError("real search should not synchronously fetch enzyme data")
 
         def fetch_kinetic_parameters(self, query: str, size: int = 5):
-            return []
+            raise AssertionError("real search should not synchronously fetch enzyme data")
 
         def fetch_mutants(self, query: str, size: int = 5):
-            return []
+            raise AssertionError("real search should not synchronously fetch enzyme data")
 
     class FakeUniProtClient:
         source = "uniprot"
+        fetch_entry_calls: list[str] = []
 
         def search_by_ec(self, ec_number: str, size: int = 5):
             raise AssertionError("keyword search should not call EC search")
@@ -2359,11 +2776,11 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
         def fetch_model_by_uniprot(self, uniprot_id: str):
             raise ValueError("no AlphaFold model in this test")
 
-    monkeypatch.setattr("app.api.routes.enzymes.run_placeholder_analysis", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
-    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
-    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: UnexpectedLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: UnexpectedEnzymeDataClient())
 
     client.post(
         "/auth/register",
@@ -2386,13 +2803,203 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
 
     assert response.status_code == 200
     body = response.json()
-    assert [match["uniprot_id"] for match in body["matches"]] == ["R11111", "R22222", "R33333"]
+    assert {match["uniprot_id"] for match in body["matches"]} == {"R11111", "R22222", "R33333"}
     assert {match["source"] for match in body["matches"]} == {"uniprot"}
     assert body["enzyme"]["uniprot_id"] == "R11111"
     assert (
         db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == "R33333"))
         is not None
     )
+
+
+def test_cached_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sparse(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyAlphaFoldClient:
+        source = "alphafold"
+
+        def fetch_model_by_uniprot(self, uniprot_id: str):
+            raise ValueError("no AlphaFold model in this test")
+
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            raise AssertionError("keyword search should not call EC search")
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            assert keyword == "microbial transglutaminase"
+            assert size == 4
+            return [
+                UniProtSearchHit(
+                    accession="P81453",
+                    protein_name="Protein-glutamine gamma-glutamyltransferase",
+                    organism="Streptomyces mobaraensis",
+                    ec_number="2.3.2.13",
+                    score=90.0,
+                ),
+                UniProtSearchHit(
+                    accession="Q11111",
+                    protein_name="Protein-glutamine gamma-glutamyltransferase",
+                    organism="Streptomyces hygroscopicus",
+                    ec_number="2.3.2.13",
+                    score=80.0,
+                ),
+                UniProtSearchHit(
+                    accession="Q22222",
+                    protein_name="Protein-glutamine gamma-glutamyltransferase",
+                    organism="Streptomyces cinnamoneus",
+                    ec_number="2.3.2.13",
+                    score=70.0,
+                ),
+                UniProtSearchHit(
+                    accession="Q33333",
+                    protein_name="Protein-glutamine gamma-glutamyltransferase",
+                    organism="Streptomyces netropsis",
+                    ec_number="2.3.2.13",
+                    score=60.0,
+                ),
+            ]
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise AssertionError("keyword search should not call organism search")
+
+        def fetch_entry(self, accession: str):
+            self.__class__.fetch_entry_calls.append(accession)
+            organisms = {
+                "P81453": "Streptomyces mobaraensis",
+                "Q11111": "Streptomyces hygroscopicus",
+                "Q22222": "Streptomyces cinnamoneus",
+                "Q33333": "Streptomyces netropsis",
+            }
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Protein-glutamine gamma-glutamyltransferase",
+                organism=organisms[accession],
+                ec_number="2.3.2.13",
+                sequence=f"M{accession}SEQUENCE",
+                mature_sequence=f"MATURE{accession}",
+                reviewed=accession == "P81453",
+                cross_references={"AlphaFoldDB": f"AF-{accession}-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return f">sp|{accession}|TGASE\nM{accession}SEQUENCE\n"
+
+    FakeUniProtClient.fetch_entry_calls = []
+
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        ec_number="2.3.2.13",
+        uniprot_id="P81453",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    job = AnalysisJob(
+        enzyme_entry_id=enzyme.id,
+        job_type="homolog_collection",
+        status=JobStatus.FINISHED,
+    )
+    db_session.add(job)
+    db_session.flush()
+    db_session.add(
+        SearchCacheRecord(
+            query="microbial transglutaminase",
+            normalized_query="microbial transglutaminase",
+            query_kind="keyword",
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            enzyme_entry_id=enzyme.id,
+            payload_json={"job_id": job.id, "enzyme_entry_id": enzyme.id},
+            source="uniprot",
+            last_refreshed_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "cached-tgase-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Cached TGase Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "cached-tgase-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase", "result_limit": 4},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cache_status"] == "hit"
+    assert {match["uniprot_id"] for match in body["matches"]} == {
+        "P81453",
+        "Q11111",
+        "Q22222",
+        "Q33333",
+    }
+    assert FakeUniProtClient.fetch_entry_calls == []
+    assert {match["organism"] for match in body["matches"]} == {
+        "Streptomyces mobaraensis",
+        "Streptomyces hygroscopicus",
+        "Streptomyces cinnamoneus",
+        "Streptomyces netropsis",
+    }
 
 
 def test_keyword_search_passes_source_organism_to_uniprot(client, db_session, monkeypatch):
@@ -2467,7 +3074,7 @@ def test_keyword_search_passes_source_organism_to_uniprot(client, db_session, mo
         def fetch_fasta(self, accession: str):
             return ">sp|B11111|REAL\nMBACILLUSLIPASESEQUENCE\n"
 
-    monkeypatch.setattr("app.api.routes.enzymes.run_placeholder_analysis", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
     monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
@@ -2574,7 +3181,7 @@ def test_real_uniprot_keyword_search_creates_family_from_enzyme_class(client, db
         def fetch_fasta(self, accession: str):
             return ">sp|LIP001|LIPA_BACSU\nMLIPASESEQUENCE\n"
 
-    monkeypatch.setattr("app.api.routes.enzymes.run_placeholder_analysis", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
     monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
@@ -2643,7 +3250,7 @@ def test_enzyme_search_fetches_uniprot_accession_when_not_local(client, db_sessi
             return {}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2721,7 +3328,7 @@ def test_enzyme_search_records_uniprot_retrieval_provenance(client, db_session, 
             return {}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2793,7 +3400,7 @@ def test_enzyme_search_reports_uniprot_provider_failure_without_mock_fallback(
             raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2867,7 +3474,7 @@ def test_enzyme_search_saves_alphafold_structure_from_uniprot_cross_reference(
             return {"AlphaFoldDB": "AF-P99998-F1"}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -2954,7 +3561,7 @@ def test_enzyme_search_saves_rcsb_structure_from_uniprot_cross_reference(
             return {"PDB": "1ABC"}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3032,7 +3639,7 @@ def test_enzyme_search_uses_real_uniprot_reviewed_status(client, db_session, mon
             return {}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3109,7 +3716,7 @@ def test_enzyme_search_skips_alphafold_structure_when_real_provider_fails_withou
             raise httpx.ConnectError("alphafold offline")
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3197,7 +3804,7 @@ def test_enzyme_search_saves_literature_metadata_for_external_hit(
             return {}
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3254,7 +3861,7 @@ def test_enzyme_search_skips_literature_when_real_provider_fails_without_mock_fa
             raise httpx.ConnectError("crossref offline")
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3294,7 +3901,7 @@ def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, mo
             return None
 
     monkeypatch.setattr(
-        "app.api.routes.enzymes.run_placeholder_analysis",
+        "app.api.routes.enzymes.run_homology_collection",
         PlaceholderTask,
         raising=False,
     )
@@ -3336,6 +3943,7 @@ def test_enzyme_search_saves_external_enzyme_data_records(client, db_session, mo
     assert {(record.property_type, record.value_original) for record in properties} == {
         ("optimal_temperature", "55"),
         ("optimal_pH", "7.0"),
+        ("specific_activity", "120"),
     }
     assert all(record.evidence_text for record in properties)
     assert len(kinetics) == 1

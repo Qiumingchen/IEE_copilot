@@ -78,7 +78,7 @@ test("formatSearchMatchSubtitle combines organism identifiers and source details
       ec_number: null,
       uniprot_id: null
     }),
-    "Source details not reported"
+    ""
   );
   assert.equal(
     formatSearchMatchSubtitle({
@@ -129,7 +129,7 @@ test("sortSearchMatches supports reviewed temperature and activity ranking modes
 });
 
 test("formatRecordCoverageBadges summarizes fetched real data coverage", () => {
-  assert.deepEqual(formatRecordCoverageBadges(enzyme), ["Real data not fetched"]);
+  assert.deepEqual(formatRecordCoverageBadges(enzyme), []);
   assert.deepEqual(
     formatRecordCoverageBadges({
       ...enzyme,

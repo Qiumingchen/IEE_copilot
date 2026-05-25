@@ -199,6 +199,18 @@ def _literature_reference_response(reference: LiteratureReference) -> Literature
     )
 
 
+def _literature_reference_is_real(reference: LiteratureReference) -> bool:
+    metadata = reference.metadata_json or {}
+    provenance = metadata.get("provenance")
+    if _is_mock_like_source(reference.source):
+        return False
+    if isinstance(provenance, dict):
+        mode = provenance.get("mode")
+        if isinstance(mode, str) and mode.lower() == "fallback":
+            return False
+    return True
+
+
 def _optional_literature_reference_response(
     reference: LiteratureReference | None,
 ) -> LiteratureReferenceResponse | None:
@@ -217,7 +229,13 @@ def _references_by_id_for_records(
         for reference in db.scalars(
             select(LiteratureReference).where(LiteratureReference.id.in_(reference_ids))
         )
+        if not get_settings().use_real_science_providers or _literature_reference_is_real(reference)
     }
+
+
+def _record_has_allowed_reference(record, references_by_id: dict[str, LiteratureReference]) -> bool:
+    reference_id = getattr(record, "reference_id", None)
+    return not reference_id or reference_id in references_by_id
 
 
 def _is_mock_like_source(source: str | None) -> bool:
@@ -236,6 +254,23 @@ def _record_is_not_mock(record) -> bool:
         return not _is_mock_like_source(source)
     source = getattr(record, "source", None) or getattr(record, "method", None)
     return not _is_mock_like_source(source)
+
+
+def _structure_is_real_summary(structure: StructureEntry) -> bool:
+    return not (
+        _summary_has_fallback_provenance(structure.chain_summary)
+        or _summary_has_fallback_provenance(structure.ligand_summary)
+    )
+
+
+def _summary_has_fallback_provenance(summary: dict | None) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    provenance = summary.get("provenance")
+    if not isinstance(provenance, dict):
+        return False
+    mode = provenance.get("mode")
+    return isinstance(mode, str) and mode.lower() == "fallback"
 
 
 def _get_engineering_sequence(db: Session, enzyme_id: str) -> str:
@@ -1058,6 +1093,8 @@ def list_structures(
             query.order_by(StructureEntry.created_at)
         )
     )
+    if get_settings().use_real_science_providers:
+        structures = [structure for structure in structures if _structure_is_real_summary(structure)]
     return [
         _structure_response(
             structure,
@@ -1254,6 +1291,8 @@ def list_properties(
         )
     )
     references_by_id = _references_by_id_for_records(db, records)
+    if get_settings().use_real_science_providers:
+        records = [record for record in records if _record_has_allowed_reference(record, references_by_id)]
     return [
         _property_response(record, references_by_id.get(record.reference_id or ""))
         for record in records
@@ -1277,6 +1316,8 @@ def list_references(
             .order_by(LiteratureReference.year.desc().nullslast(), LiteratureReference.created_at)
         )
     )
+    if get_settings().use_real_science_providers:
+        references = [reference for reference in references if _literature_reference_is_real(reference)]
     return [_literature_reference_response(reference) for reference in references]
 
 
@@ -1442,6 +1483,10 @@ def list_mutations(
         _mutation_response(record, references_by_id.get(record.reference_id or ""))
         for record in records
         if (not get_settings().use_real_science_providers or _record_is_not_mock(record))
+        and (
+            not get_settings().use_real_science_providers
+            or _record_has_allowed_reference(record, references_by_id)
+        )
         and _mutation_record_matches_position(record, position)
         and _mutation_record_matches_source(record, source)
         and _mutation_record_matches_property_delta(record, property_delta_key, beneficial_only)
@@ -1464,6 +1509,8 @@ def list_kinetics(
         )
     )
     references_by_id = _references_by_id_for_records(db, records)
+    if get_settings().use_real_science_providers:
+        records = [record for record in records if _record_has_allowed_reference(record, references_by_id)]
     return [
         _kinetic_response(record, references_by_id.get(record.reference_id or ""))
         for record in records
@@ -1536,6 +1583,12 @@ def list_expression(
         )
     }
     references_by_id = _references_by_id_for_records(db, expressions)
+    if get_settings().use_real_science_providers:
+        expressions = [
+            expression
+            for expression in expressions
+            if _record_has_allowed_reference(expression, references_by_id)
+        ]
     return [
         _expression_response(
             expression,

@@ -20,14 +20,28 @@ import {
 import { formatProvenanceLabel, provenanceFromRecord, provenanceWarning } from "../../../lib/provenance";
 import type { EnzymeRecordBundle, LiteratureReferenceRecord, StructureRecord } from "../../../lib/types";
 import {
+  buildFamilyComparisonRow,
+  type FamilyComparisonMetric,
+  type FamilyComparisonRow,
   formatConditionEvidence,
+  formatFamilyComparisonMetric,
   formatRealDataRefreshSummary,
   formatReferenceForTable,
-  formatVisibilityStatus
+  formatVisibilityStatus,
+  overviewTableEmptyLabel,
+  parseEvidenceText,
+  shouldShowOverviewTable
 } from "./enzyme-detail-utils";
 import { ReferenceCitation } from "./ReferenceCitation";
 
 const TOKEN_KEY = "iee-copilot-token";
+
+const familyComparisonMetrics: FamilyComparisonMetric[] = [
+  "optimal_temperature",
+  "optimal_pH",
+  "specific_activity",
+  "kcat"
+];
 
 type EnzymeDetailClientProps = {
   enzymeId: string;
@@ -238,7 +252,16 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   const [isSavingExpression, setIsSavingExpression] = useState(false);
   const [isFetchingRealData, setIsFetchingRealData] = useState(false);
   const [isFetchingFamilyRealData, setIsFetchingFamilyRealData] = useState(false);
+  const [isComparingFamilyEntries, setIsComparingFamilyEntries] = useState(false);
   const [realDataNotice, setRealDataNotice] = useState<string | null>(null);
+  const [familyComparisonError, setFamilyComparisonError] = useState<string | null>(null);
+  const [selectedFamilyEntryIds, setSelectedFamilyEntryIds] = useState<string[]>([]);
+  const [selectedComparisonMetrics, setSelectedComparisonMetrics] = useState<FamilyComparisonMetric[]>([
+    "optimal_temperature",
+    "optimal_pH",
+    "specific_activity"
+  ]);
+  const [familyComparisonRows, setFamilyComparisonRows] = useState<FamilyComparisonRow[]>([]);
   const [substrateName, setSubstrateName] = useState("");
   const [substrateClass, setSubstrateClass] = useState("");
   const [substrateSmiles, setSubstrateSmiles] = useState("");
@@ -253,6 +276,10 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     () => bundle?.substrates.map((item) => ({ id: item.id, name: item.name })) ?? [],
     [bundle]
   );
+  const selectedFamilyEntries = useMemo(
+    () => bundle?.family_entries.filter((item) => selectedFamilyEntryIds.includes(item.id)) ?? [],
+    [bundle, selectedFamilyEntryIds]
+  );
 
   async function loadBundle(nextToken: string) {
     setError(null);
@@ -263,6 +290,9 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
         listEnzymeReferences(enzymeId, nextToken)
       ]);
       setBundle(nextBundle);
+      setSelectedFamilyEntryIds((current) =>
+        current.filter((entryId) => nextBundle.family_entries.some((item) => item.id === entryId))
+      );
       setReferencesById(Object.fromEntries(references.map((reference) => [reference.id, reference])));
     } catch {
       setError("Unable to load enzyme records. Please check the API service and your login.");
@@ -496,6 +526,64 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
       );
     } finally {
       setIsFetchingFamilyRealData(false);
+    }
+  }
+
+  function handleToggleFamilyEntry(entryId: string) {
+    setSelectedFamilyEntryIds((current) =>
+      current.includes(entryId)
+        ? current.filter((item) => item !== entryId)
+        : [...current, entryId]
+    );
+    setFamilyComparisonError(null);
+  }
+
+  function handleToggleAllFamilyEntries() {
+    if (!bundle) {
+      return;
+    }
+    setSelectedFamilyEntryIds((current) =>
+      current.length === bundle.family_entries.length ? [] : bundle.family_entries.map((item) => item.id)
+    );
+    setFamilyComparisonError(null);
+  }
+
+  function handleToggleComparisonMetric(metric: FamilyComparisonMetric) {
+    setSelectedComparisonMetrics((current) =>
+      current.includes(metric)
+        ? current.filter((item) => item !== metric)
+        : [...current, metric]
+    );
+    setFamilyComparisonError(null);
+  }
+
+  async function handleCompareFamilyEntries() {
+    if (!token || selectedFamilyEntries.length === 0 || selectedComparisonMetrics.length === 0) {
+      return;
+    }
+
+    setIsComparingFamilyEntries(true);
+    setFamilyComparisonError(null);
+    try {
+      const rows = await Promise.all(
+        selectedFamilyEntries.map(async (entry) => {
+          await refreshEnzymeRealData(entry.id, token).catch(() => null);
+          const entryBundle = await getEnzymeRecordBundle(entry.id, token);
+          return buildFamilyComparisonRow(
+            entryBundle.enzyme,
+            {
+              properties: entryBundle.properties,
+              kinetics: entryBundle.kinetics
+            },
+            selectedComparisonMetrics
+          );
+        })
+      );
+      setFamilyComparisonRows(rows);
+    } catch {
+      setFamilyComparisonError("Unable to compare selected enzymes. Cached records may be unavailable.");
+    } finally {
+      setIsComparingFamilyEntries(false);
     }
   }
 
@@ -1033,20 +1121,154 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
           ) : null}
 
           <section className="mt-8 grid gap-6">
-            <RecordTable
-              columns={["Name", "Organism", "EC", "UniProt", "Source", "Records"]}
-              rows={bundle.family_entries.map((item) => [
-                <Link className="font-medium text-slate-950 hover:underline" href={`/enzymes/${item.id}`}>
-                  {item.name}
-                </Link>,
-                textOrDash(item.organism),
-                textOrDash(item.ec_number),
-                textOrDash(item.uniprot_id),
-                item.source,
-                summarizeRecordCounts(item)
-              ])}
-              title={`Family entries${bundle.enzyme.family_name ? `: ${bundle.enzyme.family_name}` : ""}`}
-            />
+            <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-4 py-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <h2 className="text-base font-semibold text-slate-950">
+                    {`Family entries${bundle.enzyme.family_name ? `: ${bundle.enzyme.family_name}` : ""}`}
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    {familyComparisonMetrics.map((metric) => (
+                      <label
+                        className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2"
+                        key={metric}
+                      >
+                        <input
+                          checked={selectedComparisonMetrics.includes(metric)}
+                          className="h-4 w-4"
+                          onChange={() => handleToggleComparisonMetric(metric)}
+                          type="checkbox"
+                        />
+                        {formatFamilyComparisonMetric(metric)}
+                      </label>
+                    ))}
+                    <button
+                      className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                      disabled={
+                        isComparingFamilyEntries ||
+                        selectedFamilyEntryIds.length === 0 ||
+                        selectedComparisonMetrics.length === 0
+                      }
+                      onClick={handleCompareFamilyEntries}
+                      type="button"
+                    >
+                      {isComparingFamilyEntries ? "Comparing..." : "Compare"}
+                    </button>
+                  </div>
+                </div>
+                {familyComparisonError ? (
+                  <p className="mt-3 text-sm text-red-700">{familyComparisonError}</p>
+                ) : null}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                        <label className="flex items-center gap-2">
+                          <input
+                            checked={
+                              bundle.family_entries.length > 0 &&
+                              selectedFamilyEntryIds.length === bundle.family_entries.length
+                            }
+                            className="h-4 w-4"
+                            onChange={handleToggleAllFamilyEntries}
+                            type="checkbox"
+                          />
+                          Select
+                        </label>
+                      </th>
+                      {["Name", "Organism", "EC", "UniProt", "Source", "Records"].map((column) => (
+                        <th className="whitespace-nowrap px-4 py-3 font-medium" key={column} scope="col">
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {bundle.family_entries.length > 0 ? (
+                      bundle.family_entries.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 align-top">
+                            <input
+                              aria-label={`Select ${item.name}`}
+                              checked={selectedFamilyEntryIds.includes(item.id)}
+                              className="h-4 w-4"
+                              onChange={() => handleToggleFamilyEntry(item.id)}
+                              type="checkbox"
+                            />
+                          </td>
+                          <td className="max-w-xs px-4 py-3 align-top">
+                            <Link className="font-medium text-slate-950 hover:underline" href={`/enzymes/${item.id}`}>
+                              {item.name}
+                            </Link>
+                          </td>
+                          <td className="max-w-xs px-4 py-3 align-top">{textOrDash(item.organism)}</td>
+                          <td className="px-4 py-3 align-top">{textOrDash(item.ec_number)}</td>
+                          <td className="px-4 py-3 align-top">{textOrDash(item.uniprot_id)}</td>
+                          <td className="px-4 py-3 align-top">{item.source}</td>
+                          <td className="max-w-xs px-4 py-3 align-top">{summarizeRecordCounts(item)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="px-4 py-4 text-slate-500" colSpan={7}>
+                          No records
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {familyComparisonRows.length > 0 ? (
+                <div className="border-t border-slate-200 p-4">
+                  <h3 className="text-sm font-semibold text-slate-950">Comparison results</h3>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                            Enzyme
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                            Organism
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-3 font-medium" scope="col">
+                            UniProt
+                          </th>
+                          {selectedComparisonMetrics.map((metric) => (
+                            <th className="whitespace-nowrap px-4 py-3 font-medium" key={metric} scope="col">
+                              {formatFamilyComparisonMetric(metric)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {familyComparisonRows.map((row) => (
+                          <tr key={row.enzyme.id}>
+                            <td className="max-w-xs px-4 py-3 align-top">
+                              <Link
+                                className="font-medium text-slate-950 hover:underline"
+                                href={`/enzymes/${row.enzyme.id}`}
+                              >
+                                {row.enzyme.name}
+                              </Link>
+                            </td>
+                            <td className="max-w-xs px-4 py-3 align-top">{textOrDash(row.enzyme.organism)}</td>
+                            <td className="px-4 py-3 align-top">{textOrDash(row.enzyme.uniprot_id)}</td>
+                            {selectedComparisonMetrics.map((metric) => (
+                              <td className="px-4 py-3 align-top" key={`${row.enzyme.id}-${metric}`}>
+                                {row.values[metric]}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </section>
             <RecordTable
               columns={["Name", "Class", "SMILES"]}
               rows={bundle.substrates.map((item) => [
@@ -1080,52 +1302,57 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
                   fallback={formatReferenceForTable(item.reference_id, referencesById)}
                   reference={item.reference ?? referencesById[item.reference_id ?? ""]}
                 />,
-                textOrDash(item.evidence_text),
+                <EvidenceText value={item.evidence_text} />,
                 formatVisibilityStatus(item.visibility, item.curation_status)
               ])}
+              emptyLabel={overviewTableEmptyLabel("properties")}
               title="Properties"
             />
-            <RecordTable
-              columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay", "Reference", "Evidence", "Status"]}
-              rows={bundle.kinetics.map((item) => [
-                textOrDash(item.substrate),
-                textOrDash(item.km),
-                textOrDash(item.kcat),
-                textOrDash(item.kcat_km),
-                [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
-                <ReferenceCitation
-                  fallback={formatReferenceForTable(item.reference_id, referencesById)}
-                  reference={item.reference ?? referencesById[item.reference_id ?? ""]}
-                />,
-                textOrDash(item.evidence_text),
-                formatVisibilityStatus(item.visibility, item.curation_status)
-              ])}
-              title="Kinetics"
-            />
-            <RecordTable
-              columns={["Host", "Vector", "Level", "Soluble", "Condition", "Reference", "Evidence", "Status"]}
-              rows={bundle.expression.map((item) => [
-                textOrDash(item.expression_host),
-                textOrDash(item.vector),
-                textOrDash(item.expression_level_original),
-                textOrDash(item.soluble_expression),
-                item.condition
-                  ? [item.condition.assay_temperature, item.condition.assay_pH, item.condition.method]
-                      .filter(Boolean)
-                      .join(" / ")
-                  : "-",
-                <ReferenceCitation
-                  fallback={formatReferenceForTable(
-                    item.reference_id ?? item.condition?.reference_id,
-                    referencesById
-                  )}
-                  reference={item.reference ?? referencesById[item.reference_id ?? item.condition?.reference_id ?? ""]}
-                />,
-                formatConditionEvidence(item.condition?.metadata_json),
-                formatVisibilityStatus(item.visibility, item.curation_status)
-              ])}
-              title="Expression"
-            />
+            {shouldShowOverviewTable("kinetics", bundle.kinetics.length) ? (
+              <RecordTable
+                columns={["Substrate", "Km", "kcat", "kcat/Km", "Assay", "Reference", "Evidence", "Status"]}
+                rows={bundle.kinetics.map((item) => [
+                  textOrDash(item.substrate),
+                  textOrDash(item.km),
+                  textOrDash(item.kcat),
+                  textOrDash(item.kcat_km),
+                  [item.assay_temperature, item.assay_pH].filter(Boolean).join(" / ") || "-",
+                  <ReferenceCitation
+                    fallback={formatReferenceForTable(item.reference_id, referencesById)}
+                    reference={item.reference ?? referencesById[item.reference_id ?? ""]}
+                  />,
+                  <EvidenceText value={item.evidence_text} />,
+                  formatVisibilityStatus(item.visibility, item.curation_status)
+                ])}
+                title="Kinetics"
+              />
+            ) : null}
+            {shouldShowOverviewTable("expression", bundle.expression.length) ? (
+              <RecordTable
+                columns={["Host", "Vector", "Level", "Soluble", "Condition", "Reference", "Evidence", "Status"]}
+                rows={bundle.expression.map((item) => [
+                  textOrDash(item.expression_host),
+                  textOrDash(item.vector),
+                  textOrDash(item.expression_level_original),
+                  textOrDash(item.soluble_expression),
+                  item.condition
+                    ? [item.condition.assay_temperature, item.condition.assay_pH, item.condition.method]
+                        .filter(Boolean)
+                        .join(" / ")
+                    : "-",
+                  <ReferenceCitation
+                    fallback={formatReferenceForTable(
+                      item.reference_id ?? item.condition?.reference_id,
+                      referencesById
+                    )}
+                    reference={item.reference ?? referencesById[item.reference_id ?? item.condition?.reference_id ?? ""]}
+                  />,
+                  formatConditionEvidence(item.condition?.metadata_json),
+                  formatVisibilityStatus(item.visibility, item.curation_status)
+                ])}
+                title="Expression"
+              />
+            ) : null}
           </section>
         </>
       ) : null}
@@ -1135,10 +1362,12 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
 
 function RecordTable({
   columns,
+  emptyLabel = "No records",
   rows,
   title
 }: {
   columns: string[];
+  emptyLabel?: string;
   rows: ReactNode[][];
   title: string;
 }) {
@@ -1164,7 +1393,7 @@ function RecordTable({
                 <tr key={`${title}-${rowIndex}`}>
                   {row.map((cell, cellIndex) => (
                     <td className="max-w-xs px-4 py-3 align-top" key={`${title}-${rowIndex}-${cellIndex}`}>
-                      <span className="break-words">{cell}</span>
+                      <div className="break-words">{cell}</div>
                     </td>
                   ))}
                 </tr>
@@ -1172,7 +1401,7 @@ function RecordTable({
             ) : (
               <tr>
                 <td className="px-4 py-4 text-slate-500" colSpan={columns.length}>
-                  No records
+                  {emptyLabel}
                 </td>
               </tr>
             )}
@@ -1180,5 +1409,28 @@ function RecordTable({
         </table>
       </div>
     </section>
+  );
+}
+
+function EvidenceText({ value }: { value: string | null | undefined }) {
+  const evidence = parseEvidenceText(value);
+  if (evidence.source === "-" && evidence.excerpt === null) {
+    return <span className="text-slate-500">-</span>;
+  }
+  return (
+    <div className="space-y-2">
+      <span className="text-slate-700">{evidence.source}</span>
+      {evidence.quality ? (
+        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Quality: {evidence.quality}
+        </div>
+      ) : null}
+      {evidence.excerpt ? (
+        <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium uppercase text-slate-500">Evidence excerpt</summary>
+          <p className="mt-2 text-sm leading-6 text-slate-700">{evidence.excerpt}</p>
+        </details>
+      ) : null}
+    </div>
   );
 }

@@ -19,7 +19,7 @@ from app.db.models import (
     StructureEntry,
 )
 from app.db.session import SessionLocal
-from app.external.uniprot import get_uniprot_client
+from app.external.uniprot import get_uniprot_client, parse_fasta_sequence
 from app.services.conservation import calculate_conservation_profile
 from app.services.homology import (
     HomologSearchParameters,
@@ -153,7 +153,28 @@ def finish_homology_collection_job(db: Session, job_id: str, bucket: str) -> Ana
         select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == job.enzyme_entry_id)
     )
     if protein_sequence is None:
-        raise ValueError(f"protein sequence not found for enzyme entry: {job.enzyme_entry_id}")
+        enzyme = db.get(EnzymeEntry, job.enzyme_entry_id)
+        if enzyme is None:
+            raise ValueError(f"enzyme entry not found: {job.enzyme_entry_id}")
+        if not enzyme.uniprot_id:
+            raise ValueError(f"protein sequence not found for enzyme entry: {job.enzyme_entry_id}")
+        client = get_uniprot_client()
+        entry = client.fetch_entry(enzyme.uniprot_id)
+        sequence = entry.mature_sequence or entry.sequence
+        if sequence is None:
+            sequence = parse_fasta_sequence(client.fetch_fasta(enzyme.uniprot_id))
+        if not sequence:
+            raise ValueError(f"protein sequence not found for enzyme entry: {job.enzyme_entry_id}")
+        protein_sequence = ProteinSequence(
+            enzyme_entry_id=enzyme.id,
+            sequence=entry.sequence or sequence,
+            mature_sequence=entry.mature_sequence or sequence,
+            is_engineering_target=True,
+            source=getattr(client, "source", "uniprot"),
+            checksum=hashlib.sha256((entry.mature_sequence or sequence).encode("utf-8")).hexdigest(),
+        )
+        db.add(protein_sequence)
+        db.flush()
 
     now = datetime.utcnow()
     job.status = JobStatus.RUNNING

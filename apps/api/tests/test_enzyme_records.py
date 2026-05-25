@@ -6,6 +6,7 @@ from app.db.models import (
     EnzymeEntry,
     EnzymeFamily,
     EnzymeModule,
+    ExpressionRecord,
     JobStatus,
     KineticRecord,
     LiteratureReference,
@@ -302,7 +303,20 @@ def test_real_provider_record_lists_hide_existing_mock_records(client, db_sessio
         doi="10.0000/mock-evidence",
         source="literature_mock",
     )
-    db_session.add_all([real_reference, mock_reference])
+    fallback_reference = LiteratureReference(
+        title="Fallback enzyme evidence",
+        year=2024,
+        doi="10.0000/fallback-evidence",
+        source="europepmc",
+        metadata_json={
+            "provenance": {
+                "provider": "europepmc",
+                "mode": "fallback",
+                "warning": "Fallback literature reference should stay hidden in real mode.",
+            }
+        },
+    )
+    db_session.add_all([real_reference, mock_reference, fallback_reference])
     db_session.flush()
     db_session.add_all(
         [
@@ -322,6 +336,14 @@ def test_real_provider_record_lists_hide_existing_mock_records(client, db_sessio
                 reference_id=mock_reference.id,
                 visibility=Visibility.PUBLIC,
             ),
+            PropertyRecord(
+                enzyme_entry_id=enzyme_id,
+                property_type="optimal_temperature",
+                value_original="88",
+                method="europepmc",
+                reference_id=fallback_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
             KineticRecord(
                 enzyme_entry_id=enzyme_id,
                 substrate="casein",
@@ -338,6 +360,14 @@ def test_real_provider_record_lists_hide_existing_mock_records(client, db_sessio
                 reference_id=mock_reference.id,
                 visibility=Visibility.PUBLIC,
             ),
+            KineticRecord(
+                enzyme_entry_id=enzyme_id,
+                substrate="casein",
+                km="8.8",
+                method="europepmc",
+                reference_id=fallback_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
             MutationRecord(
                 enzyme_entry_id=enzyme_id,
                 mutation_string="S2P",
@@ -352,10 +382,43 @@ def test_real_provider_record_lists_hide_existing_mock_records(client, db_sessio
                 reference_id=mock_reference.id,
                 visibility=Visibility.PUBLIC,
             ),
+            MutationRecord(
+                enzyme_entry_id=enzyme_id,
+                mutation_string="T3A",
+                assay_condition_summary={"source": "europepmc"},
+                reference_id=fallback_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            ExpressionRecord(
+                enzyme_entry_id=enzyme_id,
+                expression_host="E. coli",
+                soluble_expression=True,
+                reference_id=real_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
+            ExpressionRecord(
+                enzyme_entry_id=enzyme_id,
+                expression_host="Fallback host",
+                soluble_expression=False,
+                reference_id=fallback_reference.id,
+                visibility=Visibility.PUBLIC,
+            ),
             StructureEntry(
                 enzyme_entry_id=enzyme_id,
                 structure_type="alphafold",
                 source="alphafold",
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="alphafold",
+                source="alphafold",
+                chain_summary={
+                    "provenance": {
+                        "provider": "alphafold",
+                        "mode": "fallback",
+                        "warning": "Fallback structure summary should stay hidden in real mode.",
+                    }
+                },
             ),
             StructureEntry(
                 enzyme_entry_id=enzyme_id,
@@ -369,12 +432,14 @@ def test_real_provider_record_lists_hide_existing_mock_records(client, db_sessio
     properties = client.get(f"/enzymes/{enzyme_id}/properties", headers=headers).json()
     kinetics = client.get(f"/enzymes/{enzyme_id}/kinetics", headers=headers).json()
     mutations = client.get(f"/enzymes/{enzyme_id}/mutations", headers=headers).json()
+    expression = client.get(f"/enzymes/{enzyme_id}/expression", headers=headers).json()
     structures = client.get(f"/enzymes/{enzyme_id}/structures", headers=headers).json()
     references = client.get(f"/enzymes/{enzyme_id}/references", headers=headers).json()
 
     assert [record["value_original"] for record in properties] == ["55"]
     assert [record["km"] for record in kinetics] == ["1.8"]
     assert [record["mutation_string"] for record in mutations] == ["S2P"]
+    assert [record["expression_host"] for record in expression] == ["E. coli"]
     assert [record["source"] for record in structures] == ["alphafold"]
     assert [record["doi"] for record in references] == ["10.1000/real-evidence"]
 

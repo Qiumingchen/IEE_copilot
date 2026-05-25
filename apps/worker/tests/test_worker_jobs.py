@@ -159,7 +159,17 @@ def test_finish_placeholder_job_builds_real_local_family_profile_summary():
     assert artifact.size_bytes > 0
 
 
-def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
+def test_finish_homology_collection_job_creates_homolog_sequence_artifact(monkeypatch):
+    class RealButFallbackSettings:
+        use_real_science_providers = False
+        allow_science_fallbacks = True
+        homolog_provider_fetch_size = 25
+        sequence_similarity_fasta_path = None
+        sequence_similarity_command = None
+        mafft_bin = "mafft --auto -"
+
+    monkeypatch.setattr("worker.jobs.get_settings", lambda: RealButFallbackSettings(), raising=False)
+
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -237,6 +247,82 @@ def test_finish_homology_collection_job_creates_homolog_sequence_artifact():
     assert artifact.content_type == "application/json"
     assert artifact.size_bytes > 0
     assert artifact.checksum is not None
+
+
+def test_finish_homology_collection_job_backfills_missing_sequence_from_uniprot(monkeypatch):
+    class RealButFallbackSettings:
+        use_real_science_providers = True
+        allow_science_fallbacks = True
+        homolog_provider_fetch_size = 25
+        sequence_similarity_fasta_path = None
+        sequence_similarity_command = None
+        mafft_bin = "mafft --auto -"
+
+    class FakeUniProtClient:
+        source = "uniprot"
+
+        def fetch_entry(self, accession: str):
+            assert accession == "P81453"
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Protein-glutamine gamma-glutamyltransferase",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                sequence="ACDEFGHIKL",
+                mature_sequence="CDEFGHIKL",
+                reviewed=True,
+                cross_references={"AlphaFoldDB": "AF-P81453-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return ">sp|P81453|TGASE\nACDEFGHIKL\n"
+
+    monkeypatch.setattr("worker.jobs.get_settings", lambda: RealButFallbackSettings(), raising=False)
+    monkeypatch.setattr("worker.jobs.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as db:
+        family = EnzymeFamily(
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            name="Mature microbial transglutaminases",
+        )
+        db.add(family)
+        db.flush()
+        enzyme = EnzymeEntry(
+            family_id=family.id,
+            name="Protein-glutamine gamma-glutamyltransferase",
+            organism="Streptomyces mobaraensis",
+            ec_number="2.3.2.13",
+            uniprot_id="P81453",
+            source="uniprot",
+        )
+        db.add(enzyme)
+        db.flush()
+        job = AnalysisJob(
+            enzyme_entry_id=enzyme.id,
+            job_type="homolog_collection",
+            status=JobStatus.QUEUED,
+            parameters_json={"identity_min": 40, "identity_max": 95, "coverage_min": 70},
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        finish_homology_collection_job(db, job.id, bucket="iee-artifacts")
+
+        db.refresh(job)
+        protein_sequence = db.scalar(
+            select(ProteinSequence).where(ProteinSequence.enzyme_entry_id == enzyme.id)
+        )
+
+    assert protein_sequence is not None
+    assert protein_sequence.sequence == "ACDEFGHIKL"
+    assert protein_sequence.mature_sequence == "CDEFGHIKL"
+    assert job.status == JobStatus.FINISHED
+    assert job.result_summary_json["message"] == "homolog collection completed"
 
 
 def test_homolog_candidates_for_job_caps_real_provider_request_size(monkeypatch):
@@ -505,7 +591,14 @@ def test_sequence_similarity_homolog_mode_reports_unavailable_runner():
     assert "BLAST/MMseqs2" in runner["warning"]
 
 
-def test_finish_msa_job_creates_msa_artifact_from_target_sequence():
+def test_finish_msa_job_creates_msa_artifact_from_target_sequence(monkeypatch):
+    class RealButFallbackSettings:
+        use_real_science_providers = False
+        allow_science_fallbacks = True
+        mafft_bin = None
+
+    monkeypatch.setattr("worker.jobs.get_settings", lambda: RealButFallbackSettings(), raising=False)
+
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -798,7 +891,14 @@ def test_finish_mutation_recommendation_job_creates_hotspot_artifact():
     assert artifact.size_bytes > 0
 
 
-def test_finish_rosetta_ddg_job_creates_mock_ddg_artifact():
+def test_finish_rosetta_ddg_job_creates_mock_ddg_artifact(monkeypatch):
+    class RealButFallbackSettings:
+        allow_science_fallbacks = True
+        rosetta_ddg_command = None
+        rosetta_ddg_bin = None
+
+    monkeypatch.setattr("worker.jobs.get_settings", lambda: RealButFallbackSettings(), raising=False)
+
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

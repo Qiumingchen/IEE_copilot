@@ -62,9 +62,10 @@ The platform can run in demo mode or real-provider mode. Development defaults
 keep fallbacks enabled so the workflow remains usable without local scientific
 tool installs.
 
-- `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, Crossref literature, and Europe PMC enzyme-data adapters.
+- `USE_REAL_SCIENCE_PROVIDERS=true` enables real UniProt, RCSB, AlphaFold, Crossref literature, Europe PMC, PubMed, and SABIO-RK enzyme-data adapters.
 - `ALLOW_SCIENCE_FALLBACKS=false` makes missing tools fail jobs instead of silently using fallback outputs.
 - `HOMOLOG_PROVIDER_FETCH_SIZE=25` limits the upstream UniProt candidate pool before local identity and coverage filtering.
+- `ENZYME_DATA_PROVIDER_FETCH_SIZE=10` limits upstream Europe PMC, PubMed, and SABIO-RK enzyme-property and kinetic result pages for each focused query.
 - `SEQUENCE_SIMILARITY_FASTA_PATH="/path/to/homologs.fasta"` configures the `sequence_similarity` homolog runner to scan a local FASTA sequence database.
 - `SEQUENCE_SIMILARITY_COMMAND="python scripts/similarity/sequence_similarity_wrapper.py --backend local --database /path/to/homologs.fasta"` configures an external sequence-similarity wrapper. The command receives the query FASTA on stdin and should write tabular hits as `accession<TAB>identity<TAB>coverage`; identity and coverage may be fractions or percentages. Accessions are resolved against `SEQUENCE_SIMILARITY_FASTA_PATH`.
 - `MAFFT_BIN="mafft --auto -"` configures the MAFFT runner.
@@ -78,12 +79,22 @@ RCSB, AlphaFold, or Crossref records when those providers fail. UniProt and RCSB
 provider outages return explicit API errors; AlphaFold and literature outages
 skip those optional enrichment records.
 
-Enzyme property, kinetic, and mutant records are collected from Europe PMC
-literature metadata in real-provider mode. The adapter extracts conservative
-mentions of optimum temperature, optimum pH, Km, kcat, kcat/Km, and mutation
-strings from article titles and abstracts. If Europe PMC is unavailable or no
-extractable values are found, the real adapter returns no records rather than
-inventing demo values.
+Enzyme property, kinetic, and mutant records are collected from Europe PMC,
+PubMed, and SABIO-RK in real-provider mode. The adapter prefers structured
+SABIO-RK kinetic records when a UniProt accession or EC number is available,
+then extracts conservative mentions of optimum temperature, optimum pH,
+specific activity, Km, kcat, kcat/Km, and mutation strings from article titles
+and abstracts. Literature evidence is tagged as sentence-level extraction, and
+SABIO-RK evidence is tagged as structured kinetic data so users can judge record
+confidence. BRENDA remains a planned structured property source because its SOAP
+service requires account credentials and should be wired through explicit
+configuration rather than assumed to be available anonymously.
+Focused queries include the enzyme organism when available, and records that
+mention a different organism are routed to a matching local family entry or
+skipped with a warning instead of being attached to the currently viewed
+source. If upstream literature services are unavailable or no extractable
+values are found, the real adapter returns no records rather than inventing
+demo values.
 
 For mature microbial transglutaminases, engineering calculations use the
 UniProt mature chain when a `Chain` feature is available. The bundled seed
