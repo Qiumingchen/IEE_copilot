@@ -9,3 +9,11 @@ script = ""
 name = "1"
 icon = "run"
 command = "docker compose up"
+
+[[actions]]
+name = "配置docker"
+icon = "tool"
+command = '''
+docker compose build api worker
+docker compose up -d api worker
+'''
