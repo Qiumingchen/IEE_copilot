@@ -73,6 +73,258 @@ def test_create_literature_reference_saves_metadata_and_deduplicates_by_doi(db_s
     assert references[0].metadata_json["query"] == "reusable"
 
 
+def test_create_literature_reference_normalizes_doi_url_before_deduplication(db_session):
+    first = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A DOI URL literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="https://doi.org/10.0000/mock-doi-url",
+            source="literature_mock",
+        ),
+    )
+    second = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized DOI literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/mock-doi-url",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(
+            select(LiteratureReference).where(LiteratureReference.doi == "10.0000/mock-doi-url")
+        )
+    )
+    assert first.id == second.id
+    assert len(references) == 1
+    assert references[0].doi == "10.0000/mock-doi-url"
+
+
+def test_create_literature_reference_normalizes_doi_case_before_deduplication(db_session):
+    first = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A mixed-case DOI literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/Mock-Case",
+            source="literature_mock",
+        ),
+    )
+    second = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A lower-case DOI literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/mock-case",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.doi == "10.0000/mock-case"))
+    )
+    assert first.id == second.id
+    assert len(references) == 1
+    assert references[0].doi == "10.0000/mock-case"
+
+
+def test_create_literature_reference_normalizes_doi_trailing_punctuation(db_session):
+    first = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A DOI literature reference with trailing punctuation",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/mock-trailing-doi.",
+            source="literature_mock",
+        ),
+    )
+    second = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A clean DOI literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/mock-trailing-doi",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.doi == "10.0000/mock-trailing-doi"))
+    )
+    assert first.id == second.id
+    assert len(references) == 1
+    assert references[0].doi == "10.0000/mock-trailing-doi"
+
+
+def test_create_literature_reference_reuses_legacy_mixed_case_doi(db_session):
+    existing = LiteratureReference(
+        title="A legacy mixed-case DOI reference",
+        journal="Journal of Mock Enzyme Engineering",
+        year=2026,
+        doi="10.0000/Legacy-Case",
+        source="literature_mock",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    reference = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized legacy DOI literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            doi="10.0000/legacy-case",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.doi == "10.0000/legacy-case"))
+    )
+    assert reference.id == existing.id
+    assert len(references) == 1
+    assert references[0].doi == "10.0000/legacy-case"
+
+
+def test_create_literature_reference_normalizes_pubmed_id_before_deduplication(db_session):
+    first = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A PubMed prefixed literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            pubmed_id="PMID: 10000003",
+            source="literature_mock",
+        ),
+    )
+    second = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized PubMed literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            pubmed_id="10000003",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(
+            select(LiteratureReference).where(LiteratureReference.pubmed_id == "10000003")
+        )
+    )
+    assert first.id == second.id
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000003"
+
+
+def test_create_literature_reference_reuses_legacy_prefixed_pubmed_id(db_session):
+    existing = LiteratureReference(
+        title="A legacy prefixed PubMed reference",
+        journal="Journal of Mock Enzyme Engineering",
+        year=2026,
+        pubmed_id="PMID: 10000005",
+        source="literature_mock",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    reference = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized PubMed literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            pubmed_id="10000005",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.pubmed_id == "10000005"))
+    )
+    assert reference.id == existing.id
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000005"
+
+
+def test_create_literature_reference_reuses_legacy_pubmed_label_id(db_session):
+    existing = LiteratureReference(
+        title="A legacy PubMed label reference",
+        journal="Journal of Mock Enzyme Engineering",
+        year=2026,
+        pubmed_id="PubMed: 10000006",
+        source="literature_mock",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    reference = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized PubMed label literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            pubmed_id="10000006",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.pubmed_id == "10000006"))
+    )
+    assert reference.id == existing.id
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000006"
+
+
+def test_create_literature_reference_reuses_legacy_uppercase_pubmed_label_id(db_session):
+    existing = LiteratureReference(
+        title="A legacy uppercase PubMed label reference",
+        journal="Journal of Mock Enzyme Engineering",
+        year=2026,
+        pubmed_id="PUBMED: 10000007",
+        source="literature_mock",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    reference = create_literature_reference(
+        db_session,
+        LiteratureMetadata(
+            title="A normalized uppercase PubMed label literature reference",
+            journal="Journal of Mock Enzyme Engineering",
+            year=2026,
+            pubmed_id="10000007",
+            source="literature_mock",
+        ),
+    )
+    db_session.commit()
+
+    references = list(
+        db_session.scalars(select(LiteratureReference).where(LiteratureReference.pubmed_id == "10000007"))
+    )
+    assert reference.id == existing.id
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000007"
+
+
 def test_parse_crossref_item_extracts_literature_metadata():
     item = {
         "title": ["Enzyme engineering by mutation"],

@@ -571,6 +571,7 @@ def _save_external_enzyme_data(
             target_enzyme.id,
             datum.property_type,
             datum.value_original,
+            datum.unit_original,
             datum.substrate,
             datum.organism,
             datum.doi,
@@ -587,6 +588,7 @@ def _save_external_enzyme_data(
                 PropertyRecord.enzyme_entry_id == target_enzyme.id,
                 PropertyRecord.property_type == datum.property_type,
                 PropertyRecord.value_original == datum.value_original,
+                PropertyRecord.unit_original == datum.unit_original,
                 PropertyRecord.substrate == datum.substrate,
             )
         )
@@ -622,6 +624,7 @@ def _save_external_enzyme_data(
             parameter.km,
             parameter.kcat,
             parameter.kcat_km,
+            parameter.unit_original,
             parameter.organism,
             parameter.doi,
             parameter.pubmed_id,
@@ -639,6 +642,7 @@ def _save_external_enzyme_data(
                 KineticRecord.km == parameter.km,
                 KineticRecord.kcat == parameter.kcat,
                 KineticRecord.kcat_km == parameter.kcat_km,
+                KineticRecord.unit_original == parameter.unit_original,
             )
         )
         if existing is not None:
@@ -682,12 +686,7 @@ def _save_external_enzyme_data(
         reference, reference_created = _create_reference_for_external_datum(db, mutant)
         if reference_created:
             created["references"] += 1
-        existing = db.scalar(
-            select(MutationRecord).where(
-                MutationRecord.enzyme_entry_id == target_enzyme.id,
-                MutationRecord.mutation_string == mutant.mutation_string,
-            )
-        )
+        existing = _find_existing_external_mutation(db, target_enzyme, mutant)
         if existing is not None:
             _backfill_external_reference(existing, reference, mutant.evidence)
             continue
@@ -777,30 +776,52 @@ def _backfill_external_reference(record, reference: LiteratureReference | None, 
         record.assay_condition_summary = summary
 
 
+def _find_existing_external_mutation(db: Session, enzyme: EnzymeEntry, mutant) -> MutationRecord | None:
+    candidates = db.scalars(
+        select(MutationRecord).where(
+            MutationRecord.enzyme_entry_id == enzyme.id,
+            MutationRecord.mutation_string == mutant.mutation_string,
+            MutationRecord.substrate == mutant.substrate,
+        )
+    ).all()
+    target_delta = _normalized_mutation_property_delta(mutant.property_delta)
+    for candidate in candidates:
+        if _normalized_mutation_property_delta(candidate.property_delta) == target_delta:
+            return candidate
+    return None
+
+
+def _normalized_mutation_property_delta(value) -> dict:
+    return value if isinstance(value, dict) and value else {}
+
+
 def _create_reference_for_external_datum(db: Session, datum) -> tuple[LiteratureReference | None, bool]:
     if not any(
         getattr(datum, field, None)
         for field in ("reference_title", "doi", "pubmed_id", "journal", "year")
     ):
         return None, False
-    existed = _literature_reference_exists(
+    doi = _normalize_external_doi(getattr(datum, "doi", None))
+    existing_reference = _find_literature_reference(
         db,
-        getattr(datum, "doi", None),
+        doi,
         getattr(datum, "pubmed_id", None),
     )
+    if existing_reference is not None:
+        return existing_reference, False
     title = getattr(datum, "reference_title", None) or getattr(datum, "evidence", None) or "External enzyme data evidence"
     metadata = LiteratureMetadata(
         title=title,
         journal=getattr(datum, "journal", None),
         year=getattr(datum, "year", None),
-        doi=getattr(datum, "doi", None),
-        pubmed_id=getattr(datum, "pubmed_id", None),
+        doi=doi,
+        pubmed_id=_normalize_external_pubmed_id(getattr(datum, "pubmed_id", None)),
         abstract=getattr(datum, "evidence", None),
         source=getattr(datum, "source", None) or "external_enzyme_data",
         metadata={"topics": ["enzyme_data"]},
     )
     reference = create_literature_reference(db, metadata)
-    return reference, not existed
+    return reference, True
 
 
 def _save_alphafold_structure_for_enzyme(
@@ -848,11 +869,65 @@ def _save_alphafold_structure_for_enzyme(
 
 
 def _literature_reference_exists(db: Session, doi: str | None, pubmed_id: str | None) -> bool:
+    return _find_literature_reference(db, doi, pubmed_id) is not None
+
+
+def _find_literature_reference(db: Session, doi: str | None, pubmed_id: str | None) -> LiteratureReference | None:
+    doi = _normalize_external_doi(doi)
+    pubmed_id = _normalize_external_pubmed_id(pubmed_id)
     if doi:
-        return db.scalar(select(LiteratureReference).where(LiteratureReference.doi == doi)) is not None
+        reference = db.scalar(
+            select(LiteratureReference).where(func.lower(LiteratureReference.doi).in_(_doi_lookup_values(doi)))
+        )
+        if reference is not None:
+            reference.doi = doi
+            return reference
     if pubmed_id:
-        return db.scalar(select(LiteratureReference).where(LiteratureReference.pubmed_id == pubmed_id)) is not None
-    return False
+        reference = db.scalar(
+            select(LiteratureReference).where(
+                func.lower(LiteratureReference.pubmed_id).in_(_pubmed_lookup_values(pubmed_id))
+            )
+        )
+        if reference is not None:
+            reference.pubmed_id = pubmed_id
+        return reference
+    return None
+
+
+def _doi_lookup_values(doi: str) -> list[str]:
+    return [doi, f"https://doi.org/{doi}", f"http://doi.org/{doi}", f"https://dx.doi.org/{doi}"]
+
+
+def _normalize_external_doi(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    normalized = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^doi:\s*", "", normalized, flags=re.IGNORECASE)
+    return normalized.lower()
+
+
+def _normalize_external_pubmed_id(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"\d+", value)
+    return match.group(0) if match else None
+
+
+def _pubmed_lookup_values(pubmed_id: str) -> list[str]:
+    return [
+        pubmed_id,
+        f"PMID:{pubmed_id}",
+        f"PMID: {pubmed_id}",
+        f"pmid:{pubmed_id}",
+        f"pmid: {pubmed_id}",
+        f"PubMed:{pubmed_id}",
+        f"PubMed: {pubmed_id}",
+        f"pubmed:{pubmed_id}",
+        f"pubmed: {pubmed_id}",
+    ]
 
 
 def _raise_if_mock_provider(source: str | None, provider_label: str) -> None:
@@ -1259,18 +1334,34 @@ def _enzyme_matches_organism(enzyme: EnzymeEntry, organism: str | None) -> bool:
 def _organism_names_match(left: str, right: str) -> bool:
     left_lower = left.lower()
     right_lower = right.lower()
-    if left_lower in right_lower or right_lower in left_lower:
-        return True
     left_species = _organism_species_name(left_lower)
     right_species = _organism_species_name(right_lower)
-    return left_species is not None and left_species == right_species
+    if left_species is None or right_species is None:
+        return left_lower == right_lower
+    if left_lower in right_lower or right_lower in left_lower:
+        return True
+    if left_species == right_species:
+        return True
+    left_abbreviation = _organism_species_abbreviation_key(left_lower)
+    right_abbreviation = _organism_species_abbreviation_key(right_lower)
+    return left_abbreviation is not None and left_abbreviation == right_abbreviation
 
 
 def _organism_species_name(value: str) -> str | None:
-    parts = value.split()
+    parts = value.replace(".", "").split()
     if len(parts) < 2:
         return None
+    if parts[1] in {"sp", "spp", "species", "strain"}:
+        return None
     return " ".join(parts[:2])
+
+
+def _organism_species_abbreviation_key(value: str) -> str | None:
+    species_name = _organism_species_name(value)
+    if species_name is None:
+        return None
+    genus, species = species_name.split()[:2]
+    return f"{genus[:1]} {species}"
 
 
 FAMILY_MATCH_STOP_WORDS = {

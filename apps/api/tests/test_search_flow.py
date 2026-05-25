@@ -1418,6 +1418,270 @@ def test_real_data_refresh_routes_external_records_to_matching_family_organism(
     assert bacillus_kinetics[0].km == "2.0"
 
 
+def test_real_data_refresh_skips_genus_only_external_literature_organism(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class GenusOnlyDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="60",
+                    unit_original="degC",
+                    organism="Bacillus",
+                    source=self.source,
+                    evidence="Europe PMC Bacillus optimum temperature without species",
+                    reference_title="Genus-only Bacillus enzyme paper",
+                    journal="Food Enzymes",
+                    year=2024,
+                    doi="10.1000/genus-only-bacillus",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: GenusOnlyDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferase",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="Q00000",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "genus-only-routing@example.com",
+            "password": "search-password",
+            "display_name": "Genus Only Routing",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "genus-only-routing@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["properties"] == 0
+    assert any("Bacillus" in warning for warning in body["warnings"])
+    assert db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all() == []
+
+
+def test_real_data_refresh_skips_unspecified_species_external_literature_organism(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class UnspecifiedSpeciesDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="62",
+                    unit_original="degC",
+                    organism="Bacillus sp.",
+                    source=self.source,
+                    evidence="Europe PMC Bacillus sp. optimum temperature without species",
+                    reference_title="Unspecified Bacillus species enzyme paper",
+                    journal="Food Enzymes",
+                    year=2024,
+                    doi="10.1000/bacillus-sp-only",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: UnspecifiedSpeciesDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferase",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="Q00000",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "unspecified-species-routing@example.com",
+            "password": "search-password",
+            "display_name": "Unspecified Species Routing",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "unspecified-species-routing@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["properties"] == 0
+    assert any("Bacillus sp." in warning for warning in body["warnings"])
+    assert db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all() == []
+
+
+def test_real_data_refresh_routes_abbreviated_external_literature_organism(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class AbbreviatedOrganismDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="61",
+                    unit_original="degC",
+                    organism="B. subtilis",
+                    source=self.source,
+                    evidence="Europe PMC B. subtilis optimum temperature",
+                    reference_title="Abbreviated Bacillus subtilis enzyme paper",
+                    journal="Food Enzymes",
+                    year=2024,
+                    doi="10.1000/abbreviated-b-subtilis",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_enzyme_data_client", lambda: AbbreviatedOrganismDataClient()
+    )
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Protein-glutamine gamma-glutamyltransferase",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="Q00000",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "abbreviated-organism-routing@example.com",
+            "password": "search-password",
+            "display_name": "Abbreviated Organism Routing",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "abbreviated-organism-routing@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["properties"] == 1
+    records = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert [(record.property_type, record.value_original) for record in records] == [
+        ("optimal_temperature", "61")
+    ]
+
+
 def test_real_data_refresh_reports_multiple_enzyme_data_sources(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings
@@ -1620,6 +1884,1072 @@ def test_real_data_refresh_backfills_reference_for_existing_real_property(client
     references = db_session.scalars(select(LiteratureReference)).all()
     assert len(properties) == 1
     assert properties[0].reference_id == references[0].id
+
+
+def test_real_data_refresh_keeps_same_property_value_with_different_units(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_specific_activity(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="specific_activity",
+                    value_original="12",
+                    unit_original="U/mg",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC specific activity per mg",
+                    reference_title="Specific activity per mg",
+                    doi="10.1000/activity-per-mg",
+                ),
+                ExternalPropertyDatum(
+                    property_type="specific_activity",
+                    value_original="12",
+                    unit_original="U/mL",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC volumetric activity",
+                    reference_title="Specific activity per ml",
+                    doi="10.1000/activity-per-ml",
+                ),
+            ]
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "property-unit-distinct@example.com",
+            "password": "search-password",
+            "display_name": "Property Unit Distinct",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "property-unit-distinct@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["properties"] == 2
+    properties = db_session.scalars(
+        select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)
+    ).all()
+    assert sorted(record.unit_original for record in properties) == ["U/mL", "U/mg"]
+
+
+def test_real_data_refresh_keeps_same_kinetic_values_with_different_units(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="casein",
+                    km="1.2",
+                    unit_original="mM",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC Km in mM",
+                    reference_title="Km in mM",
+                    doi="10.1000/km-mm",
+                ),
+                ExternalKineticParameter(
+                    substrate="casein",
+                    km="1.2",
+                    unit_original="uM",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC Km in uM",
+                    reference_title="Km in uM",
+                    doi="10.1000/km-um",
+                ),
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "kinetic-unit-distinct@example.com",
+            "password": "search-password",
+            "display_name": "Kinetic Unit Distinct",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "kinetic-unit-distinct@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["kinetics"] == 2
+    kinetics = db_session.scalars(
+        select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)
+    ).all()
+    assert sorted(record.unit_original for record in kinetics) == ["mM", "uM"]
+
+
+def test_real_data_refresh_keeps_same_mutation_for_different_substrates(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return [
+                ExternalMutantRecord(
+                    mutation_string="S2P",
+                    effect_summary="Improved activity on gelatin",
+                    property_delta={"specific_activity_fold_change": 1.8},
+                    substrate="gelatin",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC S2P gelatin activity",
+                    reference_title="Substrate-specific mutant data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/s2p-gelatin",
+                )
+            ]
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        MutationRecord(
+            enzyme_entry_id=enzyme.id,
+            mutation_string="S2P",
+            effect_summary="Improved activity on casein",
+            property_delta={"specific_activity_fold_change": 1.2},
+            substrate="casein",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "mutation-substrate-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Mutation Substrate Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "mutation-substrate-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["mutations"] == 1
+    mutations = db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    assert {(record.mutation_string, record.substrate) for record in mutations} == {
+        ("S2P", "casein"),
+        ("S2P", "gelatin"),
+    }
+
+
+def test_real_data_refresh_keeps_same_mutation_substrate_for_different_property_delta(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return [
+                ExternalMutantRecord(
+                    mutation_string="S2P",
+                    effect_summary="Improved optimal temperature on casein assay",
+                    property_delta={"optimal_temperature_delta_degC": 5},
+                    substrate="casein",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC S2P casein thermostability",
+                    reference_title="Property-specific mutant data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/s2p-casein-thermostability",
+                )
+            ]
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        MutationRecord(
+            enzyme_entry_id=enzyme.id,
+            mutation_string="S2P",
+            effect_summary="Improved activity on casein",
+            property_delta={"specific_activity_fold_change": 1.2},
+            substrate="casein",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "mutation-property-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Mutation Property Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "mutation-property-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["mutations"] == 1
+    mutations = db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    assert {tuple(sorted((record.property_delta or {}).keys())) for record in mutations} == {
+        ("optimal_temperature_delta_degC",),
+        ("specific_activity_fold_change",),
+    }
+
+
+def test_real_data_refresh_treats_null_and_empty_mutation_delta_as_duplicate(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return [
+                ExternalMutantRecord(
+                    mutation_string="S2P",
+                    effect_summary="Reported mutation without structured delta",
+                    property_delta={},
+                    substrate="casein",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC S2P casein mutation mention",
+                    reference_title="Unstructured mutant data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/s2p-casein-unstructured",
+                )
+            ]
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        MutationRecord(
+            enzyme_entry_id=enzyme.id,
+            mutation_string="S2P",
+            effect_summary="Legacy mutation without structured delta",
+            property_delta=None,
+            substrate="casein",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "mutation-empty-delta-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Mutation Empty Delta Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "mutation-empty-delta-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["mutations"] == 0
+    mutations = db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(mutations) == 1
+
+
+def test_real_data_refresh_normalizes_external_doi_before_reference_lookup(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="52",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC DOI URL optimum temperature",
+                    reference_title="Shared DOI enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="https://doi.org/10.1000/shared-doi-reference",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing shared DOI enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        doi="10.1000/shared-doi-reference",
+        source="crossref",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "doi-normalization-refresh@example.com",
+            "password": "search-password",
+            "display_name": "DOI Normalization Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "doi-normalization-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert references[0].doi == "10.1000/shared-doi-reference"
+    assert len(properties) == 1
+    assert properties[0].reference_id == existing_reference.id
+
+
+def test_real_data_refresh_reuses_legacy_url_doi_reference(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="53",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC normalized DOI optimum temperature",
+                    reference_title="Legacy DOI enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/legacy-url-doi-reference",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing legacy DOI enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        doi="https://doi.org/10.1000/legacy-url-doi-reference",
+        source="crossref",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "legacy-doi-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Legacy DOI Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "legacy-doi-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert properties[0].reference_id == existing_reference.id
+
+
+def test_real_data_refresh_normalizes_external_pubmed_id_before_reference_lookup(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "pubmed"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="54",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="PubMed prefixed PMID optimum temperature",
+                    reference_title="Shared PubMed enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    pubmed_id="PMID: 10000004",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing shared PubMed enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        pubmed_id="10000004",
+        source="pubmed",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "pubmed-normalization-refresh@example.com",
+            "password": "search-password",
+            "display_name": "PubMed Normalization Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "pubmed-normalization-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000004"
+    assert properties[0].reference_id == existing_reference.id
+
+
+def test_real_data_refresh_reuses_legacy_uppercase_pubmed_reference(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "pubmed"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="54",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="PubMed uppercase PMID optimum temperature",
+                    reference_title="Shared uppercase PubMed enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    pubmed_id="10000008",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing shared uppercase PubMed enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        pubmed_id="PUBMED: 10000008",
+        source="pubmed",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "pubmed-uppercase-refresh@example.com",
+            "password": "search-password",
+            "display_name": "PubMed Uppercase Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "pubmed-uppercase-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert references[0].pubmed_id == "10000008"
+    assert properties[0].reference_id == existing_reference.id
+
+
+def test_real_data_refresh_normalizes_external_doi_case_before_reference_lookup(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="55",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC mixed-case DOI optimum temperature",
+                    reference_title="Mixed-case DOI enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/Mixed-Case-Reference",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing mixed-case DOI enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        doi="10.1000/mixed-case-reference",
+        source="crossref",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "doi-case-refresh@example.com",
+            "password": "search-password",
+            "display_name": "DOI Case Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "doi-case-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert references[0].doi == "10.1000/mixed-case-reference"
+    assert properties[0].reference_id == existing_reference.id
+
+
+def test_real_data_refresh_reuses_legacy_mixed_case_doi_reference(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RealDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="56",
+                    unit_original="degC",
+                    organism="Streptomyces mobaraensis",
+                    source=self.source,
+                    evidence="Europe PMC normalized DOI against legacy mixed case",
+                    reference_title="Legacy mixed-case DOI enzyme data",
+                    journal="Enzyme and Microbial Technology",
+                    year=2024,
+                    doi="10.1000/legacy-mixed-case-reference",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: RealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Protein-glutamine gamma-glutamyltransferase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    existing_reference = LiteratureReference(
+        title="Existing legacy mixed-case DOI enzyme data",
+        journal="Enzyme and Microbial Technology",
+        year=2024,
+        doi="10.1000/Legacy-Mixed-Case-Reference",
+        source="crossref",
+    )
+    db_session.add_all([enzyme, existing_reference])
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "legacy-doi-case-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Legacy DOI Case Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "legacy-doi-case-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 0
+    references = db_session.scalars(select(LiteratureReference)).all()
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(references) == 1
+    assert references[0].doi == "10.1000/legacy-mixed-case-reference"
+    assert properties[0].reference_id == existing_reference.id
 
 
 def test_real_data_refresh_saves_alphafold_structure_for_known_uniprot(client, db_session, monkeypatch):

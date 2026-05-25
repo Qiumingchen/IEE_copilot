@@ -118,6 +118,9 @@ class RealEnzymeDataClient:
 
     def __init__(self, timeout: float = 15.0):
         self.timeout = timeout
+        self._europe_pmc_full_text_cache: dict[str, str | None] = {}
+        self._literature_search_cache: dict[tuple[str, str, int], list[dict]] = {}
+        self._sabiork_kinetic_cache: dict[tuple[str, int], list[ExternalKineticParameter]] = {}
 
     def fetch_opt_temperature(self, query: str, size: int = 5) -> list[ExternalPropertyDatum]:
         records = []
@@ -125,12 +128,14 @@ class RealEnzymeDataClient:
             [
                 f"{query} optimum temperature",
                 f"{query} optimal temperature",
+                f"{query} optimum activity temperature",
+                f"{query} optimal activity temperature",
                 f"{query} maximum activity temperature",
                 f"{query} highest activity temperature",
             ],
             size=size,
         ):
-            text = _article_text(item)
+            text = self._article_text_for_extraction(item, _extract_temperature)
             value = _extract_temperature(text)
             if value is None:
                 continue
@@ -145,7 +150,9 @@ class RealEnzymeDataClient:
                     **_reference_kwargs(item),
                 )
             )
-        return records[:size]
+            if len(records) >= size:
+                return records
+        return records
 
     def fetch_opt_pH(self, query: str, size: int = 5) -> list[ExternalPropertyDatum]:
         records = []
@@ -153,12 +160,14 @@ class RealEnzymeDataClient:
             [
                 f"{query} optimum pH",
                 f"{query} optimal pH",
+                f"{query} optimum activity pH",
+                f"{query} optimal activity pH",
                 f"{query} maximum activity pH",
                 f"{query} highest activity pH",
             ],
             size=size,
         ):
-            text = _article_text(item)
+            text = self._article_text_for_extraction(item, _extract_ph)
             value = _extract_ph(text)
             if value is None:
                 continue
@@ -172,7 +181,9 @@ class RealEnzymeDataClient:
                     **_reference_kwargs(item),
                 )
             )
-        return records[:size]
+            if len(records) >= size:
+                return records
+        return records
 
     def fetch_specific_activity(self, query: str, size: int = 5) -> list[ExternalPropertyDatum]:
         records = []
@@ -181,18 +192,38 @@ class RealEnzymeDataClient:
                 f"{query} specific activity",
                 f"{query} enzyme activity",
                 f"{query} activity U/mg",
+                f"{query} activity U mg-1",
+                f"{query} activity units/mg",
+                f"{query} activity IU/mg",
+                f"{query} activity IU mg-1",
+                f"{query} activity U/mL",
             ],
             size=size,
         ):
             text = _article_text(item)
             value = _extract_specific_activity(text)
+            property_type = "specific_activity"
+            unit_original = "U/mg"
+            if value is None:
+                value = _extract_volumetric_activity(text)
+                property_type = "activity"
+                unit_original = "U/mL"
+            if value is None and _item_source(item) == "europepmc":
+                text = _article_text(self._with_europe_pmc_full_text(item))
+                value = _extract_specific_activity(text)
+                property_type = "specific_activity"
+                unit_original = "U/mg"
+                if value is None:
+                    value = _extract_volumetric_activity(text)
+                    property_type = "activity"
+                    unit_original = "U/mL"
             if value is None:
                 continue
             records.append(
                 ExternalPropertyDatum(
-                    property_type="specific_activity",
+                    property_type=property_type,
                     value_original=value,
-                    unit_original="U/mg",
+                    unit_original=unit_original,
                     substrate=_extract_activity_substrate(text, value),
                     organism=_extract_evidence_organism(text, value),
                     source=_item_source(item),
@@ -200,23 +231,35 @@ class RealEnzymeDataClient:
                     **_reference_kwargs(item),
                 )
             )
-        return records[:size]
+            if len(records) >= size:
+                return records
+        return records
 
     def fetch_kinetic_parameters(self, query: str, size: int = 5) -> list[ExternalKineticParameter]:
         records = self._fetch_sabiork_kinetic_parameters(query, size=size)
+        if len(records) >= size:
+            return records[:size]
         seen = {_kinetic_identity(record) for record in records}
         for item in self._search_variants(
             [
                 f"{query} Km kcat",
                 f"{query} kinetic parameters",
+                f"{query} Michaelis constant",
+                f"{query} Michaelis-Menten constant",
                 f"{query} catalytic efficiency",
+                f"{query} kcat/Km",
+                f"{query} turnover number",
+                f"{query} catalytic constant",
+                f"{query} specificity constant",
             ],
             size=size,
         ):
-            text = _article_text(item)
+            text = self._article_text_for_extraction(item, _extract_kinetic_value)
             km = _extract_labeled_number(text, "km")
             kcat = _extract_labeled_number(text, "kcat")
             kcat_km = _extract_kcat_km(text)
+            if km == kcat_km:
+                km = None
             if km is None and kcat is None and kcat_km is None:
                 continue
             record = ExternalKineticParameter(
@@ -224,7 +267,13 @@ class RealEnzymeDataClient:
                 km=km,
                 kcat=kcat,
                 kcat_km=kcat_km,
-                unit_original=_kinetic_unit_label(km=km, kcat=kcat, kcat_km=kcat_km),
+                unit_original=_kinetic_unit_label(
+                    km=km,
+                    km_unit=_extract_km_unit(text, km),
+                    kcat=kcat,
+                    kcat_km=kcat_km,
+                    kcat_km_unit=_extract_kcat_km_unit(text, kcat_km),
+                ),
                 assay_temperature=_extract_kinetic_assay_temperature(text, km or kcat or kcat_km),
                 assay_pH=_extract_kinetic_assay_ph(text, km or kcat or kcat_km),
                 organism=_extract_evidence_organism(text, km or kcat or kcat_km),
@@ -238,13 +287,16 @@ class RealEnzymeDataClient:
             seen.add(identity)
             records.append(record)
             if len(records) >= size:
-                break
-        return records[:size]
+                return records
+        return records
 
     def _fetch_sabiork_kinetic_parameters(self, query: str, size: int = 5) -> list[ExternalKineticParameter]:
         sabiork_query = _sabiork_query_for(query)
         if sabiork_query is None:
             return []
+        cache_key = (sabiork_query, size)
+        if cache_key in self._sabiork_kinetic_cache:
+            return self._sabiork_kinetic_cache[cache_key]
         try:
             entry_response = httpx.get(
                 self.sabiork_entry_ids_url,
@@ -254,6 +306,7 @@ class RealEnzymeDataClient:
             entry_response.raise_for_status()
             entry_ids = _parse_sabiork_entry_ids(entry_response.text)[:size]
             if not entry_ids:
+                self._sabiork_kinetic_cache[cache_key] = []
                 return []
             tsv_response = httpx.get(
                 self.sabiork_tsv_url,
@@ -279,18 +332,31 @@ class RealEnzymeDataClient:
             )
             tsv_response.raise_for_status()
         except Exception:
+            self._sabiork_kinetic_cache[cache_key] = []
             return []
-        return _parse_sabiork_kinetic_tsv(tsv_response.text)[:size]
+        records = _parse_sabiork_kinetic_tsv(tsv_response.text)[:size]
+        self._sabiork_kinetic_cache[cache_key] = records
+        return records
 
     def fetch_mutants(self, query: str, size: int = 5) -> list[ExternalMutantRecord]:
         records = []
-        for item in self._search(f"{query} mutant variant mutation", size=size):
-            text = _article_text(item)
+        for item in self._search_variants(
+            [
+                f"{query} mutant variant mutation",
+                f"{query} site-directed mutagenesis",
+                f"{query} engineered variant",
+            ],
+            size=size,
+        ):
+            text = self._article_text_for_extraction(item, _extract_first_mutation_string)
             for mutation in _extract_mutation_strings(text):
+                sentence = _sentence_containing(text, mutation)
                 records.append(
                     ExternalMutantRecord(
                         mutation_string=mutation,
-                        effect_summary=f"Real literature mention: {_sentence_containing(text, mutation)}",
+                        effect_summary=f"Real literature mention: {sentence}",
+                        property_delta=_extract_mutant_property_delta(sentence),
+                        substrate=_extract_activity_substrate(sentence, _extract_fold_change(sentence)),
                         organism=_extract_evidence_organism(text, mutation),
                         source=_item_source(item),
                         evidence=_evidence_with_sentence(item, text, mutation),
@@ -301,24 +367,35 @@ class RealEnzymeDataClient:
                     return records
         return records
 
-    def _search(self, query: str, size: int = 5) -> list[dict]:
-        records = []
-        seen: set[tuple] = set()
-        for record in [
-            *self._search_europe_pmc(query, size=size),
-            *self._search_pubmed(query, size=size),
-            *self._search_openalex(query, size=size),
-            *self._search_semantic_scholar(query, size=size),
-        ]:
-            identity = _literature_candidate_identity(record)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            records.append(record)
-        return records
+    def _article_text_for_extraction(self, item: dict, extractor) -> str:
+        text = _article_text(item)
+        if extractor(text) is not None or _item_source(item) != "europepmc":
+            return text
+        return _article_text(self._with_europe_pmc_full_text(item))
 
-    def _search_variants(self, queries: list[str], size: int = 5) -> list[dict]:
-        records = []
+    def _search(self, query: str, size: int = 5):
+        if size <= 0:
+            return
+        seen: set[tuple] = set()
+        for provider_name, search_provider in (
+            ("europepmc", self._search_europe_pmc),
+            ("pubmed", self._search_pubmed),
+            ("openalex", self._search_openalex),
+            ("semanticscholar", self._search_semantic_scholar),
+        ):
+            cache_key = (provider_name, query, size)
+            if cache_key not in self._literature_search_cache:
+                self._literature_search_cache[cache_key] = search_provider(query, size=size)
+            for record in self._literature_search_cache[cache_key]:
+                if _is_secondary_literature_record(record):
+                    continue
+                identity = _literature_candidate_identity(record)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                yield record
+
+    def _search_variants(self, queries: list[str], size: int = 5):
         seen: set[tuple] = set()
         for query in queries:
             for record in self._search(query, size=size):
@@ -326,8 +403,7 @@ class RealEnzymeDataClient:
                 if identity in seen:
                     continue
                 seen.add(identity)
-                records.append(record)
-        return records
+                yield record
 
     def _search_europe_pmc(self, query: str, size: int = 5) -> list[dict]:
         try:
@@ -345,12 +421,15 @@ class RealEnzymeDataClient:
         except Exception:
             return []
         records = ((response.json().get("resultList") or {}).get("result") or [])[:size]
-        return [self._with_europe_pmc_full_text({**record, "_source": "europepmc"}) for record in records]
+        return [{**record, "_source": "europepmc"} for record in records]
 
     def _with_europe_pmc_full_text(self, record: dict) -> dict:
         pmcid = _europe_pmc_pmcid(record)
         if pmcid is None:
             return record
+        if pmcid in self._europe_pmc_full_text_cache:
+            full_text = self._europe_pmc_full_text_cache[pmcid]
+            return {**record, "fullText": full_text} if full_text else record
         try:
             response = httpx.get(
                 f"{self.full_text_base_url}/{pmcid}/fullTextXML",
@@ -358,8 +437,10 @@ class RealEnzymeDataClient:
             )
             response.raise_for_status()
         except Exception:
+            self._europe_pmc_full_text_cache[pmcid] = None
             return record
         full_text = _xml_document_text(response.text)
+        self._europe_pmc_full_text_cache[pmcid] = full_text
         return {**record, "fullText": full_text} if full_text else record
 
     def _search_pubmed(self, query: str, size: int = 5) -> list[dict]:
@@ -444,16 +525,31 @@ def _article_text(item: dict) -> str:
     )
 
 
+def _extract_kinetic_value(text: str) -> str | None:
+    km = _extract_labeled_number(text, "km")
+    kcat = _extract_labeled_number(text, "kcat")
+    kcat_km = _extract_kcat_km(text)
+    if km == kcat_km:
+        km = None
+    return km or kcat or kcat_km
+
+
+def _extract_first_mutation_string(text: str) -> str | None:
+    return next(iter(_extract_mutation_strings(text)), None)
+
+
 def _item_source(item: dict) -> str:
     return str(item.get("_source") or "europepmc")
 
 
 def _evidence_label(item: dict) -> str:
+    doi = _normalize_doi(item.get("doi"))
+    pmid = _normalize_pubmed_id(item.get("pmid"))
     parts = [
         item.get("journalTitle"),
         item.get("pubYear"),
-        f"doi:{item.get('doi')}" if item.get("doi") else None,
-        f"pmid:{item.get('pmid')}" if item.get("pmid") else None,
+        f"doi:{doi}" if doi else None,
+        f"pmid:{pmid}" if pmid else None,
     ]
     source = _item_source(item)
     return " ".join(str(part) for part in parts if part) or f"{source} literature metadata"
@@ -474,8 +570,8 @@ def _reference_kwargs(item: dict) -> dict:
         "reference_title": item.get("title"),
         "journal": item.get("journalTitle"),
         "year": _parse_year(item.get("pubYear")),
-        "doi": item.get("doi"),
-        "pubmed_id": item.get("pmid"),
+        "doi": _normalize_doi(item.get("doi")),
+        "pubmed_id": _normalize_pubmed_id(item.get("pmid")),
     }
 
 
@@ -534,14 +630,33 @@ def _normalize_doi(value) -> str | None:
     normalized = value.strip()
     if not normalized:
         return None
-    return re.sub(r"^https?://(?:dx\.)?doi\.org/", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^doi:\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = normalized.rstrip(".,;")
+    return normalized.lower()
+
+
+def _normalize_pubmed_id(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"\d+", value)
+    return match.group(0) if match else None
 
 
 def _literature_candidate_identity(item: dict) -> tuple:
     return (
-        (item.get("doi") or "").lower(),
-        item.get("pmid") or "",
+        (_normalize_doi(item.get("doi")) or "").lower(),
+        _normalize_pubmed_id(item.get("pmid")) or "",
         (item.get("title") or "").lower(),
+    )
+
+
+def _is_secondary_literature_record(item: dict) -> bool:
+    title = str(item.get("title") or "").lower()
+    publication_type = str(item.get("pubType") or item.get("publicationType") or item.get("type") or "").lower()
+    text = f"{title} {publication_type}"
+    return bool(
+        re.search(r"\b(?:review|systematic review|meta[- ]analysis|meta analysis)\b", text)
     )
 
 
@@ -679,7 +794,7 @@ def _parse_sabiork_kinetic_tsv(text: str) -> list[ExternalKineticParameter]:
                 "assay_pH": _row_value(row, "pH", "PH", "ph"),
                 "reference_title": _row_value(row, "Title", "title"),
                 "year": _parse_year(_row_value(row, "Year", "year")),
-                "pubmed_id": _row_value(row, "PubMedID", "PubmedID", "PMID", "pubmed id"),
+                "pubmed_id": _normalize_pubmed_id(_row_value(row, "PubMedID", "PubmedID", "PMID", "pubmed id")),
                 "units": {},
                 "km": None,
                 "kcat": None,
@@ -792,6 +907,7 @@ def _extract_temperature(text: str) -> str | None:
         rf"(?:optimum|optimal)\s+temperature\s+and\s+pH\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s*{unit}\s+and\s+\d+(?:\.\d+)?",
         rf"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){{0,6}}\s+(?:was\s+)?(?:observed\s+)?at\s+(\d+(?:\.\d+)?)\s*{unit}",
         rf"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){{0,6}}\s+(?:was\s+)?(?:observed\s+)?at\s+pH\s*\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
+        rf"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){{0,8}}\s+(?:at|under)\s+pH\s*\d+(?:\.\d+)?\s+and\s+temperature\s+(\d+(?:\.\d+)?)\s*{unit}",
     ]
     return _first_match(text, patterns)
 
@@ -817,14 +933,20 @@ def _extract_ph(text: str) -> str | None:
         rf"temperature\s+and\s+pH\s+optima\s+(?:were|was)\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+(\d+(?:\.\d+)?)",
         rf"(?:optimum|optimal)\s+temperature\s+and\s+pH\s+(?:were|was)\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+(\d+(?:\.\d+)?)",
         r"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){0,6}\s+at\s+pH\s*(\d+(?:\.\d+)?)",
+        r"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){0,8}\s+(?:at|under)\s+pH\s*(\d+(?:\.\d+)?)\s+and\s+temperature\b",
         rf"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){{0,6}}\s+(?:was\s+)?(?:observed\s+)?at\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+pH\s*(\d+(?:\.\d+)?)",
     ]
     return _first_match(text, patterns)
 
 
 def _extract_specific_activity(text: str) -> str | None:
-    unit = r"(?:U\s*/\s*mg|units?\s*/\s*mg|U\s*mg\s*[-\u2212]?1(?:\s+protein)?)"
+    unit = (
+        r"(?:(?:U|IU)\s*/\s*mg|units?\s*/\s*mg|"
+        r"(?:U|IU|units?)\s+per\s+mg(?:\s+protein)?|"
+        r"(?:U|IU)\s*mg\s*[-\u2212]?1(?:\s+protein)?)"
+    )
     patterns = [
+        rf"specific\s+activity\s+toward\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?\s+(?:was|is|=)\s*(\d+(?:\.\d+)?)\s*{unit}",
         rf"specific\s+activity(?:\s+(?:was|is|of|reached|as))?\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
         rf"\b(\d+(?:\.\d+)?)\s*{unit}\s+specific\s+activity\b",
         rf"enzyme\s+activity\s+(?:was|is|=)\s*(\d+(?:\.\d+)?)\s*{unit}",
@@ -833,11 +955,25 @@ def _extract_specific_activity(text: str) -> str | None:
     return _first_match(text, patterns)
 
 
+def _extract_volumetric_activity(text: str) -> str | None:
+    unit = r"(?:U\s*/\s*mL|units?\s*/\s*mL|(?:U|units?)\s+per\s+mL|U\s*mL\s*[-\u2212]?1)"
+    patterns = [
+        rf"enzyme\s+activity\s+(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
+        rf"activity\s+of\s+(\d+(?:\.\d+)?)\s*{unit}",
+        rf"\b(\d+(?:\.\d+)?)\s*{unit}\s+enzyme\s+activity\b",
+    ]
+    return _first_match(text, patterns)
+
+
 def _extract_activity_substrate(text: str, value: str | None) -> str | None:
     if value is None:
         return None
     sentence = _sentence_containing(text, value)
-    match = re.search(r"\btoward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60})", sentence, flags=re.IGNORECASE)
+    match = re.search(
+        r"\btoward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)(?:\s+(?:was|is|=)|[.;,]|$)",
+        sentence,
+        flags=re.IGNORECASE,
+    )
     return _clean_substrate_name(match.group(1)) if match else None
 
 
@@ -848,9 +984,18 @@ ORGANISM_FALSE_POSITIVE_PREFIXES = {
     "Full",
     "Journal",
     "Maximum",
+    "Michaelis",
+    "Menten",
     "Mutation",
+    "Amylase",
+    "Catalytic",
+    "Cellulase",
+    "Lipase",
+    "Protease",
     "Real",
     "The",
+    "Transglutaminase",
+    "Xylanase",
 }
 
 
@@ -898,17 +1043,23 @@ def _genus_for_initial(text: str, initial: str) -> str | None:
 
 
 def _extract_evidence_organism(text: str, needle: str | None) -> str | None:
+    source_organism = _extract_enzyme_source_organism(text)
     if needle:
         sentence = _sentence_containing(text, needle)
         organism = _extract_organism(sentence) or _extract_abbreviated_organism(sentence, text)
+        if organism and source_organism and _is_expression_host_sentence(sentence):
+            return source_organism
         if organism:
             return organism
         if _has_abbreviated_organism(sentence):
             return None
-    source_organism = _extract_enzyme_source_organism(text)
     if source_organism:
         return source_organism
     return _extract_organism(text)
+
+
+def _is_expression_host_sentence(text: str) -> bool:
+    return bool(re.search(r"\b(?:expressed|expression|recombinant|host)\b", text, flags=re.IGNORECASE))
 
 
 def _extract_enzyme_source_organism(text: str) -> str | None:
@@ -930,8 +1081,23 @@ def _extract_enzyme_source_organism(text: str) -> str | None:
 
 
 def _extract_labeled_number(text: str, label: str) -> str | None:
-    patterns = [rf"\b{label}\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)"]
+    patterns = [
+        rf"\b{label}\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
+        rf"\b{label}\s+value\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
+        rf"(?<!and\s)\b{label}\s+values\b\s*(?:were|was|is|=|of)?\s*(\d+(?:\.\d+)?)",
+    ]
     if label.lower() == "km":
+        michaelis_label = r"Michaelis(?:-Menten)?\s+constant"
+        patterns.append(rf"\b{michaelis_label}\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)")
+        patterns.append(rf"\b{michaelis_label}\b[^.;]*?\b(?:was|is|=|of)\s*(\d+(?:\.\d+)?)")
+        patterns.append(
+            r"\bKm\s+value\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+"
+            r"(?:were|was|is|=)\s+(\d+(?:\.\d+)?)"
+        )
+        patterns.append(
+            r"(?<!and\s)\bKm\s+values\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+"
+            r"(?:were|was|is|=)\s+(\d+(?:\.\d+)?)"
+        )
         patterns.append(
             r"\bKm\s+and\s+kcat\s+values?\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+"
             r"(?:were|was)\s+(\d+(?:\.\d+)?)\s*(?:mM|uM|μM)?\s+and\s+\d+(?:\.\d+)?"
@@ -952,6 +1118,17 @@ def _extract_labeled_number(text: str, label: str) -> str | None:
             r"\b(?:apparent\s+)?Km\b\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+of\s+(\d+(?:\.\d+)?)"
         )
     if label.lower() == "kcat":
+        patterns.append(r"\bturnover\s+number\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)")
+        patterns.append(r"\bcatalytic\s+constant\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)")
+        patterns.append(r"\bcatalytic\s+constant\b[^.;]*?\b(?:was|is|=|of)\s*(\d+(?:\.\d+)?)")
+        patterns.append(
+            r"\bkcat\s+value\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+"
+            r"(?:were|was|is|=)\s+(\d+(?:\.\d+)?)"
+        )
+        patterns.append(
+            r"(?<!and\s)\bkcat\s+values\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+"
+            r"(?:were|was|is|=)\s+(\d+(?:\.\d+)?)"
+        )
         patterns.append(
             r"\bKm\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+and\s+kcat\s+(?:were|was)\s+"
             r"\d+(?:\.\d+)?\s*(?:mM|uM|娓璏)?\s+and\s+(\d+(?:\.\d+)?)"
@@ -979,6 +1156,8 @@ def _extract_kcat_km(text: str) -> str | None:
             r"\bkcat\s+Km\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
             r"\bcatalytic\s+efficiency\b\s*(?:\([^)]*kcat\s*/\s*Km[^)]*\))?\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
             r"\bcatalytic\s+efficiency\b[^.;]*?\b(?:was|is|=|of)\s*(\d+(?:\.\d+)?)",
+            r"\bspecificity\s+constant\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
+            r"\bspecificity\s+constant\b[^.;]*?\b(?:was|is|=|of)\s*(\d+(?:\.\d+)?)",
         ],
     )
 
@@ -989,14 +1168,22 @@ def _extract_kinetic_substrate(text: str, value: str | None) -> str | None:
     sentence = _sentence_containing(text, value)
     patterns = [
         r"\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s*(?:K|k)",
+        r"\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s+[^.;]*?\b(?:K|k)m\b",
         r"\btoward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s*(?:K|k)",
         r"\bKm\s+and\s+kcat\s+values?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was)\b",
         r"\bkcat\s+and\s+Km\s+values?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was)\b",
         r"\bKm\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+and\s+kcat\s+(?:were|was)\b",
         r"\bKm\s+and\s+kcat\s+(?:values?\s+)?(?:were|was)\b.*?\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)(?:[.;,]|$)",
+        r"\b(?:K|k)m\s+value\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was|is|=)\b",
+        r"(?<!and\s)\b(?:K|k)m\s+values\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was|is|=)\b",
+        r"\bkcat\s+value\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was|is|=)\b",
+        r"(?<!and\s)\bkcat\s+values\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was|is|=)\b",
+        rf"\bturnover\s+number\b[^.;]*?\b{re.escape(value)}\b[^.;]*?\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:[.;,]|$)",
+        rf"\bcatalytic\s+constant\b[^.;]*?\b{re.escape(value)}\b[^.;]*?\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:\s+at\b|[.;,]|$)",
+        rf"\bMichaelis(?:-Menten)?\s+constant\b[^.;]*?\b{re.escape(value)}\b[^.;]*?\b(?:for|toward)\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:\s+at\b|[.;,]|$)",
         rf"\bcatalytic\s+efficiency\b\s+toward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)\s+(?:was|is|=|of)\s+{re.escape(value)}\b",
         rf"\b(?:apparent\s+)?Km\b\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)\s+of\s+{re.escape(value)}\s*(?:mM|uM)?",
-        rf"\b(?:kcat\s*/\s*Km|catalytic\s+efficiency)\b[^.;]*?\b{re.escape(value)}\b[^.;]*?\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:[.;,]|$)",
+        rf"\b(?:kcat\s*/\s*Km|catalytic\s+efficiency|specificity\s+constant)\b[^.;]*?\b{re.escape(value)}\b[^.;]*?\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:[.;,]|$)",
         rf"\b(?:K|k)m\b\s+(?:was|is|=|of)?\s*{re.escape(value)}\s*(?:mM|uM|µM)?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:\s+and\b|[.;,]|$)",
     ]
     for pattern in patterns:
@@ -1021,6 +1208,32 @@ def _extract_kinetic_assay_ph(text: str, value: str | None) -> str | None:
     return _first_match(sentence, [r"\bpH\s*(\d+(?:\.\d+)?)"])
 
 
+def _extract_km_unit(text: str, value: str | None) -> str:
+    if value is None:
+        return "mM"
+    sentence = _sentence_containing(text, value)
+    match = re.search(rf"\b{re.escape(value)}\s*(mM|uM|µM|μM)\b", sentence, flags=re.IGNORECASE)
+    if not match:
+        return "mM"
+    unit = match.group(1)
+    return "uM" if unit.lower() in {"um", "µm", "μm"} else "mM"
+
+
+def _extract_kcat_km_unit(text: str, value: str | None) -> str:
+    if value is None:
+        return "mM^-1 s^-1"
+    sentence = _sentence_containing(text, value)
+    match = re.search(
+        rf"\b{re.escape(value)}\s*(mM|M)\s*[-\^]?\s*1\s*s\s*[-\^]?\s*1\b",
+        sentence,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return "mM^-1 s^-1"
+    unit = match.group(1)
+    return "M^-1 s^-1" if unit == "M" else "mM^-1 s^-1"
+
+
 def _clean_substrate_name(value: str) -> str | None:
     cleaned = re.sub(r"\s+", " ", value).strip(" .;:,")
     return cleaned or None
@@ -1029,13 +1242,46 @@ def _clean_substrate_name(value: str) -> str | None:
 def _extract_mutation_strings(text: str) -> list[str]:
     seen: set[str] = set()
     mutations = []
-    for match in re.finditer(r"\b[A-Z][0-9]{1,5}[A-Z]\b", text):
+    combined_spans: list[tuple[int, int]] = []
+    mutation_pattern = r"[A-Z][0-9]{1,5}[A-Z]"
+    combined_pattern = rf"\b{mutation_pattern}(?:[\/+]{mutation_pattern})+\b"
+    for match in re.finditer(combined_pattern, text):
+        mutation = match.group(0)
+        seen.add(mutation)
+        mutations.append(mutation)
+        combined_spans.append(match.span())
+    for match in re.finditer(rf"\b{mutation_pattern}\b", text):
+        if any(start <= match.start() and match.end() <= end for start, end in combined_spans):
+            continue
         mutation = match.group(0)
         if mutation in seen:
             continue
         seen.add(mutation)
         mutations.append(mutation)
     return mutations
+
+
+def _extract_fold_change(text: str) -> str | None:
+    return _first_match(text, [r"\b(\d+(?:\.\d+)?)\s*[- ]?fold\b"])
+
+
+def _extract_mutant_property_delta(sentence: str) -> dict:
+    fold_change = _extract_fold_change(sentence)
+    if not fold_change:
+        return {}
+    signed_fold_change = _signed_fold_change(sentence, fold_change)
+    if re.search(r"\b(?:specific\s+activity|enzyme\s+activity|activity)\b", sentence, flags=re.IGNORECASE):
+        return {"specific_activity_fold_change": signed_fold_change}
+    if re.search(r"\b(?:thermostability|thermal\s+stability|stability)\b", sentence, flags=re.IGNORECASE):
+        return {"thermostability_fold_change": signed_fold_change}
+    return {}
+
+
+def _signed_fold_change(sentence: str, fold_change: str) -> float:
+    value = float(fold_change)
+    if re.search(r"\b(?:lower|reduced|decreased|decrease|loss|lost)\b", sentence, flags=re.IGNORECASE):
+        return -value
+    return value
 
 
 def _sentence_containing(text: str, needle: str) -> str:
@@ -1062,14 +1308,21 @@ def _measurement_sentence_score(sentence: str) -> int:
     return score
 
 
-def _kinetic_unit_label(*, km: str | None, kcat: str | None, kcat_km: str | None) -> str | None:
+def _kinetic_unit_label(
+    *,
+    km: str | None,
+    km_unit: str = "mM",
+    kcat: str | None,
+    kcat_km: str | None,
+    kcat_km_unit: str = "mM^-1 s^-1",
+) -> str | None:
     units = []
     if km is not None:
-        units.append("mM")
+        units.append(km_unit)
     if kcat is not None:
         units.append("s^-1")
     if kcat_km is not None:
-        units.append("mM^-1 s^-1")
+        units.append(kcat_km_unit)
     return "; ".join(units) or None
 
 

@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
+import re
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -103,13 +104,23 @@ def get_literature_client() -> MockLiteratureClient | RealLiteratureClient:
 
 def create_literature_reference(db: Session, metadata: LiteratureMetadata) -> LiteratureReference:
     existing = None
-    if metadata.doi:
-        existing = db.scalar(select(LiteratureReference).where(LiteratureReference.doi == metadata.doi))
-    if existing is None and metadata.pubmed_id:
+    doi = _normalize_doi(metadata.doi)
+    pubmed_id = _normalize_pubmed_id(metadata.pubmed_id)
+    if doi:
         existing = db.scalar(
-            select(LiteratureReference).where(LiteratureReference.pubmed_id == metadata.pubmed_id)
+            select(LiteratureReference).where(func.lower(LiteratureReference.doi).in_(_doi_lookup_values(doi)))
+        )
+    if existing is None and pubmed_id:
+        existing = db.scalar(
+            select(LiteratureReference).where(
+                func.lower(LiteratureReference.pubmed_id).in_(_pubmed_lookup_values(pubmed_id))
+            )
         )
     if existing is not None:
+        if doi:
+            existing.doi = doi
+        if pubmed_id:
+            existing.pubmed_id = pubmed_id
         return existing
 
     metadata_json = dict(metadata.metadata)
@@ -121,14 +132,51 @@ def create_literature_reference(db: Session, metadata: LiteratureMetadata) -> Li
         authors=metadata.authors,
         journal=metadata.journal,
         year=metadata.year,
-        doi=metadata.doi,
-        pubmed_id=metadata.pubmed_id,
+        doi=doi,
+        pubmed_id=pubmed_id,
         source=metadata.source,
         metadata_json=metadata_json or None,
     )
     db.add(reference)
     db.flush()
     return reference
+
+
+def _normalize_doi(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    normalized = re.sub(r"^doi:\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", normalized, flags=re.IGNORECASE)
+    normalized = normalized.rstrip(".,;")
+    return normalized.lower()
+
+
+def _doi_lookup_values(doi: str) -> list[str]:
+    return [doi, f"https://doi.org/{doi}", f"http://doi.org/{doi}", f"https://dx.doi.org/{doi}", f"doi:{doi}"]
+
+
+def _normalize_pubmed_id(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"\d+", value)
+    return match.group(0) if match else None
+
+
+def _pubmed_lookup_values(pubmed_id: str) -> list[str]:
+    return [
+        pubmed_id,
+        f"PMID:{pubmed_id}",
+        f"PMID: {pubmed_id}",
+        f"pmid:{pubmed_id}",
+        f"pmid: {pubmed_id}",
+        f"PubMed:{pubmed_id}",
+        f"PubMed: {pubmed_id}",
+        f"pubmed:{pubmed_id}",
+        f"pubmed: {pubmed_id}",
+    ]
 
 
 MOCK_MTGASE_PROPERTY_LITERATURE = LiteratureMetadata(

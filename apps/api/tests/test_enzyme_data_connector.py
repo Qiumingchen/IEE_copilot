@@ -553,6 +553,409 @@ def test_real_enzyme_data_client_extracts_enzyme_activity_was_specific_activity(
     ]
 
 
+def test_real_enzyme_data_client_queries_u_mg_minus_one_specific_activity(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase activity U mg-1":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase U mg-1 activity report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme reached a specific activity "
+                                "of 95 U mg-1 protein toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/u-mg-minus-one-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert "amylase activity U mg-1" in calls
+    assert records[0].value_original == "95"
+    assert records[0].substrate == "soluble starch"
+    assert records[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_queries_units_per_mg_specific_activity(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase activity units/mg":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase units per mg activity report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a specific activity "
+                                "of 118 units/mg protein toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/units-per-mg-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert "amylase activity units/mg" in calls
+    assert records[0].value_original == "118"
+    assert records[0].substrate == "soluble starch"
+    assert records[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_extracts_units_per_mg_words_specific_activity(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase units per mg activity report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a specific activity "
+                                "of 142 units per mg protein toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/units-per-mg-words",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="specific_activity",
+            value_original="142",
+            unit_original="U/mg",
+            substrate="soluble starch",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Catalysis 2024 doi:10.1000/units-per-mg-words | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed a specific activity "
+                "of 142 units per mg protein toward soluble starch"
+            ),
+            reference_title="Amylase units per mg activity report",
+            journal="Food Catalysis",
+            year=2024,
+            doi="10.1000/units-per-mg-words",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_queries_units_per_ml_activity(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase activity U/mL":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase volumetric activity report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed enzyme activity "
+                                "of 320 U/mL toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/u-per-ml-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert "amylase activity U/mL" in calls
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="activity",
+            value_original="320",
+            unit_original="U/mL",
+            substrate="soluble starch",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Catalysis 2024 doi:10.1000/u-per-ml-query | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed enzyme activity "
+                "of 320 U/mL toward soluble starch"
+            ),
+            reference_title="Amylase volumetric activity report",
+            journal="Food Catalysis",
+            year=2024,
+            doi="10.1000/u-per-ml-query",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_extracts_units_per_ml_words_activity(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase volumetric activity words report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed enzyme activity "
+                                "of 410 units per mL toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/units-per-ml-words",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="activity",
+            value_original="410",
+            unit_original="U/mL",
+            substrate="soluble starch",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Catalysis 2024 doi:10.1000/units-per-ml-words | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed enzyme activity "
+                "of 410 units per mL toward soluble starch"
+            ),
+            reference_title="Amylase volumetric activity words report",
+            journal="Food Catalysis",
+            year=2024,
+            doi="10.1000/units-per-ml-words",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_extracts_international_units_specific_activity(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase activity IU/mg":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase international unit activity report",
+                            "abstractText": (
+                                "The Bacillus licheniformis enzyme showed a specific activity "
+                                "of 76 IU/mg protein toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/iu-per-mg-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert "amylase activity IU/mg" in calls
+    assert records[0].value_original == "76"
+    assert records[0].unit_original == "U/mg"
+    assert records[0].substrate == "soluble starch"
+    assert records[0].organism == "Bacillus licheniformis"
+
+
+def test_real_enzyme_data_client_queries_iu_mg_minus_one_specific_activity(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase activity IU mg-1":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase IU mg-1 activity report",
+                            "abstractText": (
+                                "The Bacillus licheniformis enzyme reached a specific activity "
+                                "of 82 IU mg-1 protein toward soluble starch."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/iu-mg-minus-one-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert "amylase activity IU mg-1" in calls
+    assert records[0].value_original == "82"
+    assert records[0].unit_original == "U/mg"
+    assert records[0].substrate == "soluble starch"
+    assert records[0].organism == "Bacillus licheniformis"
+
+
+def test_real_enzyme_data_client_extracts_specific_activity_toward_substrate_was(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Substrate-specific amylase activity",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme specific activity toward "
+                                "soluble starch was 220 U/mg."
+                            ),
+                            "journalTitle": "Food Catalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/specific-activity-toward-was",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("amylase")
+
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="specific_activity",
+            value_original="220",
+            unit_original="U/mg",
+            substrate="soluble starch",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Catalysis 2024 doi:10.1000/specific-activity-toward-was | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme specific activity toward soluble starch was 220 U/mg"
+            ),
+            reference_title="Substrate-specific amylase activity",
+            journal="Food Catalysis",
+            year=2024,
+            doi="10.1000/specific-activity-toward-was",
+        )
+    ]
+
+
 def test_real_enzyme_data_client_extracts_common_optimum_ph_temperature_phrasing(monkeypatch):
     class Response:
         def raise_for_status(self):
@@ -742,6 +1145,57 @@ def test_real_enzyme_data_client_extracts_optimum_activity_conditions(monkeypatc
     assert ph_values[0].organism == "Bacillus subtilis"
 
 
+def test_real_enzyme_data_client_queries_optimum_activity_for_conditions(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] not in {
+            "food enzyme optimum activity temperature",
+            "food enzyme optimum activity pH",
+        }:
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Food enzyme optimum activity query",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed optimum activity "
+                                "at 55 degC and pH 7.0."
+                            ),
+                            "journalTitle": "Applied Food Enzymes",
+                            "pubYear": "2024",
+                            "doi": "10.1000/optimum-activity-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+    ph_values = client.fetch_opt_pH("food enzyme")
+
+    assert "food enzyme optimum activity temperature" in calls
+    assert "food enzyme optimum activity pH" in calls
+    assert temperatures[0].value_original == "55"
+    assert ph_values[0].value_original == "7.0"
+
+
 def test_real_enzyme_data_client_extracts_activity_conditions_when_ph_precedes_temperature(monkeypatch):
     class Response:
         def raise_for_status(self):
@@ -774,6 +1228,40 @@ def test_real_enzyme_data_client_extracts_activity_conditions_when_ph_precedes_t
     assert temperatures[0].value_original == "55"
     assert temperatures[0].organism == "Bacillus subtilis"
     assert ph_values[0].value_original == "7.0"
+
+
+def test_real_enzyme_data_client_extracts_activity_conditions_with_temperature_label(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Food enzyme optimum conditions",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme exhibited optimum activity "
+                                "under pH 7.5 and temperature 55 degC."
+                            ),
+                            "journalTitle": "Applied Food Enzymes",
+                            "pubYear": "2024",
+                            "doi": "10.1000/ph-temperature-label",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+    ph_values = client.fetch_opt_pH("food enzyme")
+
+    assert temperatures[0].value_original == "55"
+    assert ph_values[0].value_original == "7.5"
+    assert temperatures[0].organism == "Bacillus subtilis"
 
 
 def test_real_enzyme_data_client_extracts_optimum_condition_ranges(monkeypatch):
@@ -1070,6 +1558,39 @@ def test_real_enzyme_data_client_prefers_enzyme_source_over_expression_host(monk
     assert temperatures[0].organism == "Streptomyces mobaraensis"
 
 
+def test_real_enzyme_data_client_prefers_source_when_measurement_sentence_names_expression_host(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Recombinant transglutaminase optimum temperature",
+                            "abstractText": (
+                                "The transglutaminase from Streptomyces mobaraensis was cloned. "
+                                "The Escherichia coli recombinant enzyme showed "
+                                "optimum temperature at 55 degC."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/source-over-host-measurement",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("microbial transglutaminase")
+
+    assert temperatures[0].value_original == "55"
+    assert temperatures[0].organism == "Streptomyces mobaraensis"
+
+
 def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc_full_text(monkeypatch):
     calls = []
 
@@ -1137,6 +1658,177 @@ def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc_full_tex
             pubmed_id="76543210",
         )
     ]
+
+
+def test_real_enzyme_data_client_reuses_europe_pmc_full_text_between_property_fetches(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Full text characterization of microbial transglutaminase",
+                            "abstractText": "The abstract reports purification but omits activity optima.",
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2021",
+                            "doi": "10.1000/full-text-cache",
+                            "pmid": "76543211",
+                            "pmcid": "PMC7654324",
+                        }
+                    ]
+                }
+            }
+
+    class XmlResponse:
+        text = """
+        <article>
+          <body>
+            <p>The Streptomyces mobaraensis enzyme showed optimum temperature at 55 degC.</p>
+            <p>The Streptomyces mobaraensis enzyme showed optimum pH at 7.0.</p>
+          </body>
+        </article>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, params))
+        if url.endswith("/fullTextXML"):
+            return XmlResponse()
+        return JsonResponse()
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("microbial transglutaminase")
+    ph_values = client.fetch_opt_pH("microbial transglutaminase")
+
+    assert temperatures[0].value_original == "55"
+    assert ph_values[0].value_original == "7.0"
+    assert [url for url, _ in calls if url.endswith("/PMC7654324/fullTextXML")] == [
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC7654324/fullTextXML"
+    ]
+
+
+def test_real_enzyme_data_client_skips_full_text_when_abstract_has_property_value(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Abstract characterization of microbial transglutaminase",
+                            "abstractText": (
+                                "The Streptomyces mobaraensis enzyme showed optimum temperature at 55 degC."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2021",
+                            "doi": "10.1000/abstract-enzyme",
+                            "pmid": "76543211",
+                            "pmcid": "PMC7654322",
+                        }
+                    ]
+                }
+            }
+
+    class XmlResponse:
+        text = """
+        <article>
+          <body>
+            <p>The full text repeated optimum temperature at 55 degC.</p>
+          </body>
+        </article>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, params))
+        if url.endswith("/fullTextXML"):
+            return XmlResponse()
+        return JsonResponse()
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("microbial transglutaminase")
+
+    assert not any(url.endswith("/PMC7654322/fullTextXML") for url, _ in calls)
+    assert temperatures[0].value_original == "55"
+    assert temperatures[0].evidence == (
+        "Food Enzyme Reports 2021 doi:10.1000/abstract-enzyme pmid:76543211 | "
+        "Evidence quality: literature sentence | "
+        "Evidence: The Streptomyces mobaraensis enzyme showed optimum temperature at 55 degC"
+    )
+
+
+def test_real_enzyme_data_client_skips_full_text_when_abstract_has_volumetric_activity(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Abstract volumetric activity of microbial transglutaminase",
+                            "abstractText": (
+                                "The Streptomyces mobaraensis enzyme activity was 18 U/mL "
+                                "during casein crosslinking."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2021",
+                            "doi": "10.1000/abstract-volumetric-activity",
+                            "pmid": "76543212",
+                            "pmcid": "PMC7654323",
+                        }
+                    ]
+                }
+            }
+
+    class XmlResponse:
+        text = """
+        <article>
+          <body>
+            <p>The full text repeated enzyme activity was 18 U/mL.</p>
+          </body>
+        </article>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, params))
+        if url.endswith("/fullTextXML"):
+            return XmlResponse()
+        return JsonResponse()
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    activities = client.fetch_specific_activity("microbial transglutaminase")
+
+    assert not any(url.endswith("/PMC7654323/fullTextXML") for url, _ in calls)
+    assert activities[0].property_type == "activity"
+    assert activities[0].value_original == "18"
+    assert activities[0].unit_original == "U/mL"
+    assert activities[0].organism == "Streptomyces mobaraensis"
 
 
 def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(monkeypatch):
@@ -1211,6 +1903,291 @@ def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(m
     ]
 
 
+def test_real_enzyme_data_client_extracts_combined_mutation_strings(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Combined mutant characterization",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme mutant A123V/S124P improved "
+                                "thermostability and retained activity."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/combined-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert [record.mutation_string for record in mutants] == ["A123V/S124P"]
+    assert mutants[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_extracts_plus_separated_combined_mutation_strings(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Plus separated mutant characterization",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme mutant A123V+S124P improved "
+                                "specific activity."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/plus-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert [record.mutation_string for record in mutants] == ["A123V+S124P"]
+
+
+def test_real_enzyme_data_client_searches_site_directed_mutagenesis_for_mutants(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase site-directed mutagenesis":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Amylase site-directed mutagenesis",
+                            "abstractText": (
+                                "Site-directed mutagenesis of the Bacillus subtilis enzyme "
+                                "generated A123V with improved thermostability."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/site-directed-mutagenesis",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert "amylase site-directed mutagenesis" in calls
+    assert [record.mutation_string for record in mutants] == ["A123V"]
+    assert mutants[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_engineered_variant_for_mutants(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if params["query"] != "amylase engineered variant":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Engineered amylase variant",
+                            "abstractText": (
+                                "The engineered variant A123V of Bacillus subtilis amylase "
+                                "showed higher activity."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/engineered-variant",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert "amylase engineered variant" in calls
+    assert [record.mutation_string for record in mutants] == ["A123V"]
+    assert mutants[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_extracts_mutant_specific_activity_fold_change(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Activity-improved enzyme mutant",
+                            "abstractText": (
+                                "The Bacillus subtilis mutant A123V showed a 2.3-fold higher "
+                                "specific activity toward soluble starch."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/activity-fold-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert mutants[0].mutation_string == "A123V"
+    assert mutants[0].property_delta == {"specific_activity_fold_change": 2.3}
+    assert mutants[0].substrate == "soluble starch"
+
+
+def test_real_enzyme_data_client_extracts_decreased_mutant_specific_activity_fold_change(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Activity-reduced enzyme mutant",
+                            "abstractText": (
+                                "The Bacillus subtilis mutant A123V showed a 2.3-fold lower "
+                                "specific activity toward soluble starch."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/activity-lower-fold-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert mutants[0].mutation_string == "A123V"
+    assert mutants[0].property_delta == {"specific_activity_fold_change": -2.3}
+    assert mutants[0].substrate == "soluble starch"
+
+
+def test_real_enzyme_data_client_extracts_mutant_thermostability_fold_change(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Thermostable enzyme mutant",
+                            "abstractText": (
+                                "The Bacillus subtilis mutant A123V showed 5-fold higher "
+                                "thermostability after incubation at 60 degC."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/thermostability-fold-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert mutants[0].mutation_string == "A123V"
+    assert mutants[0].property_delta == {"thermostability_fold_change": 5.0}
+
+
+def test_real_enzyme_data_client_extracts_decreased_mutant_thermostability_fold_change(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Destabilized enzyme mutant",
+                            "abstractText": (
+                                "The Bacillus subtilis mutant A123V showed 3-fold reduced "
+                                "thermostability after incubation at 60 degC."
+                            ),
+                            "journalTitle": "Food Biocatalysis",
+                            "pubYear": "2024",
+                            "doi": "10.1000/reduced-thermostability-mutant",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    mutants = client.fetch_mutants("amylase")
+
+    assert mutants[0].mutation_string == "A123V"
+    assert mutants[0].property_delta == {"thermostability_fold_change": -3.0}
+
+
 def test_real_enzyme_data_client_extracts_kinetics_of_value_for_substrate(monkeypatch):
     class Response:
         def raise_for_status(self):
@@ -1259,6 +2236,108 @@ def test_real_enzyme_data_client_extracts_kinetics_of_value_for_substrate(monkey
             doi="10.1000/km-of-casein",
         )
     ]
+
+
+def test_real_enzyme_data_client_preserves_km_micromolar_unit(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease micromolar Km",
+                            "abstractText": (
+                                "For casein, the Bacillus subtilis enzyme Km was 250 uM "
+                                "at 37 degC and pH 7.5."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/km-micromolar",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].km == "250"
+    assert kinetics[0].unit_original == "uM"
+    assert kinetics[0].assay_temperature == "37"
+    assert kinetics[0].assay_pH == "7.5"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_extracts_kinetic_value_labels(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease kinetic value labels",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme was characterized with casein. "
+                                "The Km value was 0.9 mM and the kcat value was 15 s-1."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/kinetic-value-labels",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert kinetics[0].km == "0.9"
+    assert kinetics[0].kcat == "15"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_extracts_kinetic_value_labels_for_substrate(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease kinetic values",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed Km value for casein "
+                                "was 0.9 mM and kcat value was 15 s-1."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/kinetic-value-labels-substrate",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].km == "0.9"
+    assert kinetics[0].kcat == "15"
 
 
 def test_real_enzyme_data_client_extracts_joint_km_kcat_values_for_substrate(monkeypatch):
@@ -1644,6 +2723,344 @@ def test_real_enzyme_data_client_searches_catalytic_efficiency_synonym_for_kinet
     assert kinetics[0].organism == "Bacillus subtilis"
 
 
+def test_real_enzyme_data_client_searches_kcat_km_synonym_for_kinetics(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease kcat/Km":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease kcat Km report",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed kcat/Km "
+                                "of 9.1 mM-1 s-1 for casein."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/kcat-km-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease kcat/Km" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].kcat_km == "9.1"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_preserves_kcat_km_molar_unit(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease molar catalytic efficiency",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed kcat/Km "
+                                "of 12000 M-1 s-1 for casein."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/kcat-km-molar-unit",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].kcat_km == "12000"
+    assert kinetics[0].unit_original == "M^-1 s^-1"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_turnover_number_for_kcat(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease turnover number":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease turnover number",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a turnover number "
+                                "of 32 s-1 for casein."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/turnover-number-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease turnover number" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].kcat == "32"
+    assert kinetics[0].unit_original == "s^-1"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_catalytic_constant_for_kcat(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease catalytic constant":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease catalytic constant",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a catalytic constant "
+                                "of 18 s-1 for casein at 37 degC and pH 7.5."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/catalytic-constant-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease catalytic constant" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].kcat == "18"
+    assert kinetics[0].unit_original == "s^-1"
+    assert kinetics[0].assay_temperature == "37"
+    assert kinetics[0].assay_pH == "7.5"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_michaelis_constant_for_km(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease Michaelis constant":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease Michaelis constant",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a Michaelis constant "
+                                "of 0.42 mM for casein at 37 degC and pH 7.5."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/michaelis-constant-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease Michaelis constant" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].km == "0.42"
+    assert kinetics[0].unit_original == "mM"
+    assert kinetics[0].assay_temperature == "37"
+    assert kinetics[0].assay_pH == "7.5"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_michaelis_menten_constant_for_km(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease Michaelis-Menten constant":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease Michaelis-Menten constant",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a Michaelis-Menten constant "
+                                "of 0.51 mM toward casein at 40 degC and pH 8.0."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/michaelis-menten-constant-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease Michaelis-Menten constant" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].km == "0.51"
+    assert kinetics[0].assay_temperature == "40"
+    assert kinetics[0].assay_pH == "8.0"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
+def test_real_enzyme_data_client_searches_specificity_constant_for_kcat_km(monkeypatch):
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        if "sabiork" in url:
+            return Response([])
+        calls.append(params["query"])
+        if params["query"] != "protease specificity constant":
+            return Response({"resultList": {"result": []}})
+        return Response(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Protease specificity constant",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme showed a specificity constant "
+                                "of 6.8 mM-1 s-1 for casein."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/specificity-constant-query",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("protease")
+
+    assert "protease specificity constant" in calls
+    assert kinetics[0].substrate == "casein"
+    assert kinetics[0].kcat_km == "6.8"
+    assert kinetics[0].unit_original == "mM^-1 s^-1"
+    assert kinetics[0].organism == "Bacillus subtilis"
+
+
 def test_real_enzyme_data_client_extracts_pubmed_abstract_records_when_europe_pmc_has_no_hit(monkeypatch):
     calls = []
 
@@ -1792,6 +3209,620 @@ def test_real_enzyme_data_client_extracts_openalex_records_when_literature_sourc
             doi="10.1000/openalex-temperature",
         )
     ]
+
+
+def test_real_enzyme_data_client_deduplicates_same_doi_across_literature_sources(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "europepmc" in url:
+            return JsonResponse(
+                {
+                    "resultList": {
+                        "result": [
+                            {
+                                "title": "Shared DOI food enzyme characterization",
+                                "abstractText": (
+                                    "The Bacillus subtilis enzyme showed optimum temperature at 62 degC."
+                                ),
+                                "journalTitle": "Food Enzyme Reports",
+                                "pubYear": "2024",
+                                "doi": "https://doi.org/10.1000/shared-temperature",
+                            }
+                        ]
+                    }
+                }
+            )
+        if "esearch.fcgi" in url:
+            return JsonResponse({"esearchresult": {"idlist": []}})
+        if "openalex" in url:
+            return JsonResponse(
+                {
+                    "results": [
+                        {
+                            "display_name": "Shared DOI food enzyme characterization",
+                            "abstract_inverted_index": {
+                                "The": [0],
+                                "Bacillus": [1],
+                                "subtilis": [2],
+                                "enzyme": [3],
+                                "showed": [4],
+                                "optimum": [5],
+                                "temperature": [6],
+                                "at": [7],
+                                "62": [8],
+                                "degC": [9],
+                            },
+                            "publication_year": 2024,
+                            "doi": "10.1000/shared-temperature",
+                            "primary_location": {
+                                "source": {"display_name": "OpenAlex Food Enzymes"}
+                            },
+                        }
+                    ]
+                }
+            )
+        if "semanticscholar" in url:
+            return JsonResponse({"data": []})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+
+    assert any("europepmc" in url for url, _ in calls)
+    assert any("openalex" in url for url, _ in calls)
+    assert temperatures == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="62",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Reports 2024 doi:10.1000/shared-temperature | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 62 degC"
+            ),
+            reference_title="Shared DOI food enzyme characterization",
+            journal="Food Enzyme Reports",
+            year=2024,
+            doi="10.1000/shared-temperature",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_deduplicates_prefixed_doi_across_literature_sources(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "europepmc" in url:
+            return JsonResponse(
+                {
+                    "resultList": {
+                        "result": [
+                            {
+                                "title": "Shared DOI prefix food enzyme characterization",
+                                "abstractText": (
+                                    "The Bacillus subtilis enzyme showed optimum temperature at 63 degC."
+                                ),
+                                "journalTitle": "Food Enzyme Reports",
+                                "pubYear": "2024",
+                                "doi": "doi:10.1000/shared-prefix-temperature",
+                            }
+                        ]
+                    }
+                }
+            )
+        if "esearch.fcgi" in url:
+            return JsonResponse({"esearchresult": {"idlist": []}})
+        if "openalex" in url:
+            return JsonResponse(
+                {
+                    "results": [
+                        {
+                            "display_name": "Shared DOI prefix food enzyme characterization",
+                            "abstract_inverted_index": {
+                                "The": [0],
+                                "Bacillus": [1],
+                                "subtilis": [2],
+                                "enzyme": [3],
+                                "showed": [4],
+                                "optimum": [5],
+                                "temperature": [6],
+                                "at": [7],
+                                "63": [8],
+                                "degC": [9],
+                            },
+                            "publication_year": 2024,
+                            "doi": "10.1000/shared-prefix-temperature",
+                            "primary_location": {
+                                "source": {"display_name": "OpenAlex Food Enzymes"}
+                            },
+                        }
+                    ]
+                }
+            )
+        if "semanticscholar" in url:
+            return JsonResponse({"data": []})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+
+    assert any("europepmc" in url for url, _ in calls)
+    assert any("openalex" in url for url, _ in calls)
+    assert temperatures == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="63",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Reports 2024 doi:10.1000/shared-prefix-temperature | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 63 degC"
+            ),
+            reference_title="Shared DOI prefix food enzyme characterization",
+            journal="Food Enzyme Reports",
+            year=2024,
+            doi="10.1000/shared-prefix-temperature",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_deduplicates_trailing_punctuation_doi_across_literature_sources(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "europepmc" in url:
+            return JsonResponse(
+                {
+                    "resultList": {
+                        "result": [
+                            {
+                                "title": "Shared DOI trailing punctuation food enzyme characterization",
+                                "abstractText": (
+                                    "The Bacillus subtilis enzyme showed optimum temperature at 64 degC."
+                                ),
+                                "journalTitle": "Food Enzyme Reports",
+                                "pubYear": "2024",
+                                "doi": "10.1000/shared-trailing-temperature.",
+                            }
+                        ]
+                    }
+                }
+            )
+        if "esearch.fcgi" in url:
+            return JsonResponse({"esearchresult": {"idlist": []}})
+        if "openalex" in url:
+            return JsonResponse(
+                {
+                    "results": [
+                        {
+                            "display_name": "Shared DOI trailing punctuation food enzyme characterization",
+                            "abstract_inverted_index": {
+                                "The": [0],
+                                "Bacillus": [1],
+                                "subtilis": [2],
+                                "enzyme": [3],
+                                "showed": [4],
+                                "optimum": [5],
+                                "temperature": [6],
+                                "at": [7],
+                                "64": [8],
+                                "degC": [9],
+                            },
+                            "publication_year": 2024,
+                            "doi": "10.1000/shared-trailing-temperature",
+                            "primary_location": {
+                                "source": {"display_name": "OpenAlex Food Enzymes"}
+                            },
+                        }
+                    ]
+                }
+            )
+        if "semanticscholar" in url:
+            return JsonResponse({"data": []})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+
+    assert any("europepmc" in url for url, _ in calls)
+    assert any("openalex" in url for url, _ in calls)
+    assert temperatures == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="64",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Reports 2024 doi:10.1000/shared-trailing-temperature | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 64 degC"
+            ),
+            reference_title="Shared DOI trailing punctuation food enzyme characterization",
+            journal="Food Enzyme Reports",
+            year=2024,
+            doi="10.1000/shared-trailing-temperature",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_skips_secondary_literature_candidates(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "europepmc" in url:
+            return JsonResponse(
+                {
+                    "resultList": {
+                        "result": [
+                            {
+                                "title": "Review of Bacillus subtilis enzyme thermostability",
+                                "abstractText": (
+                                    "The Bacillus subtilis enzyme showed optimum temperature at 90 degC."
+                                ),
+                                "journalTitle": "Food Enzyme Reviews",
+                                "pubYear": "2024",
+                                "doi": "10.1000/review-temperature",
+                                "pubType": "Review",
+                            }
+                        ]
+                    }
+                }
+            )
+        if "esearch.fcgi" in url:
+            return JsonResponse({"esearchresult": {"idlist": []}})
+        if "openalex" in url:
+            return JsonResponse(
+                {
+                    "results": [
+                        {
+                            "display_name": "Primary Bacillus subtilis enzyme characterization",
+                            "abstract_inverted_index": {
+                                "The": [0],
+                                "Bacillus": [1],
+                                "subtilis": [2],
+                                "enzyme": [3],
+                                "showed": [4],
+                                "optimum": [5],
+                                "temperature": [6],
+                                "at": [7],
+                                "62": [8],
+                                "degC": [9],
+                            },
+                            "publication_year": 2024,
+                            "doi": "10.1000/primary-temperature",
+                            "primary_location": {
+                                "source": {"display_name": "OpenAlex Food Enzymes"}
+                            },
+                        }
+                    ]
+                }
+            )
+        if "semanticscholar" in url:
+            return JsonResponse({"data": []})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+
+    assert any("europepmc" in url for url, _ in calls)
+    assert any("openalex" in url for url, _ in calls)
+    assert temperatures == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="62",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="openalex",
+            evidence=(
+                "OpenAlex Food Enzymes 2024 doi:10.1000/primary-temperature | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 62 degC"
+            ),
+            reference_title="Primary Bacillus subtilis enzyme characterization",
+            journal="OpenAlex Food Enzymes",
+            year=2024,
+            doi="10.1000/primary-temperature",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_deduplicates_prefixed_pmid_across_literature_sources(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class TextResponse:
+        text = """
+        <PubmedArticleSet>
+          <PubmedArticle>
+            <MedlineCitation>
+              <PMID>45678901</PMID>
+              <Article>
+                <Journal>
+                  <Title>Food Enzyme Reports</Title>
+                  <JournalIssue><PubDate><Year>2024</Year></PubDate></JournalIssue>
+                </Journal>
+                <ArticleTitle>Shared PMID food enzyme characterization</ArticleTitle>
+                <Abstract>
+                  <AbstractText>The Bacillus subtilis enzyme showed optimum temperature at 64 degC.</AbstractText>
+                </Abstract>
+              </Article>
+            </MedlineCitation>
+          </PubmedArticle>
+        </PubmedArticleSet>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "europepmc" in url:
+            return JsonResponse(
+                {
+                    "resultList": {
+                        "result": [
+                            {
+                                "title": "Shared PMID food enzyme characterization",
+                                "abstractText": (
+                                    "The Bacillus subtilis enzyme showed optimum temperature at 64 degC."
+                                ),
+                                "journalTitle": "Food Enzyme Reports",
+                                "pubYear": "2024",
+                                "pmid": "PMID:45678901",
+                            }
+                        ]
+                    }
+                }
+            )
+        if "esearch.fcgi" in url:
+            return JsonResponse({"esearchresult": {"idlist": ["45678901"]}})
+        if "efetch.fcgi" in url:
+            return TextResponse()
+        if "openalex" in url:
+            return JsonResponse({"results": []})
+        if "semanticscholar" in url:
+            return JsonResponse({"data": []})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("food enzyme")
+
+    assert any("europepmc" in url for url, _ in calls)
+    assert any("efetch.fcgi" in url for url, _ in calls)
+    assert temperatures == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="64",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Reports 2024 pmid:45678901 | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 64 degC"
+            ),
+            reference_title="Shared PMID food enzyme characterization",
+            journal="Food Enzyme Reports",
+            year=2024,
+            pubmed_id="45678901",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_stops_after_extracted_property_budget_is_filled(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    europe_pmc_record = {
+        "title": "Fast Europe PMC enzyme hit",
+        "abstractText": "The Bacillus subtilis enzyme showed optimum temperature at 62 degC.",
+        "journalTitle": "Food Enzyme Reports",
+        "pubYear": "2024",
+        "doi": "10.1000/fast-hit",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append("europepmc")
+        return [europe_pmc_record]
+
+    def search_pubmed(query: str, size: int = 5):
+        calls.append("pubmed")
+        return []
+
+    def search_openalex(query: str, size: int = 5):
+        calls.append("openalex")
+        return []
+
+    def search_semantic_scholar(query: str, size: int = 5):
+        calls.append("semanticscholar")
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", search_pubmed)
+    monkeypatch.setattr(client, "_search_openalex", search_openalex)
+    monkeypatch.setattr(client, "_search_semantic_scholar", search_semantic_scholar)
+
+    records = client.fetch_opt_temperature("food enzyme", size=1)
+
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="optimal_temperature",
+            value_original="62",
+            unit_original="degC",
+            organism="Bacillus subtilis",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Reports 2024 doi:10.1000/fast-hit | "
+                "Evidence quality: literature sentence | "
+                "Evidence: The Bacillus subtilis enzyme showed optimum temperature at 62 degC"
+            ),
+            reference_title="Fast Europe PMC enzyme hit",
+            journal="Food Enzyme Reports",
+            year=2024,
+            doi="10.1000/fast-hit",
+        )
+    ]
+    assert calls == ["europepmc"]
+
+
+def test_real_enzyme_data_client_reuses_literature_search_results_for_same_query(monkeypatch):
+    calls = []
+
+    class JsonResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params["query"]))
+        return JsonResponse(
+            {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Cached food enzyme hit",
+                            "abstractText": "The Bacillus subtilis enzyme showed optimum temperature at 62 degC.",
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/cached-hit",
+                        }
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    first = client.fetch_opt_temperature("food enzyme", size=1)
+    second = client.fetch_opt_temperature("food enzyme", size=1)
+
+    assert first == second
+    assert calls == [
+        (
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+            "food enzyme optimum temperature",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_skips_literature_kinetics_when_sabiork_fills_budget(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    sabiork_record = ExternalKineticParameter(
+        substrate="casein",
+        km="0.8",
+        kcat="12",
+        unit_original="mM; s^-1",
+        organism="Bacillus subtilis",
+        source="sabiork",
+        evidence="SABIO-RK EntryID 12345 pmid:28193333 | Evidence quality: structured kinetic database",
+    )
+
+    def fetch_sabiork(query: str, size: int = 5):
+        calls.append("sabiork")
+        return [sabiork_record]
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append("europepmc")
+        return []
+
+    def search_pubmed(query: str, size: int = 5):
+        calls.append("pubmed")
+        return []
+
+    def search_openalex(query: str, size: int = 5):
+        calls.append("openalex")
+        return []
+
+    def search_semantic_scholar(query: str, size: int = 5):
+        calls.append("semanticscholar")
+        return []
+
+    monkeypatch.setattr(client, "_fetch_sabiork_kinetic_parameters", fetch_sabiork)
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", search_pubmed)
+    monkeypatch.setattr(client, "_search_openalex", search_openalex)
+    monkeypatch.setattr(client, "_search_semantic_scholar", search_semantic_scholar)
+
+    kinetics = client.fetch_kinetic_parameters("protease", size=1)
+
+    assert kinetics == [sabiork_record]
+    assert calls == ["sabiork"]
 
 
 def test_real_enzyme_data_client_extracts_semantic_scholar_records_when_other_sources_are_sparse(monkeypatch):
@@ -1956,6 +3987,132 @@ def test_real_enzyme_data_client_prefers_sabiork_structured_kinetics(monkeypatch
             year=2020,
             pubmed_id="28193333",
         )
+    ]
+
+
+def test_real_enzyme_data_client_normalizes_prefixed_sabiork_pubmed_id(monkeypatch):
+    class TextResponse:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params, timeout):
+        if "searchKineticLaws/entryIDs" in url:
+            return TextResponse("12345\n")
+        if "kineticlawsExportTsv" in url:
+            return TextResponse(
+                "\t".join(
+                    [
+                        "EntryID",
+                        "Organism",
+                        "Parameter",
+                        "ParameterValue",
+                        "ParameterUnit",
+                        "Substrate",
+                        "PubMedID",
+                    ]
+                )
+                + "\n"
+                + "\t".join(
+                    [
+                        "12345",
+                        "Streptomyces mobaraensis",
+                        "Km",
+                        "2.4",
+                        "mM",
+                        "CBZ-Gln-Gly",
+                        "PMID: 28193333",
+                    ]
+                )
+            )
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("Protein-glutamine gamma-glutamyltransferase P81453")
+
+    assert len(kinetics) == 1
+    assert kinetics[0].pubmed_id == "28193333"
+    assert kinetics[0].evidence == (
+        "SABIO-RK EntryID 12345 pmid:28193333 | Evidence quality: structured kinetic database"
+    )
+
+
+def test_real_enzyme_data_client_reuses_sabiork_kinetics_for_same_query(monkeypatch):
+    calls = []
+
+    class TextResponse:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params))
+        if "searchKineticLaws/entryIDs" in url:
+            return TextResponse("12345\n")
+        if "kineticlawsExportTsv" in url:
+            return TextResponse(
+                "\t".join(
+                    [
+                        "EntryID",
+                        "Organism",
+                        "UniprotID",
+                        "ECNumber",
+                        "Parameter",
+                        "ParameterValue",
+                        "ParameterUnit",
+                        "Substrate",
+                        "Temperature",
+                        "pH",
+                        "PubMedID",
+                        "Title",
+                        "Year",
+                    ]
+                )
+                + "\n"
+                + "\t".join(
+                    [
+                        "12345",
+                        "Streptomyces mobaraensis",
+                        "P81453",
+                        "2.3.2.13",
+                        "Km",
+                        "2.4",
+                        "mM",
+                        "CBZ-Gln-Gly",
+                        "45",
+                        "7.0",
+                        "28193333",
+                        "Curated kinetic law for microbial transglutaminase",
+                        "2020",
+                    ]
+                )
+            )
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", fake_get)
+    client = RealEnzymeDataClient()
+
+    first = client.fetch_kinetic_parameters(
+        "Protein-glutamine gamma-glutamyltransferase Streptomyces mobaraensis P81453",
+        size=1,
+    )
+    second = client.fetch_kinetic_parameters(
+        "Protein-glutamine gamma-glutamyltransferase Streptomyces mobaraensis P81453",
+        size=1,
+    )
+
+    assert first == second
+    assert [url for url, _ in calls if "searchKineticLaws/entryIDs" in url] == [
+        "https://sabiork.h-its.org/sabioRestWebServices/searchKineticLaws/entryIDs"
+    ]
+    assert [url for url, _ in calls if "kineticlawsExportTsv" in url] == [
+        "https://sabiork.h-its.org/sabioRestWebServices/kineticlawsExportTsv"
     ]
 
 
