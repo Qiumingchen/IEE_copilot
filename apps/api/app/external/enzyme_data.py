@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import csv
 from io import StringIO
 import re
-from typing import Protocol
+from typing import Callable, Protocol
 from xml.etree import ElementTree
 
 import httpx
@@ -61,6 +61,28 @@ class ExternalMutantRecord:
     year: int | None = None
     doi: str | None = None
     pubmed_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ExternalLiteratureDatum:
+    organism: str | None = None
+    source: str = "external_enzyme_data"
+    evidence: str | None = None
+    reference_title: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    pubmed_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ExternalEnzymeDataBatch:
+    property_data: list[ExternalPropertyDatum] = field(default_factory=list)
+    kinetic_parameters: list[ExternalKineticParameter] = field(default_factory=list)
+    mutant_records: list[ExternalMutantRecord] = field(default_factory=list)
+    literature_references: list[ExternalLiteratureDatum] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 class EnzymeDataClient(Protocol):
@@ -367,11 +389,163 @@ class RealEnzymeDataClient:
                     return records
         return records
 
+    def fetch_enzyme_records(
+        self,
+        query: str,
+        size: int = 5,
+        progress_callback: Callable[[dict], None] | None = None,
+    ) -> ExternalEnzymeDataBatch:
+        candidate_limit = _literature_candidate_limit(size)
+        candidates = list(self._search_relevant_literature(query, size=size))
+        sources = _unique_strings(_item_source(item) for item in candidates)
+        _emit_progress(
+            progress_callback,
+            {
+                "stage": "candidate literature search",
+                "candidate_articles": len(candidates),
+                "candidate_papers": _candidate_paper_summaries(candidates),
+                "articles_scanned": 0,
+                "filtered_articles": 0,
+                "relevant_articles": 0,
+                "found_records": 0,
+            },
+        )
+
+        property_data: list[ExternalPropertyDatum] = []
+        kinetic_parameters: list[ExternalKineticParameter] = self._fetch_sabiork_kinetic_parameters(query, size=size)
+        mutant_records: list[ExternalMutantRecord] = []
+        literature_references: list[ExternalLiteratureDatum] = []
+        seen_properties: set[tuple] = set()
+        seen_kinetics = {_kinetic_identity(record) for record in kinetic_parameters}
+        seen_mutants: set[tuple] = set()
+        seen_literature: set[tuple] = set()
+        articles_scanned = 0
+        filtered_articles = 0
+
+        for item in candidates:
+            articles_scanned += 1
+            if not _is_relevant_enzyme_article(item, query):
+                filtered_articles += 1
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "stage": "filtering candidate literature",
+                        "candidate_articles": len(candidates),
+                        "candidate_papers": _candidate_paper_summaries(candidates),
+                        "articles_scanned": articles_scanned,
+                        "filtered_articles": filtered_articles,
+                        "relevant_articles": articles_scanned - filtered_articles,
+                        "found_records": len(property_data) + len(kinetic_parameters) + len(mutant_records),
+                    },
+                )
+                continue
+
+            text = self._article_text_for_batch_extraction(item)
+            literature_datum = _literature_datum_from_article(item, text)
+            literature_identity = (literature_datum.doi, literature_datum.pubmed_id, literature_datum.reference_title)
+            if any(literature_identity) and literature_identity not in seen_literature:
+                seen_literature.add(literature_identity)
+                literature_references.append(literature_datum)
+
+            for datum in _extract_property_data_from_article(item, text):
+                identity = (
+                    datum.property_type,
+                    datum.value_original,
+                    datum.unit_original,
+                    datum.substrate,
+                    datum.doi,
+                    datum.pubmed_id,
+                )
+                if identity in seen_properties:
+                    continue
+                seen_properties.add(identity)
+                property_data.append(datum)
+
+            kinetics = _extract_kinetic_parameters_from_article(item, text)
+            for kinetic in kinetics:
+                kinetic_identity = _kinetic_identity(kinetic)
+                if kinetic_identity not in seen_kinetics:
+                    seen_kinetics.add(kinetic_identity)
+                    kinetic_parameters.append(kinetic)
+
+            for mutant in _extract_mutant_records_from_article(item, text):
+                mutant_identity = (mutant.mutation_string, mutant.substrate, mutant.doi, mutant.pubmed_id)
+                if mutant_identity in seen_mutants:
+                    continue
+                seen_mutants.add(mutant_identity)
+                mutant_records.append(mutant)
+
+            _emit_progress(
+                progress_callback,
+                {
+                    "stage": "extracting candidate literature",
+                    "candidate_articles": len(candidates),
+                    "candidate_papers": _candidate_paper_summaries(candidates),
+                    "articles_scanned": articles_scanned,
+                    "filtered_articles": filtered_articles,
+                    "relevant_articles": articles_scanned - filtered_articles,
+                    "found_records": len(property_data) + len(kinetic_parameters) + len(mutant_records),
+                },
+            )
+
+            if (
+                len(property_data) >= size
+                and len(kinetic_parameters) >= size
+                and len(mutant_records) >= size
+                and len(literature_references) >= candidate_limit
+            ):
+                break
+
+        return ExternalEnzymeDataBatch(
+            property_data=property_data[:size],
+            kinetic_parameters=kinetic_parameters[:size],
+            mutant_records=mutant_records[:size],
+            literature_references=literature_references[:candidate_limit],
+            sources=sources,
+        )
+
     def _article_text_for_extraction(self, item: dict, extractor) -> str:
         text = _article_text(item)
         if extractor(text) is not None or _item_source(item) != "europepmc":
             return text
         return _article_text(self._with_europe_pmc_full_text(item))
+
+    def _article_text_for_batch_extraction(self, item: dict) -> str:
+        text = _article_text(item)
+        if _article_has_extractable_enzyme_data(text) or _item_source(item) != "europepmc":
+            return text
+        return _article_text(self._with_europe_pmc_full_text(item))
+
+    def _search_relevant_literature(self, query: str, size: int = 5):
+        seen: set[tuple] = set()
+        yielded = 0
+        candidate_limit = _literature_candidate_limit(size)
+        discovery_queries = _literature_discovery_queries(query)
+        per_query_limit = max(size, candidate_limit // 3)
+        for discovery_query in discovery_queries:
+            query_yielded = 0
+            scored_records = sorted(
+                (
+                    (_literature_relevance_score(record, query), record)
+                    for record in self._search(discovery_query, size=candidate_limit)
+                ),
+                key=lambda item: item[0],
+                reverse=True,
+            )
+            for score, record in scored_records:
+                if score <= 0:
+                    continue
+                identity = _literature_candidate_identity(record)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                yield record
+                yielded += 1
+                query_yielded += 1
+                if yielded >= candidate_limit:
+                    return
+                if query_yielded >= per_query_limit:
+                    break
 
     def _search(self, query: str, size: int = 5):
         if size <= 0:
@@ -523,6 +697,645 @@ def _article_text(item: dict) -> str:
         for field in ["title", "abstractText", "fullText"]
         if item.get(field)
     )
+
+
+def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalPropertyDatum]:
+    records: list[ExternalPropertyDatum] = []
+    records.extend(_extract_comparative_property_data_from_article(item, text))
+    reaction_scope = _extract_substrate_reaction_scope(text)
+    if reaction_scope is not None:
+        records.append(
+            ExternalPropertyDatum(
+                property_type="substrate_reaction_scope",
+                value_original=reaction_scope,
+                organism=_extract_evidence_organism(text, reaction_scope),
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, reaction_scope),
+                **_reference_kwargs(item),
+            )
+        )
+    temperature = _extract_temperature(text)
+    if temperature is not None and not any(record.property_type == "optimal_temperature" for record in records):
+        records.append(
+            ExternalPropertyDatum(
+                property_type="optimal_temperature",
+                value_original=temperature,
+                unit_original="degC",
+                organism=_extract_evidence_organism(text, temperature),
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, temperature),
+                **_reference_kwargs(item),
+            )
+        )
+    ph_value = _extract_ph(text)
+    if ph_value is not None:
+        records.append(
+            ExternalPropertyDatum(
+                property_type="optimal_pH",
+                value_original=ph_value,
+                organism=_extract_evidence_organism(text, ph_value),
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, ph_value),
+                **_reference_kwargs(item),
+            )
+        )
+    activity = _extract_specific_activity(text)
+    property_type = "specific_activity"
+    unit_original = "U/mg"
+    if activity is None:
+        activity = _extract_volumetric_activity(text)
+        property_type = "activity"
+        unit_original = "U/mL"
+    if activity is not None and not any(record.property_type == property_type for record in records):
+        records.append(
+            ExternalPropertyDatum(
+                property_type=property_type,
+                value_original=activity,
+                unit_original=unit_original,
+                substrate=_extract_activity_substrate(text, activity),
+                organism=_extract_evidence_organism(text, activity),
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, activity),
+                **_reference_kwargs(item),
+            )
+        )
+    return records
+
+
+def _extract_substrate_reaction_scope(text: str) -> str | None:
+    normalized_text = _normalize_greek_letters(text)
+    match = re.search(
+        r"\b((?:epimerizes?|isomerizes?|hydroly[sz]es?|glycosylates?|transglycosylates?)"
+        r"(?:\s+and\s+(?:epimerizes?|isomerizes?|hydroly[sz]es?|glycosylates?|transglycosylates?))*"
+        r"\s+[A-Za-z0-9alpha-beta,\- ]{3,120}?(?:oligosaccharides?|saccharides?|substrates?|glycosides?))\b",
+        normalized_text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return _clean_substrate_name(match.group(1))
+
+
+def _normalize_greek_letters(text: str) -> str:
+    return (
+        text.replace("\u03b1", "alpha")
+        .replace("\u0391", "alpha")
+        .replace("\u03b2", "beta")
+        .replace("\u0392", "beta")
+    )
+
+
+def _extract_comparative_property_data_from_article(item: dict, text: str) -> list[ExternalPropertyDatum]:
+    records: list[ExternalPropertyDatum] = []
+    organism = r"([A-Z][a-z]+)\s+([a-z][a-z-]{2,})"
+    prefix = rf"\b{organism}\s+and\s+{organism}\s+enzymes?\s+showed\s+"
+    temperature_unit = r"(?:\u00b0\s*C|\u2103|degrees?\s*C|deg\s*C|degC|C)"
+    activity_unit = (
+        r"(?:(?:U|IU)\s*/\s*mg|units?\s*/\s*mg|"
+        r"(?:U|IU|units?)\s+per\s+mg(?:\s+protein)?|"
+        r"(?:U|IU)\s*mg\s*[-\u2212]?1(?:\s+protein)?)"
+    )
+    comparative_patterns = [
+        (
+            "optimal_temperature",
+            "degC",
+            None,
+            prefix
+            + rf"(?:an?\s+)?(?:optimum|optimal)\s+temperature\s+at\s+"
+            rf"(\d+(?:\.\d+)?)\s*{temperature_unit}\s+and\s+(\d+(?:\.\d+)?)\s*{temperature_unit},?\s+respectively",
+        ),
+        (
+            "optimal_pH",
+            None,
+            None,
+            prefix
+            + r"(?:an?\s+)?(?:optimum|optimal)\s+pH\s+at\s+"
+            r"(\d+(?:\.\d+)?)\s+and\s+(\d+(?:\.\d+)?),?\s+respectively",
+        ),
+        (
+            "specific_activity",
+            "U/mg",
+            "starch",
+            prefix
+            + rf"specific\s+activities\s+of\s+(\d+(?:\.\d+)?)\s*{activity_unit}\s+and\s+"
+            rf"(\d+(?:\.\d+)?)\s*{activity_unit}\s+toward\s+starch,?\s+respectively",
+        ),
+    ]
+    for property_type, unit_original, substrate, pattern in comparative_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            records.extend(
+                _comparative_property_records_from_match(
+                    item,
+                    text,
+                    match,
+                    property_type=property_type,
+                    unit_original=unit_original,
+                    substrate=substrate,
+                )
+            )
+    contrast_temperature_pattern = (
+        rf"\b(?:the\s+)?{organism}\s+enzymes?\s+had\s+an?\s+(?:optimum|optimal)\s+temperature\s+of\s+"
+        rf"(\d+(?:\.\d+)?)\s*{temperature_unit},?\s+(?:whereas|while)\s+(?:the\s+)?"
+        rf"{organism}\s+enzymes?\s+had\s+an?\s+(?:optimum|optimal)\s+temperature\s+of\s+"
+        rf"(\d+(?:\.\d+)?)\s*{temperature_unit}"
+    )
+    for match in re.finditer(contrast_temperature_pattern, text, flags=re.IGNORECASE):
+        records.extend(
+            _contrast_property_records_from_match(
+                item,
+                text,
+                match,
+                property_type="optimal_temperature",
+                unit_original="degC",
+                substrate=None,
+            )
+        )
+    contrast_ph_pattern = (
+        rf"\b(?:the\s+)?{organism}\s+enzymes?\s+had\s+an?\s+(?:optimum|optimal)\s+pH\s+of\s+"
+        r"(\d+(?:\.\d+)?),?\s+(?:whereas|while)\s+(?:the\s+)?"
+        rf"{organism}\s+enzymes?\s+had\s+an?\s+(?:optimum|optimal)\s+pH\s+of\s+"
+        r"(\d+(?:\.\d+)?)"
+    )
+    for match in re.finditer(contrast_ph_pattern, text, flags=re.IGNORECASE):
+        records.extend(
+            _contrast_property_records_from_match(
+                item,
+                text,
+                match,
+                property_type="optimal_pH",
+                unit_original=None,
+                substrate=None,
+            )
+        )
+    contrast_activity_pattern = (
+        rf"\b(?:the\s+)?{organism}\s+enzymes?\s+had\s+a\s+specific\s+activity\s+of\s+"
+        rf"(\d+(?:\.\d+)?)\s*{activity_unit}\s+toward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?),?\s+"
+        rf"(?:whereas|while)\s+(?:the\s+)?{organism}\s+enzymes?\s+had\s+a\s+specific\s+activity\s+of\s+"
+        rf"(\d+(?:\.\d+)?)\s*{activity_unit}\s+toward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{{0,60}}?)(?:[.;,]|$)"
+    )
+    for match in re.finditer(contrast_activity_pattern, text, flags=re.IGNORECASE):
+        first_organism = f"{match.group(1)} {match.group(2)}"
+        second_organism = f"{match.group(5)} {match.group(6)}"
+        records.extend(
+            [
+                ExternalPropertyDatum(
+                    property_type="specific_activity",
+                    value_original=match.group(3),
+                    unit_original="U/mg",
+                    substrate=_clean_substrate_name(match.group(4)),
+                    organism=first_organism,
+                    source=_item_source(item),
+                    evidence=_evidence_with_sentence(item, text, match.group(3)),
+                    **_reference_kwargs(item),
+                ),
+                ExternalPropertyDatum(
+                    property_type="specific_activity",
+                    value_original=match.group(7),
+                    unit_original="U/mg",
+                    substrate=_clean_substrate_name(match.group(8)),
+                    organism=second_organism,
+                    source=_item_source(item),
+                    evidence=_evidence_with_sentence(item, text, match.group(7)),
+                    **_reference_kwargs(item),
+                ),
+            ]
+        )
+    return records
+
+
+def _comparative_property_records_from_match(
+    item: dict,
+    text: str,
+    match: re.Match,
+    *,
+    property_type: str,
+    unit_original: str | None,
+    substrate: str | None,
+) -> list[ExternalPropertyDatum]:
+    sentence = _sentence_containing(text, match.group(5))
+    records = []
+    first_organism = f"{match.group(1)} {match.group(2)}"
+    second_organism = f"{match.group(3)} {match.group(4)}"
+    for organism_name, value in ((first_organism, match.group(5)), (second_organism, match.group(6))):
+        records.append(
+            ExternalPropertyDatum(
+                property_type=property_type,
+                value_original=value,
+                unit_original=unit_original,
+                substrate=substrate,
+                organism=organism_name,
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, value if value in sentence else match.group(5)),
+                **_reference_kwargs(item),
+            )
+        )
+    return records
+
+
+def _contrast_property_records_from_match(
+    item: dict,
+    text: str,
+    match: re.Match,
+    *,
+    property_type: str,
+    unit_original: str | None,
+    substrate: str | None,
+) -> list[ExternalPropertyDatum]:
+    first_organism = f"{match.group(1)} {match.group(2)}"
+    second_organism = f"{match.group(4)} {match.group(5)}"
+    return [
+        ExternalPropertyDatum(
+            property_type=property_type,
+            value_original=value,
+            unit_original=unit_original,
+            substrate=substrate,
+            organism=organism_name,
+            source=_item_source(item),
+            evidence=_evidence_with_sentence(item, text, value),
+            **_reference_kwargs(item),
+        )
+        for organism_name, value in ((first_organism, match.group(3)), (second_organism, match.group(6)))
+    ]
+
+
+def _extract_kinetic_parameter_from_article(item: dict, text: str) -> ExternalKineticParameter | None:
+    km = _extract_labeled_number(text, "km")
+    kcat = _extract_labeled_number(text, "kcat")
+    kcat_km = _extract_kcat_km(text)
+    if km == kcat_km:
+        km = None
+    if km is None and kcat is None and kcat_km is None:
+        return None
+    value = km or kcat or kcat_km
+    return ExternalKineticParameter(
+        substrate=_extract_kinetic_substrate(text, value),
+        km=km,
+        kcat=kcat,
+        kcat_km=kcat_km,
+        unit_original=_kinetic_unit_label(
+            km=km,
+            km_unit=_extract_km_unit(text, km),
+            kcat=kcat,
+            kcat_km=kcat_km,
+            kcat_km_unit=_extract_kcat_km_unit(text, kcat_km),
+        ),
+        assay_temperature=_extract_kinetic_assay_temperature(text, value),
+        assay_pH=_extract_kinetic_assay_ph(text, value),
+        organism=_extract_evidence_organism(text, value),
+        source=_item_source(item),
+        evidence=_evidence_with_sentence(item, text, value),
+        **_reference_kwargs(item),
+    )
+
+
+def _extract_kinetic_parameters_from_article(item: dict, text: str) -> list[ExternalKineticParameter]:
+    comparative_records = _extract_comparative_kinetic_parameters_from_article(item, text)
+    if comparative_records:
+        return comparative_records
+    kinetic = _extract_kinetic_parameter_from_article(item, text)
+    return [kinetic] if kinetic is not None else []
+
+
+def _extract_comparative_kinetic_parameters_from_article(item: dict, text: str) -> list[ExternalKineticParameter]:
+    organism = r"([A-Z][a-z]+)\s+([a-z][a-z-]{2,})"
+    pattern = (
+        rf"\b{organism}\s+and\s+{organism}\s+enzymes?\s+showed\s+"
+        r"Km\s+values\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+of\s+"
+        r"(\d+(?:\.\d+)?)\s*(mM|uM|渭M)\s+and\s+(\d+(?:\.\d+)?)\s*(mM|uM|渭M),?\s+respectively,?\s+"
+        r"and\s+kcat\s+values\s+of\s+(\d+(?:\.\d+)?)\s*(?:s-?1|s\^-1)\s+and\s+"
+        r"(\d+(?:\.\d+)?)\s*(?:s-?1|s\^-1),?\s+respectively"
+    )
+    records: list[ExternalKineticParameter] = []
+    for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+        first_organism = f"{match.group(1)} {match.group(2)}"
+        second_organism = f"{match.group(3)} {match.group(4)}"
+        substrate = _clean_substrate_name(match.group(5))
+        first_km = match.group(6)
+        first_km_unit = _normalize_km_unit(match.group(7))
+        second_km = match.group(8)
+        second_km_unit = _normalize_km_unit(match.group(9))
+        first_kcat = match.group(10)
+        second_kcat = match.group(11)
+        for organism_name, km, km_unit, kcat in (
+            (first_organism, first_km, first_km_unit, first_kcat),
+            (second_organism, second_km, second_km_unit, second_kcat),
+        ):
+            records.append(
+                ExternalKineticParameter(
+                    substrate=substrate,
+                    km=km,
+                    kcat=kcat,
+                    kcat_km=None,
+                    unit_original=f"{km_unit}; s^-1",
+                    organism=organism_name,
+                    source=_item_source(item),
+                    evidence=_evidence_with_sentence(item, text, km),
+                    **_reference_kwargs(item),
+                )
+            )
+    kcat_km_pattern = (
+        rf"\b{organism}\s+and\s+{organism}\s+enzymes?\s+showed\s+"
+        r"kcat\s*/\s*Km\s+values\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+of\s+"
+        r"(\d+(?:\.\d+)?)\s*(?:mM|M)\s*[-\^]?\s*1\s*s\s*[-\^]?\s*1\s+and\s+"
+        r"(\d+(?:\.\d+)?)\s*(?:mM|M)\s*[-\^]?\s*1\s*s\s*[-\^]?\s*1,?\s+respectively"
+    )
+    for match in re.finditer(kcat_km_pattern, text, flags=re.IGNORECASE):
+        first_organism = f"{match.group(1)} {match.group(2)}"
+        second_organism = f"{match.group(3)} {match.group(4)}"
+        substrate = _clean_substrate_name(match.group(5))
+        first_kcat_km = match.group(6)
+        second_kcat_km = match.group(7)
+        for organism_name, kcat_km in (
+            (first_organism, first_kcat_km),
+            (second_organism, second_kcat_km),
+        ):
+            records.append(
+                ExternalKineticParameter(
+                    substrate=substrate,
+                    km=None,
+                    kcat=None,
+                    kcat_km=kcat_km,
+                    unit_original=_extract_kcat_km_unit(text, kcat_km),
+                    organism=organism_name,
+                    source=_item_source(item),
+                    evidence=_evidence_with_sentence(item, text, kcat_km),
+                    **_reference_kwargs(item),
+                )
+            )
+    return records
+
+
+def _extract_mutant_records_from_article(item: dict, text: str) -> list[ExternalMutantRecord]:
+    records = []
+    for mutation in _extract_mutation_strings(text):
+        sentence = _sentence_containing(text, mutation)
+        records.append(
+            ExternalMutantRecord(
+                mutation_string=mutation,
+                effect_summary=f"Real literature mention: {sentence}",
+                property_delta=_extract_mutant_property_delta(sentence),
+                substrate=_extract_activity_substrate(sentence, _extract_fold_change(sentence)),
+                organism=_extract_evidence_organism(text, mutation),
+                source=_item_source(item),
+                evidence=_evidence_with_sentence(item, text, mutation),
+                **_reference_kwargs(item),
+            )
+        )
+    return records
+
+
+def _literature_datum_from_article(item: dict, text: str) -> ExternalLiteratureDatum:
+    return ExternalLiteratureDatum(
+        organism=_extract_evidence_organism(text, None),
+        source=_item_source(item),
+        evidence=_evidence_label(item),
+        **_reference_kwargs(item),
+    )
+
+
+def _literature_candidate_limit(size: int) -> int:
+    return min(max(size * 6, 18), 30)
+
+
+def _candidate_paper_summaries(items: list[dict]) -> list[dict]:
+    summaries = []
+    for item in items:
+        title = item.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        summaries.append(
+            {
+                "title": title.strip(),
+                "source": _item_source(item),
+                "year": _parse_year(item.get("pubYear")),
+                "doi": _normalize_doi(item.get("doi")),
+                "pubmed_id": _normalize_pubmed_id(item.get("pmid")),
+            }
+        )
+    return summaries
+
+
+def _article_has_extractable_enzyme_data(text: str) -> bool:
+    return any(
+        extractor(text) is not None
+        for extractor in (
+            _extract_temperature,
+            _extract_ph,
+            _extract_specific_activity,
+            _extract_volumetric_activity,
+            _extract_kinetic_value,
+            _extract_first_mutation_string,
+            _extract_substrate_reaction_scope,
+        )
+    )
+
+
+def _is_relevant_enzyme_article(item: dict, query: str) -> bool:
+    terms = _query_relevance_terms(query)
+    if not terms:
+        return True
+    text = _article_text(item).lower()
+    matches = sum(1 for term in terms if term in text)
+    return matches >= min(2, len(terms))
+
+
+def _literature_relevance_score(item: dict, query: str) -> int:
+    text = _article_text(item).lower()
+    title = str(item.get("title") or "").lower()
+    cleaned = _clean_literature_query(query)
+    without_accessions = _strip_accession_like_terms(cleaned)
+    enzyme_name, organism = _split_enzyme_organism_query(without_accessions)
+    score = 0
+
+    if without_accessions and without_accessions.lower() in text:
+        score += 8
+    if enzyme_name and organism:
+        enzyme_lower = enzyme_name.lower()
+        organism_lower = organism.lower()
+        if enzyme_lower in title:
+            score += 5
+        elif enzyme_lower in text:
+            score += 3
+        if organism_lower in title:
+            score += 5
+        elif organism_lower in text:
+            score += 3
+        if f"{enzyme_lower} from {organism_lower}" in text or f"{organism_lower} {enzyme_lower}" in text:
+            score += 8
+        abbreviated = _abbreviated_organism_pattern(organism)
+        if abbreviated and re.search(abbreviated, text, flags=re.IGNORECASE):
+            score += 3
+
+    terms = _query_relevance_terms(query)
+    score += sum(1 for term in terms if term in text)
+    if _article_has_extractable_enzyme_data(text):
+        score += 2
+    if _is_secondary_literature_record(item):
+        score -= 10
+    return score
+
+
+def _query_relevance_terms(query: str) -> list[str]:
+    stopwords = {
+        "activity",
+        "characterization",
+        "enzyme",
+        "enzymes",
+        "food",
+        "kinetic",
+        "kinetics",
+        "protein",
+        "proteins",
+    }
+    terms = []
+    for token in re.findall(r"[a-z0-9]+", query.lower()):
+        if len(token) < 3 or token in stopwords:
+            continue
+        terms.append(token)
+    return _unique_strings(terms)
+
+
+def _literature_discovery_queries(query: str) -> list[str]:
+    cleaned = _clean_literature_query(query)
+    without_accessions = _strip_accession_like_terms(cleaned)
+    enzyme_name, organism = _split_enzyme_organism_query(without_accessions)
+    strain = _extract_strain_suffix_after_organism(without_accessions, organism)
+    organism_with_strain = f"{organism} {strain}" if organism and strain else None
+    abbreviated_organism = _abbreviated_organism_name(organism)
+    abbreviated_organism_with_strain = (
+        f"{abbreviated_organism} {strain}" if abbreviated_organism and strain else None
+    )
+    enzyme_aliases = _enzyme_name_query_aliases(enzyme_name)
+    is_specific_enzyme = bool(enzyme_name and _is_specific_enzyme_name(enzyme_name))
+    queries = [
+        cleaned,
+        without_accessions,
+        f"{enzyme_name} from {organism}" if enzyme_name and organism else None,
+        f"{organism} {enzyme_name}" if enzyme_name and organism else None,
+        f"{enzyme_name} from {organism_with_strain}" if enzyme_name and organism_with_strain else None,
+        f"{organism_with_strain} {enzyme_name}" if enzyme_name and organism_with_strain else None,
+        f"{without_accessions} characterization" if without_accessions else None,
+        f"{without_accessions} biochemical characterization" if without_accessions else None,
+        f"{without_accessions} purification expression" if without_accessions else None,
+        *(f"{alias} from {organism}" for alias in enzyme_aliases if organism),
+        f"recombinant {enzyme_name} from {organism}" if enzyme_name and organism and is_specific_enzyme else None,
+        f"characterization of recombinant {enzyme_name} from {organism}" if enzyme_name and organism and is_specific_enzyme else None,
+        f"characterization of a recombinant {enzyme_name} from {organism}" if enzyme_name and organism and is_specific_enzyme else None,
+        f"purification of {enzyme_name} from {organism}" if enzyme_name and organism and is_specific_enzyme else None,
+        f"crystallographic analysis of {enzyme_name} from {organism}" if enzyme_name and organism and is_specific_enzyme else None,
+        f"{enzyme_name} from {abbreviated_organism}" if enzyme_name and abbreviated_organism else None,
+        f"{abbreviated_organism} {enzyme_name}" if enzyme_name and abbreviated_organism else None,
+        (
+            f"{enzyme_name} from {abbreviated_organism_with_strain}"
+            if enzyme_name and abbreviated_organism_with_strain
+            else None
+        ),
+        (
+            f"{abbreviated_organism_with_strain} {enzyme_name}"
+            if enzyme_name and abbreviated_organism_with_strain
+            else None
+        ),
+    ]
+    return _unique_strings(query for query in queries if query)
+
+
+def _clean_literature_query(query: str) -> str:
+    return re.sub(r"\s+", " ", query).strip()
+
+
+def _strip_accession_like_terms(query: str) -> str:
+    tokens = query.split()
+    kept = [token for token in tokens if not _looks_like_database_accession(token)]
+    return " ".join(kept).strip()
+
+
+def _split_enzyme_organism_query(query: str) -> tuple[str | None, str | None]:
+    match = re.search(r"\b([A-Z][a-z]+)\s+([a-z][a-z-]+)\b", query)
+    if match is None:
+        return None, None
+    organism = f"{match.group(1)} {match.group(2)}"
+    trailing = query[match.end() :].strip()
+    strain = _extract_strain_suffix(trailing)
+    if strain:
+        trailing = trailing[len(strain) :].strip()
+    enzyme_name = " ".join((query[: match.start()] + " " + trailing).split())
+    return enzyme_name or None, organism
+
+
+def _extract_strain_suffix_after_organism(query: str, organism: str | None) -> str | None:
+    if not organism:
+        return None
+    match = re.search(rf"\b{re.escape(organism)}\b(?P<trailing>.*)$", query)
+    if not match:
+        return None
+    return _extract_strain_suffix(match.group("trailing").strip())
+
+
+def _extract_strain_suffix(value: str) -> str | None:
+    match = re.match(
+        r"(?:(?:strain|str\.)\s+)?"
+        r"((?:DSM|ATCC|KCTC|JCM|NBRC|IFO|CGMCC|CIP)\s*\d+[A-Za-z0-9-]*)\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1)).strip()
+
+
+def _enzyme_name_query_aliases(enzyme_name: str | None) -> list[str]:
+    if not enzyme_name:
+        return []
+    aliases = []
+    without_numeric_prefixes = re.sub(r"\b\d+\s*-\s*", "", enzyme_name)
+    if without_numeric_prefixes != enzyme_name:
+        aliases.append(without_numeric_prefixes)
+    return _unique_strings(aliases)
+
+
+def _is_specific_enzyme_name(enzyme_name: str) -> bool:
+    return bool(re.search(r"\b[A-Za-z0-9-]*ase\b", enzyme_name, flags=re.IGNORECASE))
+
+
+def _abbreviated_organism_pattern(organism: str) -> str | None:
+    parts = organism.split()
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    return rf"\b{re.escape(parts[0][0])}\.\s*{re.escape(parts[1])}\b"
+
+
+def _abbreviated_organism_name(organism: str | None) -> str | None:
+    if not organism:
+        return None
+    parts = organism.split()
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    return f"{parts[0][0]}. {parts[1]}"
+
+
+def _looks_like_database_accession(token: str) -> bool:
+    normalized = re.sub(r"[^A-Za-z0-9]", "", token)
+    if len(normalized) < 5:
+        return False
+    if normalized != normalized.upper():
+        return False
+    return bool(re.fullmatch(r"(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{5,12}", normalized))
+
+
+def _emit_progress(progress_callback: Callable[[dict], None] | None, payload: dict) -> None:
+    if progress_callback is not None:
+        progress_callback(payload)
+
+
+def _unique_strings(values) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _extract_kinetic_value(text: str) -> str | None:
@@ -903,6 +1716,7 @@ def _extract_temperature(text: str) -> str | None:
         rf"(?:optimum|optimal)\s+temperature(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
         rf"temperature\s+(?:optimum|optimal|optima)(?:\s+(?:at|of|was|were))?\s*(?:is|was|were|at|of)?\s*(\d+(?:\.\d+)?)\s*{unit}",
         rf"pH\s+and\s+temperature\s+optima\s+(?:were|was)\s+\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
+        rf"(?:optimum|optimal)\s+pH\s+and\s+temperature\s+(?:were|was)\s+\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
         rf"temperature\s+and\s+pH\s+optima\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s*{unit}\s+and\s+\d+(?:\.\d+)?",
         rf"(?:optimum|optimal)\s+temperature\s+and\s+pH\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s*{unit}\s+and\s+\d+(?:\.\d+)?",
         rf"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){{0,6}}\s+(?:was\s+)?(?:observed\s+)?at\s+(\d+(?:\.\d+)?)\s*{unit}",
@@ -930,6 +1744,7 @@ def _extract_ph(text: str) -> str | None:
         r"optimum pH(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)",
         r"optimal pH(?:\s+(?:at|of|was))?\s*(?:is|was|at|of)?\s*(\d+(?:\.\d+)?)",
         r"pH\s+and\s+temperature\s+optima\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s+and\s+\d+(?:\.\d+)?",
+        rf"(?:optimum|optimal)\s+pH\s+and\s+temperature\s+(?:were|was)\s+(\d+(?:\.\d+)?)\s+and\s+\d+(?:\.\d+)?\s*{unit}",
         rf"temperature\s+and\s+pH\s+optima\s+(?:were|was)\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+(\d+(?:\.\d+)?)",
         rf"(?:optimum|optimal)\s+temperature\s+and\s+pH\s+(?:were|was)\s+\d+(?:\.\d+)?\s*{unit}\s+and\s+(\d+(?:\.\d+)?)",
         r"(?:maximum|highest|optimum|optimal) activity(?:\s+\w+){0,6}\s+at\s+pH\s*(\d+(?:\.\d+)?)",
@@ -1065,7 +1880,7 @@ def _is_expression_host_sentence(text: str) -> bool:
 def _extract_enzyme_source_organism(text: str) -> str | None:
     organisms = []
     patterns = [
-        r"\b(?:enzyme|protein|gene|sequence|transglutaminase|amylase|lipase|protease|cellulase|xylanase)\b"
+        r"\b(?:enzyme|protein|gene|sequence|[A-Za-z0-9-]*ase)\b"
         r"[^.]{0,80}?\b(?:from|of|derived\s+from|originating\s+from|isolated\s+from)\s+"
         r"([A-Z][a-z]+)\s+([a-z][a-z-]{2,})",
     ]
@@ -1118,6 +1933,10 @@ def _extract_labeled_number(text: str, label: str) -> str | None:
             r"\b(?:apparent\s+)?Km\b\s+for\s+[A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?\s+of\s+(\d+(?:\.\d+)?)"
         )
     if label.lower() == "kcat":
+        patterns.append(
+            r"\bKm,\s*kcat,\s+and\s+kcat\s*/\s*Km\s+values?\s+(?:were|was)\s+"
+            r"\d+(?:\.\d+)?\s*(?:mM|uM|渭M)?\s*,\s*(\d+(?:\.\d+)?)\s*(?:s-?1|s\^-1)"
+        )
         patterns.append(r"\bturnover\s+number\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)")
         patterns.append(r"\bcatalytic\s+constant\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)")
         patterns.append(r"\bcatalytic\s+constant\b[^.;]*?\b(?:was|is|=|of)\s*(\d+(?:\.\d+)?)")
@@ -1152,6 +1971,9 @@ def _extract_kcat_km(text: str) -> str | None:
     return _first_match(
         text,
         [
+            r"\bKm,\s*kcat,\s+and\s+kcat\s*/\s*Km\s+values?\s+(?:were|was)\s+"
+            r"\d+(?:\.\d+)?\s*(?:mM|uM|渭M)?\s*,\s*\d+(?:\.\d+)?\s*(?:s-?1|s\^-1)\s*,\s*"
+            r"(?:and\s+)?(\d+(?:\.\d+)?)\s*(?:mM|M)\s*[-\^]?\s*1\s*s\s*[-\^]?\s*1",
             r"\bkcat\s*/\s*Km\b\)?\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
             r"\bkcat\s+Km\b\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
             r"\bcatalytic\s+efficiency\b\s*(?:\([^)]*kcat\s*/\s*Km[^)]*\))?\s*(?:was|is|=|of)?\s*(\d+(?:\.\d+)?)",
@@ -1217,6 +2039,10 @@ def _extract_km_unit(text: str, value: str | None) -> str:
         return "mM"
     unit = match.group(1)
     return "uM" if unit.lower() in {"um", "µm", "μm"} else "mM"
+
+
+def _normalize_km_unit(unit: str | None) -> str:
+    return "uM" if (unit or "").lower() in {"um", "碌m", "渭m"} else "mM"
 
 
 def _extract_kcat_km_unit(text: str, value: str | None) -> str:

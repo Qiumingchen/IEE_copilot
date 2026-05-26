@@ -94,6 +94,11 @@ export type StructureQualityCheckView = {
   detail: string;
 };
 
+export type StructureExternalLinkView = {
+  label: string;
+  href: string;
+};
+
 export const structureUploadAccept = ".pdb,.cif,chemical/x-pdb,chemical/x-cif,text/plain";
 
 export function isStructureUploadFileName(fileName: string): boolean {
@@ -143,6 +148,22 @@ export function getStructurePreviewAtoms(structure: StructureRecord): StructureP
   });
 }
 
+export function sortStructuresForStructurePage(structures: StructureRecord[]): StructureRecord[] {
+  return [...structures].sort((left, right) => getStructurePriority(left) - getStructurePriority(right));
+}
+
+export function getStructureExternalLinks(structure: StructureRecord): StructureExternalLinkView[] {
+  const pdbId = typeof structure.pdb_id === "string" ? structure.pdb_id.trim().toUpperCase() : "";
+  return pdbId
+    ? [
+        {
+          label: `RCSB ${pdbId}`,
+          href: `https://www.rcsb.org/structure/${encodeURIComponent(pdbId)}`
+        }
+      ]
+    : [];
+}
+
 export function getChainOptions(structures: StructureRecord[]): ChainOptionView[] {
   return structures.flatMap((structure) => {
     const chains = getRecordArray(structure.chain_summary, "chains");
@@ -161,9 +182,11 @@ export function getChainOptions(structures: StructureRecord[]): ChainOptionView[
 }
 
 export function getDefaultStructureId(structures: StructureRecord[]): string | null {
+  const sortedStructures = sortStructuresForStructurePage(structures);
   return (
-    structures.find((structure) => getResidueRows(structure, null).length > 0)?.id ??
-    structures[0]?.id ??
+    sortedStructures.find(isRcsbStructure)?.id ??
+    sortedStructures.find((structure) => getResidueRows(structure, null).length > 0)?.id ??
+    sortedStructures[0]?.id ??
     null
   );
 }
@@ -491,6 +514,37 @@ function formatNearestResidues(ligand: Record<string, unknown>, cutoff: "4A" | "
 function getRecordArray(source: Record<string, unknown> | null | undefined, key: string): Record<string, unknown>[] {
   const value = source?.[key];
   return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function getStructurePriority(structure: StructureRecord): number {
+  if (isRcsbStructure(structure)) {
+    return 0;
+  }
+  if (isAlphaFoldStructure(structure)) {
+    return 1;
+  }
+  if (isUserUploadedStructure(structure)) {
+    return 3;
+  }
+  return 2;
+}
+
+function isRcsbStructure(structure: StructureRecord): boolean {
+  const structureType = structure.structure_type.toLowerCase();
+  const source = (structure.source ?? "").toLowerCase();
+  return Boolean(structure.pdb_id) || structureType === "pdb" || source.includes("rcsb");
+}
+
+function isAlphaFoldStructure(structure: StructureRecord): boolean {
+  const structureType = structure.structure_type.toLowerCase();
+  const source = (structure.source ?? "").toLowerCase();
+  return structureType === "alphafold" || source.includes("alphafold");
+}
+
+function isUserUploadedStructure(structure: StructureRecord): boolean {
+  const structureType = structure.structure_type.toLowerCase();
+  const source = (structure.source ?? "").toLowerCase();
+  return structureType.startsWith("uploaded_") || source === "user_upload";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

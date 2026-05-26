@@ -169,8 +169,28 @@ def test_finish_real_data_refresh_job_updates_status_and_summary(monkeypatch):
         assert require_real is True
         return 1, ["crossref"], []
 
-    def fake_save_external_data(_db, _enzyme, *, require_real):
+    def fake_save_external_data(_db, _enzyme, *, require_real, progress_callback=None):
         assert require_real is True
+        assert progress_callback is not None
+        progress_callback(
+            {
+                "candidate_articles": 3,
+                "articles_scanned": 2,
+                "filtered_articles": 1,
+                "relevant_articles": 1,
+                "found_records": 2,
+                "candidate_papers": [
+                    {
+                        "title": "Characterization of a worker enzyme",
+                        "source": "europepmc",
+                        "year": 2024,
+                        "doi": "10.1000/worker-enzyme",
+                        "pubmed_id": None,
+                    }
+                ],
+                "stage": "extracting candidate literature",
+            }
+        )
         return {"properties": 2, "kinetics": 0, "mutations": 0}, ["europepmc", "europepmc"], [
             "one source was temporarily unavailable"
         ]
@@ -227,6 +247,20 @@ def test_finish_real_data_refresh_job_updates_status_and_summary(monkeypatch):
             "processed_enzymes": 1,
             "total_enzymes": 1,
             "stage": "completed",
+            "candidate_articles": 3,
+            "articles_scanned": 2,
+            "filtered_articles": 1,
+            "relevant_articles": 1,
+            "extracted_records": 2,
+            "candidate_papers": [
+                {
+                    "title": "Characterization of a worker enzyme",
+                    "source": "europepmc",
+                    "year": 2024,
+                    "doi": "10.1000/worker-enzyme",
+                    "pubmed_id": None,
+                }
+            ],
         },
     }
 

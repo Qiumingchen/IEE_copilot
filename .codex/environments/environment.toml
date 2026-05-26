@@ -15,5 +15,5 @@ name = "配置docker"
 icon = "tool"
 command = '''
 docker compose build api worker
-docker compose up -d api worker
+docker compose up
 '''

@@ -820,6 +820,12 @@ def finish_real_data_refresh_job(db: Session, job_id: str) -> AnalysisJob:
         "processed_enzymes": 0,
         "total_enzymes": len(target_enzymes),
         "stage": "starting",
+        "candidate_articles": 0,
+        "articles_scanned": 0,
+        "filtered_articles": 0,
+        "relevant_articles": 0,
+        "extracted_records": 0,
+        "candidate_papers": [],
     }
 
     job.status = JobStatus.RUNNING
@@ -855,6 +861,16 @@ def finish_real_data_refresh_job(db: Session, job_id: str) -> AnalysisJob:
             db,
             target_enzyme,
             require_real=True,
+            progress_callback=lambda payload: _record_real_data_refresh_external_progress(
+                db,
+                job,
+                scope,
+                created,
+                sources,
+                warnings,
+                progress,
+                payload,
+            ),
         )
         _record_real_data_refresh_stage(
             db,
@@ -942,7 +958,7 @@ def _record_real_data_refresh_stage(
     created: dict[str, int],
     sources: list[str],
     warnings: list[str],
-    progress: dict[str, int | str],
+    progress: dict[str, object],
     *,
     stage: str,
     created_delta: dict[str, int],
@@ -962,6 +978,37 @@ def _record_real_data_refresh_stage(
     _update_real_data_refresh_progress(db, job, scope, created, sources, warnings, progress)
 
 
+def _record_real_data_refresh_external_progress(
+    db: Session,
+    job: AnalysisJob,
+    scope: str,
+    created: dict[str, int],
+    sources: list[str],
+    warnings: list[str],
+    progress: dict[str, object],
+    payload: dict,
+) -> None:
+    for source_key, progress_key in (
+        ("candidate_articles", "candidate_articles"),
+        ("articles_scanned", "articles_scanned"),
+        ("filtered_articles", "filtered_articles"),
+        ("relevant_articles", "relevant_articles"),
+        ("found_records", "extracted_records"),
+    ):
+        value = payload.get(source_key)
+        if isinstance(value, int):
+            progress[progress_key] = value
+    stage = payload.get("stage")
+    if isinstance(stage, str) and stage:
+        progress["stage"] = stage
+    candidate_papers = payload.get("candidate_papers")
+    if isinstance(candidate_papers, list):
+        progress["candidate_papers"] = [
+            paper for paper in candidate_papers if isinstance(paper, dict) and isinstance(paper.get("title"), str)
+        ]
+    _update_real_data_refresh_progress(db, job, scope, created, sources, warnings, progress)
+
+
 def _real_data_refresh_cancelled(db: Session, job: AnalysisJob) -> bool:
     db.refresh(job)
     return job.status == JobStatus.CANCELLED
@@ -974,7 +1021,7 @@ def _finish_cancelled_real_data_refresh_job(
     created: dict[str, int],
     sources: list[str],
     warnings: list[str],
-    progress: dict[str, int | str],
+    progress: dict[str, object],
 ) -> AnalysisJob:
     job.status = JobStatus.CANCELLED
     job.finished_at = datetime.utcnow()
@@ -1000,7 +1047,7 @@ def _update_real_data_refresh_progress(
     created: dict[str, int],
     sources: list[str],
     warnings: list[str],
-    progress: dict[str, int | str],
+    progress: dict[str, object],
     *,
     message: str = "real data refresh in progress",
 ) -> None:

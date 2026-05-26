@@ -14,6 +14,7 @@ from app.db.models import (
     AnalysisJob,
     EnzymeEntry,
     EnzymeFamily,
+    EnzymeLiteratureReference,
     EnzymeModule,
     ExpressionRecord,
     JobStatus,
@@ -305,7 +306,7 @@ def _fetch_uniprot_entries_with_client(
         if hit.accession in seen_accessions:
             continue
         seen_accessions.add(hit.accession)
-        if include_details and index == 0:
+        if include_details:
             entry = client.fetch_entry(hit.accession)
             entries.append((entry, client.fetch_fasta(entry.accession), source))
             continue
@@ -536,6 +537,7 @@ def _save_external_enzyme_data(
     *,
     require_real: bool = False,
     skip_mock: bool = False,
+    progress_callback=None,
 ) -> tuple[dict[str, int], list[str], list[str]]:
     client = get_enzyme_data_client()
     source = getattr(client, "source", "enzyme_data")
@@ -550,7 +552,27 @@ def _save_external_enzyme_data(
     property_data = []
     kinetic_parameters = []
     mutant_records = []
-    for query_variant in _external_enzyme_data_queries(enzyme):
+    literature_references = []
+    data_sources = {source}
+    warnings = []
+    fetch_enzyme_records = getattr(client, "fetch_enzyme_records", None)
+    query_variants = _external_enzyme_data_queries(enzyme)
+    if callable(fetch_enzyme_records):
+        query_variants = query_variants[:1]
+    for query_variant in query_variants:
+        if callable(fetch_enzyme_records):
+            batch = fetch_enzyme_records(
+                query_variant,
+                size=fetch_size,
+                progress_callback=progress_callback,
+            )
+            property_data.extend(batch.property_data)
+            kinetic_parameters.extend(batch.kinetic_parameters)
+            mutant_records.extend(batch.mutant_records)
+            literature_references.extend(batch.literature_references)
+            data_sources.update(batch.sources)
+            warnings.extend(batch.warnings)
+            continue
         property_data.extend(client.fetch_opt_temperature(query_variant, size=fetch_size))
         property_data.extend(client.fetch_opt_pH(query_variant, size=fetch_size))
         fetch_specific_activity = getattr(client, "fetch_specific_activity", None)
@@ -559,8 +581,6 @@ def _save_external_enzyme_data(
         kinetic_parameters.extend(client.fetch_kinetic_parameters(query_variant, size=fetch_size))
         mutant_records.extend(client.fetch_mutants(query_variant, size=fetch_size))
 
-    data_sources = {source}
-    warnings = []
     seen_property_data: set[tuple] = set()
     for datum in property_data:
         data_sources.add(getattr(datum, "source", None) or source)
@@ -707,6 +727,35 @@ def _save_external_enzyme_data(
             )
         )
         created["mutations"] += 1
+
+    seen_literature_data: set[tuple] = set()
+    for datum in literature_references:
+        data_sources.add(getattr(datum, "source", None) or source)
+        target_enzyme = _target_enzyme_for_external_datum(db, enzyme, datum)
+        if target_enzyme is None:
+            warnings.append(_external_datum_mismatch_warning(enzyme, datum))
+            continue
+        data_key = (
+            target_enzyme.id,
+            datum.doi,
+            datum.pubmed_id,
+            datum.reference_title,
+        )
+        if data_key in seen_literature_data:
+            continue
+        seen_literature_data.add(data_key)
+        reference, reference_created = _create_reference_for_external_datum(db, datum)
+        if reference is None:
+            continue
+        if reference_created:
+            created["references"] += 1
+        _link_literature_reference_to_enzyme(
+            db,
+            enzyme=target_enzyme,
+            reference=reference,
+            source=getattr(datum, "source", None) or source,
+            evidence=getattr(datum, "evidence", None),
+        )
     return created, _unique_strings([item for item in data_sources if item]), _unique_strings(warnings)
 
 
@@ -727,6 +776,8 @@ def _external_enzyme_data_queries(enzyme: EnzymeEntry) -> list[str]:
 def _target_enzyme_for_external_datum(db: Session, enzyme: EnzymeEntry, datum) -> EnzymeEntry | None:
     organism = _normalize_source_organism(getattr(datum, "organism", None))
     if organism is None:
+        if _external_literature_datum_matches_enzyme_context(enzyme, datum):
+            return enzyme
         if _external_datum_needs_explicit_organism(datum):
             return None
         return enzyme
@@ -753,6 +804,64 @@ def _external_datum_needs_explicit_organism(datum) -> bool:
     }
 
 
+def _external_literature_datum_matches_enzyme_context(enzyme: EnzymeEntry, datum) -> bool:
+    if not _looks_like_literature_only_datum(datum):
+        return False
+    text = _external_datum_reference_text(datum)
+    if not text:
+        return False
+    return _text_mentions_enzyme_name(text, enzyme.name) and _text_mentions_enzyme_organism(text, enzyme.organism)
+
+
+def _looks_like_literature_only_datum(datum) -> bool:
+    if not getattr(datum, "reference_title", None):
+        return False
+    value_fields = (
+        "property_type",
+        "value_original",
+        "km",
+        "kcat",
+        "kcat_km",
+        "mutation_string",
+    )
+    return not any(getattr(datum, field, None) for field in value_fields)
+
+
+def _external_datum_reference_text(datum) -> str:
+    return " ".join(
+        str(value)
+        for value in (
+            getattr(datum, "reference_title", None),
+            getattr(datum, "evidence", None),
+        )
+        if value
+    ).lower()
+
+
+def _text_mentions_enzyme_name(text: str, enzyme_name: str | None) -> bool:
+    terms = [
+        term
+        for term in re.findall(r"[a-z0-9]+", (enzyme_name or "").lower())
+        if len(term) >= 3 and term not in {"enzyme", "protein", "putative", "probable"}
+    ]
+    if not terms:
+        return False
+    return all(term in text for term in terms)
+
+
+def _text_mentions_enzyme_organism(text: str, organism: str | None) -> bool:
+    normalized = _normalize_source_organism(organism)
+    if normalized is None:
+        return False
+    species_name = _organism_species_name(normalized.lower())
+    if species_name and species_name in text:
+        return True
+    if normalized.lower() in text:
+        return True
+    abbreviation = _organism_species_abbreviation_key(normalized.lower())
+    return abbreviation is not None and abbreviation.replace(" ", ". ") in text
+
+
 def _external_datum_mismatch_warning(enzyme: EnzymeEntry, datum) -> str:
     organism = getattr(datum, "organism", None) or "unknown organism"
     if organism == "unknown organism" and _external_datum_needs_explicit_organism(datum):
@@ -775,6 +884,35 @@ def _backfill_external_reference(record, reference: LiteratureReference | None, 
         summary = dict(record.assay_condition_summary or {})
         summary.setdefault("evidence", evidence)
         record.assay_condition_summary = summary
+
+
+def _link_literature_reference_to_enzyme(
+    db: Session,
+    *,
+    enzyme: EnzymeEntry,
+    reference: LiteratureReference,
+    source: str,
+    evidence: str | None,
+) -> None:
+    existing = db.scalar(
+        select(EnzymeLiteratureReference).where(
+            EnzymeLiteratureReference.enzyme_entry_id == enzyme.id,
+            EnzymeLiteratureReference.literature_reference_id == reference.id,
+        )
+    )
+    if existing is not None:
+        if evidence and existing.evidence_text is None:
+            existing.evidence_text = evidence
+        return
+    db.add(
+        EnzymeLiteratureReference(
+            enzyme_entry_id=enzyme.id,
+            literature_reference_id=reference.id,
+            source=source,
+            evidence_text=evidence,
+            metadata_json={"source": source},
+        )
+    )
 
 
 def _find_existing_external_mutation(db: Session, enzyme: EnzymeEntry, mutant) -> MutationRecord | None:
@@ -1250,7 +1388,7 @@ def _backfill_sparse_uniprot_search_results(
             resolved_query,
             limit=limit,
             organism=organism,
-            include_details=False,
+            include_details=True,
         )
     except HTTPException:
         return
@@ -1910,14 +2048,17 @@ def search_enzymes(
     family = _ensure_family(db, module)
     cache_status = "miss_refreshed"
     retrieval_provenance: dict | None = None
+    use_search_cache = not settings.use_real_science_providers
 
     enzyme: EnzymeEntry | None = None
-    fresh_cache = find_fresh_search_cache(
-        db,
-        normalized_query=cache_normalized_query,
-        query_kind=resolved.kind.value,
-        module=module,
-    )
+    fresh_cache = None
+    if use_search_cache:
+        fresh_cache = find_fresh_search_cache(
+            db,
+            normalized_query=cache_normalized_query,
+            query_kind=resolved.kind.value,
+            module=module,
+        )
     if fresh_cache and fresh_cache.enzyme_entry_id:
         cached_enzyme = db.get(EnzymeEntry, fresh_cache.enzyme_entry_id)
         if (
@@ -2014,8 +2155,7 @@ def search_enzymes(
             resolved,
             limit=request.result_limit,
             organism=source_organism,
-            include_details=(not settings.use_real_science_providers)
-            or resolved.kind in {QueryKind.UNIPROT, QueryKind.ALPHAFOLD},
+            include_details=True,
         ):
             if uniprot_family is None:
                 uniprot_family = _ensure_uniprot_entry_family(db, module, entry)
@@ -2037,12 +2177,14 @@ def search_enzymes(
             )
             cache_status = "miss_refreshed"
 
-    stale_cache = find_search_cache(
-        db,
-        normalized_query=cache_normalized_query,
-        query_kind=resolved.kind.value,
-        module=module,
-    )
+    stale_cache = None
+    if use_search_cache:
+        stale_cache = find_search_cache(
+            db,
+            normalized_query=cache_normalized_query,
+            query_kind=resolved.kind.value,
+            module=module,
+        )
     if enzyme is None and stale_cache is not None and not is_fresh(stale_cache.last_refreshed_at):
         cache_status = "stale_refreshed"
     elif enzyme is not None and stale_cache is not None and not is_fresh(stale_cache.last_refreshed_at):
@@ -2128,16 +2270,17 @@ def search_enzymes(
     )
     db.add(job)
     db.flush()
-    _upsert_search_cache(
-        db,
-        query=request.query,
-        normalized_query=cache_normalized_query,
-        query_kind=resolved.kind.value,
-        module=module,
-        enzyme=enzyme,
-        job=job,
-        retrieval_provenance=retrieval_provenance,
-    )
+    if use_search_cache:
+        _upsert_search_cache(
+            db,
+            query=request.query,
+            normalized_query=cache_normalized_query,
+            query_kind=resolved.kind.value,
+            module=module,
+            enzyme=enzyme,
+            job=job,
+            retrieval_provenance=retrieval_provenance,
+        )
     db.commit()
     db.refresh(enzyme)
     db.refresh(job)

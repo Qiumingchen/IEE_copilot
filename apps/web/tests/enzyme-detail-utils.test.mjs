@@ -8,6 +8,9 @@ import {
   parseEvidenceText,
   formatRealDataRefreshSummary,
   formatReferenceForTable,
+  isUserUploadedStructure,
+  sortStructuresForDisplay,
+  sortLiteratureReferencesForDisplay,
   formatVisibilityStatus,
   overviewTableEmptyLabel,
   shouldShowOverviewTable
@@ -37,6 +40,52 @@ test("formatReferenceForTable prefers readable literature metadata", () => {
 test("formatReferenceForTable falls back to id or dash", () => {
   assert.equal(formatReferenceForTable("missing-ref", referencesById), "missing-ref");
   assert.equal(formatReferenceForTable(null, referencesById), "-");
+});
+
+test("sortLiteratureReferencesForDisplay keeps newest known papers first", () => {
+  const sorted = sortLiteratureReferencesForDisplay([
+    { ...referencesById["ref-1"], id: "older", year: 2020 },
+    { ...referencesById["ref-1"], id: "unknown", year: null },
+    { ...referencesById["ref-1"], id: "newer", year: 2024 }
+  ]);
+
+  assert.deepEqual(
+    sorted.map((reference) => reference.id),
+    ["newer", "older", "unknown"]
+  );
+});
+
+test("sortStructuresForDisplay keeps RCSB and AlphaFold structures before uploads", () => {
+  const uploaded = {
+    id: "uploaded-1",
+    structure_type: "uploaded_pdb",
+    source: "user_upload",
+    created_at: "2026-01-01T00:00:00Z"
+  };
+  const alphafold = {
+    id: "alphafold-1",
+    structure_type: "alphafold",
+    source: "alphafold",
+    created_at: "2026-01-02T00:00:00Z"
+  };
+  const rcsb = {
+    id: "rcsb-1",
+    structure_type: "pdb",
+    source: "rcsb",
+    created_at: "2026-01-03T00:00:00Z"
+  };
+
+  assert.deepEqual(
+    sortStructuresForDisplay([uploaded, alphafold, rcsb]).map((item) => item.id),
+    ["rcsb-1", "alphafold-1", "uploaded-1"]
+  );
+});
+
+test("isUserUploadedStructure only allows uploaded user structures to be deleted", () => {
+  assert.equal(isUserUploadedStructure({ structure_type: "uploaded_pdb", source: "user_upload" }), true);
+  assert.equal(isUserUploadedStructure({ structure_type: "uploaded_cif", source: "user_upload" }), true);
+  assert.equal(isUserUploadedStructure({ structure_type: "alphafold", source: "alphafold" }), false);
+  assert.equal(isUserUploadedStructure({ structure_type: "pdb", source: "rcsb" }), false);
 });
 
 test("formatVisibilityStatus combines visibility and curation status", () => {
@@ -108,6 +157,12 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
       processedEnzymes: 0,
       totalEnzymes: 0,
       stage: null,
+      candidateArticles: 0,
+      articlesScanned: 0,
+      filteredArticles: 0,
+      relevantArticles: 0,
+      extractedRecords: 0,
+      candidatePapers: [],
       canPause: true
     }
   );
@@ -126,7 +181,21 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
           not_found_sources: 0,
           processed_enzymes: 0,
           total_enzymes: 1,
-          stage: "properties and kinetics: TGase"
+          stage: "extracting candidate literature",
+          candidate_articles: 5,
+          articles_scanned: 2,
+          filtered_articles: 1,
+          relevant_articles: 1,
+          extracted_records: 2,
+          candidate_papers: [
+            {
+              title: "Characterization of a recombinant cellobiose 2-epimerase",
+              source: "europepmc",
+              year: 2012,
+              doi: "10.1007/s00253-012-4002-5",
+              pubmed_id: null
+            }
+          ]
         }
       },
       error_message: null
@@ -143,7 +212,21 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
       notFoundSources: 0,
       processedEnzymes: 0,
       totalEnzymes: 1,
-      stage: "properties and kinetics: TGase",
+      stage: "extracting candidate literature",
+      candidateArticles: 5,
+      articlesScanned: 2,
+      filteredArticles: 1,
+      relevantArticles: 1,
+      extractedRecords: 2,
+      candidatePapers: [
+        {
+          title: "Characterization of a recombinant cellobiose 2-epimerase",
+          source: "europepmc",
+          year: 2012,
+          doi: "10.1007/s00253-012-4002-5",
+          pubmedId: null
+        }
+      ],
       canPause: true
     }
   );
@@ -176,6 +259,12 @@ test("buildRealDataRefreshProgress reports finished job counts and warnings", ()
       processedEnzymes: 0,
       totalEnzymes: 0,
       stage: null,
+      candidateArticles: 0,
+      articlesScanned: 0,
+      filteredArticles: 0,
+      relevantArticles: 0,
+      extractedRecords: 0,
+      candidatePapers: [],
       canPause: false
     }
   );
@@ -203,6 +292,12 @@ test("buildRealDataRefreshProgress reports failed job error", () => {
       processedEnzymes: 0,
       totalEnzymes: 0,
       stage: null,
+      candidateArticles: 0,
+      articlesScanned: 0,
+      filteredArticles: 0,
+      relevantArticles: 0,
+      extractedRecords: 0,
+      candidatePapers: [],
       canPause: false
     }
   );
@@ -222,7 +317,13 @@ test("buildRealDataRefreshProgress reports paused job progress", () => {
           not_found_sources: 2,
           processed_enzymes: 1,
           total_enzymes: 3,
-          stage: "cancelled"
+          stage: "cancelled",
+          candidate_articles: 4,
+          articles_scanned: 3,
+          filtered_articles: 1,
+          relevant_articles: 2,
+          extracted_records: 2,
+          candidate_papers: []
         }
       },
       result_summary_json: {
@@ -245,6 +346,12 @@ test("buildRealDataRefreshProgress reports paused job progress", () => {
       processedEnzymes: 1,
       totalEnzymes: 3,
       stage: "cancelled",
+      candidateArticles: 4,
+      articlesScanned: 3,
+      filteredArticles: 1,
+      relevantArticles: 2,
+      extractedRecords: 2,
+      candidatePapers: [],
       canPause: false
     }
   );

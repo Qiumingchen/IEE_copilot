@@ -12,6 +12,7 @@ import {
   createPropertyRecord,
   createStructureRecord,
   createSubstrate,
+  deleteStructureRecord,
   getEnzymeRecordBundle,
   getJob,
   listEnzymeReferences,
@@ -31,9 +32,12 @@ import {
   formatFamilyComparisonMetric,
   formatReferenceForTable,
   formatVisibilityStatus,
+  isUserUploadedStructure,
   overviewTableEmptyLabel,
   parseEvidenceText,
-  shouldShowOverviewTable
+  shouldShowOverviewTable,
+  sortStructuresForDisplay,
+  sortLiteratureReferencesForDisplay
 } from "./enzyme-detail-utils";
 import { ReferenceCitation } from "./ReferenceCitation";
 
@@ -251,6 +255,7 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
   const [isSavingProperty, setIsSavingProperty] = useState(false);
   const [isSavingStructure, setIsSavingStructure] = useState(false);
   const [isUploadingStructure, setIsUploadingStructure] = useState(false);
+  const [deletingStructureId, setDeletingStructureId] = useState<string | null>(null);
   const [isSavingKinetic, setIsSavingKinetic] = useState(false);
   const [isSavingExpression, setIsSavingExpression] = useState(false);
   const [isFetchingRealData, setIsFetchingRealData] = useState(false);
@@ -286,6 +291,11 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
     () => bundle?.family_entries.filter((item) => selectedFamilyEntryIds.includes(item.id)) ?? [],
     [bundle, selectedFamilyEntryIds]
   );
+  const literatureReferences = useMemo(
+    () => sortLiteratureReferencesForDisplay(Object.values(referencesById)),
+    [referencesById]
+  );
+  const displayStructures = useMemo(() => sortStructuresForDisplay(bundle?.structures ?? []), [bundle]);
 
   async function loadBundle(nextToken: string) {
     setError(null);
@@ -421,6 +431,23 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
       setError("Unable to upload or parse structure file.");
     } finally {
       setIsUploadingStructure(false);
+    }
+  }
+
+  async function handleDeleteStructure(structure: StructureRecord) {
+    if (!token || !isUserUploadedStructure(structure)) {
+      return;
+    }
+
+    setDeletingStructureId(structure.id);
+    setError(null);
+    try {
+      await deleteStructureRecord(enzymeId, structure.id, token);
+      await loadBundle(token);
+    } catch {
+      setError("Unable to delete uploaded structure file.");
+    } finally {
+      setDeletingStructureId(null);
     }
   }
 
@@ -657,6 +684,12 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
       processedEnzymes: 0,
       totalEnzymes: 0,
       stage: null,
+      candidateArticles: 0,
+      articlesScanned: 0,
+      filteredArticles: 0,
+      relevantArticles: 0,
+      extractedRecords: 0,
+      candidatePapers: [],
       canPause: true
     });
   }
@@ -1361,14 +1394,26 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
               title="Substrates"
             />
             <RecordTable
-              columns={["Type", "State", "Chains", "Ligands", "Provenance", "Artifact"]}
-              rows={bundle.structures.map((item) => [
+              columns={["Type", "State", "Chains", "Ligands", "Provenance", "Artifact", "Actions"]}
+              rows={displayStructures.map((item) => [
                 item.structure_type,
                 item.complex_state,
                 summarizeStructureChains(item),
                 summarizeStructureLigands(item),
                 summarizeStructureProvenance(item),
-                item.artifact?.object_key ?? "-"
+                item.artifact?.object_key ?? "-",
+                isUserUploadedStructure(item) ? (
+                  <button
+                    className="rounded-md border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    disabled={deletingStructureId === item.id}
+                    onClick={() => void handleDeleteStructure(item)}
+                    type="button"
+                  >
+                    {deletingStructureId === item.id ? "Deleting..." : "Delete"}
+                  </button>
+                ) : (
+                  "-"
+                )
               ])}
               title="Structures"
             />
@@ -1435,6 +1480,16 @@ export default function EnzymeDetailClient({ enzymeId, mode = "detail" }: Enzyme
                 title="Expression"
               />
             ) : null}
+            <RecordTable
+              columns={["Citation", "Journal", "Year", "Source"]}
+              rows={literatureReferences.map((reference) => [
+                <ReferenceCitation reference={reference} />,
+                textOrDash(reference.journal),
+                reference.year ? String(reference.year) : "-",
+                reference.source
+              ])}
+              title="References"
+            />
           </section>
         </>
       ) : null}
@@ -1486,7 +1541,27 @@ function RealDataProgressPanel({
           style={{ width: `${progress.percent}%` }}
         />
       </div>
-      <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Candidate papers</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.candidateArticles}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Papers scanned</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.articlesScanned}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Papers filtered</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.filteredArticles}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Relevant papers</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.relevantArticles}</dd>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase text-slate-500">Extracted records</dt>
+          <dd className="mt-1 font-semibold text-slate-950">{progress.extractedRecords}</dd>
+        </div>
         <div className="rounded-md bg-white px-3 py-2">
           <dt className="text-xs font-medium uppercase text-slate-500">Sources checked</dt>
           <dd className="mt-1 font-semibold text-slate-950">{progress.checkedSources}</dd>
@@ -1510,6 +1585,25 @@ function RealDataProgressPanel({
           <dd className="mt-1 break-words font-semibold text-slate-950">{progress.stage ?? "-"}</dd>
         </div>
       </dl>
+      {progress.candidatePapers.length > 0 ? (
+        <div className="mt-3 overflow-hidden rounded-md border border-sky-100 bg-white">
+          <div className="border-b border-sky-100 px-3 py-2">
+            <h3 className="text-xs font-semibold uppercase text-slate-500">Candidate paper list</h3>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {progress.candidatePapers.map((paper, index) => (
+              <li className="px-3 py-2" key={`${paper.title}-${paper.doi ?? paper.pubmedId ?? index}`}>
+                <p className="font-medium text-slate-950">{paper.title}</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {[paper.source, paper.year, paper.doi ? `DOI ${paper.doi}` : null, paper.pubmedId ? `PMID ${paper.pubmedId}` : null]
+                    .filter(Boolean)
+                    .join(" | ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {progress.summary ? <p className="mt-3 text-emerald-800">{progress.summary}</p> : null}
       {progress.warnings.length > 0 ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">

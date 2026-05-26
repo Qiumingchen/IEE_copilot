@@ -426,6 +426,23 @@ export async function downloadStructureFile(
   return response.blob();
 }
 
+export async function deleteStructureRecord(
+  enzymeId: string,
+  structureId: string,
+  token: string
+): Promise<void> {
+  const response = await fetch(apiUrl(`/enzymes/${enzymeId}/structures/${structureId}`), {
+    method: "DELETE",
+    headers: {
+      authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response, "Structure delete failed");
+  }
+}
+
 export async function createKineticRecord(
   enzymeId: string,
   token: string,

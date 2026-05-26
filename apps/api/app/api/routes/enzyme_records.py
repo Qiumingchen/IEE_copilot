@@ -12,6 +12,7 @@ from app.db.models import (
     AnalysisJob,
     CurationStatus,
     EnzymeEntry,
+    EnzymeLiteratureReference,
     ExperimentCondition,
     ExpressionRecord,
     KineticRecord,
@@ -180,6 +181,15 @@ def _enzyme_reference_ids(db: Session, enzyme_id: str) -> set[str]:
         )
         if reference_id
     )
+    reference_ids.update(
+        reference_id
+        for reference_id in db.scalars(
+            select(EnzymeLiteratureReference.literature_reference_id).where(
+                EnzymeLiteratureReference.enzyme_entry_id == enzyme_id,
+            )
+        )
+        if reference_id
+    )
     return reference_ids
 
 
@@ -261,6 +271,26 @@ def _structure_is_real_summary(structure: StructureEntry) -> bool:
         _summary_has_fallback_provenance(structure.chain_summary)
         or _summary_has_fallback_provenance(structure.ligand_summary)
     )
+
+
+def _structure_display_sort_key(structure: StructureEntry) -> tuple[int, object]:
+    source = (structure.source or "").lower()
+    structure_type = (structure.structure_type or "").lower()
+    if "rcsb" in source or structure_type == "pdb":
+        priority = 0
+    elif "alphafold" in source or structure_type == "alphafold":
+        priority = 1
+    elif _structure_is_user_uploaded(structure):
+        priority = 3
+    else:
+        priority = 2
+    return priority, structure.created_at
+
+
+def _structure_is_user_uploaded(structure: StructureEntry) -> bool:
+    source = (structure.source or "").lower()
+    structure_type = (structure.structure_type or "").lower()
+    return source == "user_upload" and structure_type in {"uploaded_pdb", "uploaded_cif"}
 
 
 def _summary_has_fallback_provenance(summary: dict | None) -> bool:
@@ -1093,6 +1123,7 @@ def list_structures(
             query.order_by(StructureEntry.created_at)
         )
     )
+    structures.sort(key=_structure_display_sort_key)
     if get_settings().use_real_science_providers:
         structures = [structure for structure in structures if _structure_is_real_summary(structure)]
     return [
@@ -1133,6 +1164,34 @@ def download_structure_file(
         media_type=artifact.content_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
     )
+
+
+@router.delete("/{enzyme_id}/structures/{structure_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_structure(
+    enzyme_id: str,
+    structure_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    _get_enzyme(db, enzyme_id)
+    structure = db.get(StructureEntry, structure_id)
+    if structure is None or structure.enzyme_entry_id != enzyme_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="structure not found")
+    if not _structure_is_user_uploaded(structure):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only uploaded structure files can be deleted",
+        )
+
+    artifact = db.get(AnalysisArtifact, structure.artifact_id) if structure.artifact_id else None
+    ligands = list(db.scalars(select(LigandEntry).where(LigandEntry.structure_entry_id == structure.id)))
+    for ligand in ligands:
+        db.delete(ligand)
+    db.delete(structure)
+    if artifact is not None and artifact.source == "user_upload":
+        db.delete(artifact)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

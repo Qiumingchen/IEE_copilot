@@ -233,6 +233,21 @@ class LiteratureReference(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class EnzymeLiteratureReference(Base):
+    __tablename__ = "enzyme_literature_reference"
+    __table_args__ = (
+        UniqueConstraint("enzyme_entry_id", "literature_reference_id", name="uq_enzyme_literature_reference"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    enzyme_entry_id: Mapped[str] = mapped_column(ForeignKey("enzyme_entry.id"))
+    literature_reference_id: Mapped[str] = mapped_column(ForeignKey("literature_reference.id"))
+    source: Mapped[str] = mapped_column(String(80), default="external_enzyme_data")
+    evidence_text: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class SubstrateEntry(Base):
     __tablename__ = "substrate_entry"
 

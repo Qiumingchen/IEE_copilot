@@ -4,6 +4,8 @@ from app.external.enzyme_data import (
     ExternalPropertyDatum,
     MockEnzymeDataClient,
     RealEnzymeDataClient,
+    _is_relevant_enzyme_article,
+    _literature_discovery_queries,
     get_enzyme_data_client,
 )
 
@@ -1024,6 +1026,40 @@ def test_real_enzyme_data_client_extracts_common_optimum_temperature_ph_phrasing
     assert ph_values[0].value_original == "8.0"
 
 
+def test_real_enzyme_data_client_extracts_optimum_ph_temperature_order(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Cellobiose epimerase optimum conditions",
+                            "abstractText": (
+                                "The optimal pH and temperature were 7.2 and 82 degC, "
+                                "respectively, for the Dictyoglomus turgidum enzyme."
+                            ),
+                            "journalTitle": "Applied Glycoscience",
+                            "pubYear": "2014",
+                            "doi": "10.1000/ph-temperature-order",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("cellobiose epimerase Dictyoglomus turgidum", size=3)
+
+    assert [(datum.property_type, datum.value_original) for datum in batch.property_data] == [
+        ("optimal_temperature", "82"),
+        ("optimal_pH", "7.2"),
+    ]
+
+
 def test_real_enzyme_data_client_extracts_maximum_activity_conditions(monkeypatch):
     class Response:
         def raise_for_status(self):
@@ -1523,6 +1559,215 @@ def test_real_enzyme_data_client_does_not_assign_measurement_with_multiple_organ
 
     assert temperatures[0].value_original == "55"
     assert temperatures[0].organism is None
+
+
+def test_real_enzyme_data_client_splits_comparative_temperature_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Comparative optimum temperature of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis and Aspergillus oryzae enzymes showed "
+                                "optimum temperature at 55 degC and 45 degC, respectively."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/comparative-temperatures",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.property_type, datum.value_original) for datum in batch.property_data] == [
+        ("Bacillus subtilis", "optimal_temperature", "55"),
+        ("Aspergillus oryzae", "optimal_temperature", "45"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_whereas_temperature_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Contrasting optimal temperatures of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme had an optimal temperature of "
+                                "55 degC, whereas the Aspergillus oryzae enzyme had an "
+                                "optimal temperature of 45 degC."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/whereas-temperatures",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [
+        (datum.organism, datum.property_type, datum.value_original, datum.unit_original)
+        for datum in batch.property_data
+    ] == [
+        ("Bacillus subtilis", "optimal_temperature", "55", "degC"),
+        ("Aspergillus oryzae", "optimal_temperature", "45", "degC"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_comparative_ph_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Comparative optimum pH of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis and Aspergillus oryzae enzymes showed "
+                                "optimum pH at 7.5 and 6.0, respectively."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/comparative-ph",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.property_type, datum.value_original) for datum in batch.property_data] == [
+        ("Bacillus subtilis", "optimal_pH", "7.5"),
+        ("Aspergillus oryzae", "optimal_pH", "6.0"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_whereas_ph_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Contrasting optimal pH of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme had an optimal pH of 7.5, "
+                                "whereas the Aspergillus oryzae enzyme had an optimal pH of 6.0."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/whereas-ph",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.property_type, datum.value_original) for datum in batch.property_data] == [
+        ("Bacillus subtilis", "optimal_pH", "7.5"),
+        ("Aspergillus oryzae", "optimal_pH", "6.0"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_comparative_specific_activity_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Comparative specific activity of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis and Aspergillus oryzae enzymes showed "
+                                "specific activities of 120 U/mg and 85 U/mg toward starch, respectively."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/comparative-specific-activity",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.property_type, datum.value_original, datum.substrate) for datum in batch.property_data] == [
+        ("Bacillus subtilis", "specific_activity", "120", "starch"),
+        ("Aspergillus oryzae", "specific_activity", "85", "starch"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_whereas_specific_activity_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Contrasting specific activity of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis enzyme had a specific activity of "
+                                "120 U/mg toward starch, while the Aspergillus oryzae enzyme "
+                                "had a specific activity of 85 U/mg toward starch."
+                            ),
+                            "journalTitle": "Food Enzyme Reports",
+                            "pubYear": "2024",
+                            "doi": "10.1000/whereas-specific-activity",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.property_type, datum.value_original, datum.substrate) for datum in batch.property_data] == [
+        ("Bacillus subtilis", "specific_activity", "120", "starch"),
+        ("Aspergillus oryzae", "specific_activity", "85", "starch"),
+    ]
 
 
 def test_real_enzyme_data_client_prefers_enzyme_source_over_expression_host(monkeypatch):
@@ -2587,6 +2832,133 @@ def test_real_enzyme_data_client_extracts_km_for_substrate_and_kcat(monkeypatch)
             year=2024,
             doi="10.1000/km-for-substrate-and-kcat",
         )
+    ]
+
+
+def test_real_enzyme_data_client_extracts_joint_km_kcat_kcat_km_values(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Full kinetic constants with catalytic efficiency",
+                            "abstractText": (
+                                "For lactose, the Dictyoglomus turgidum enzyme Km, kcat, "
+                                "and kcat/Km values were 1.2 mM, 33 s-1, and "
+                                "27.5 mM-1 s-1, respectively."
+                            ),
+                            "journalTitle": "Applied Glycoscience",
+                            "pubYear": "2014",
+                            "doi": "10.1000/full-kinetic-constants",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("cellobiose 2-epimerase")
+
+    assert kinetics == [
+        ExternalKineticParameter(
+            substrate="lactose",
+            km="1.2",
+            kcat="33",
+            kcat_km="27.5",
+            unit_original="mM; s^-1; mM^-1 s^-1",
+            assay_temperature=None,
+            assay_pH=None,
+            organism="Dictyoglomus turgidum",
+            source="europepmc",
+            evidence=(
+                "Applied Glycoscience 2014 doi:10.1000/full-kinetic-constants | "
+                "Evidence quality: literature sentence | "
+                "Evidence: For lactose, the Dictyoglomus turgidum enzyme Km, kcat, and kcat/Km values "
+                "were 1.2 mM, 33 s-1, and 27.5 mM-1 s-1, respectively"
+            ),
+            reference_title="Full kinetic constants with catalytic efficiency",
+            journal="Applied Glycoscience",
+            year=2014,
+            doi="10.1000/full-kinetic-constants",
+        )
+    ]
+
+
+def test_real_enzyme_data_client_splits_comparative_km_kcat_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Comparative kinetic constants of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis and Aspergillus oryzae enzymes showed "
+                                "Km values for starch of 1.2 mM and 0.8 mM, respectively, "
+                                "and kcat values of 33 s-1 and 21 s-1, respectively."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/comparative-kinetics",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [(datum.organism, datum.substrate, datum.km, datum.kcat) for datum in batch.kinetic_parameters] == [
+        ("Bacillus subtilis", "starch", "1.2", "33"),
+        ("Aspergillus oryzae", "starch", "0.8", "21"),
+    ]
+
+
+def test_real_enzyme_data_client_splits_comparative_kcat_km_by_organism(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Comparative catalytic efficiencies of food enzymes",
+                            "abstractText": (
+                                "The Bacillus subtilis and Aspergillus oryzae enzymes showed "
+                                "kcat/Km values for starch of 27.5 mM-1 s-1 and "
+                                "18.2 mM-1 s-1, respectively."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/comparative-kcat-km",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    batch = client.fetch_enzyme_records("food enzyme", size=5)
+
+    assert [
+        (datum.organism, datum.substrate, datum.kcat_km, datum.unit_original)
+        for datum in batch.kinetic_parameters
+    ] == [
+        ("Bacillus subtilis", "starch", "27.5", "mM^-1 s^-1"),
+        ("Aspergillus oryzae", "starch", "18.2", "mM^-1 s^-1"),
     ]
 
 
@@ -3732,6 +4104,542 @@ def test_real_enzyme_data_client_stops_after_extracted_property_budget_is_filled
         )
     ]
     assert calls == ["europepmc"]
+
+
+def test_real_enzyme_data_client_fetches_all_record_types_from_relevant_papers_once(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    progress_events = []
+    relevant_record = {
+        "title": "Characterization of a Bacillus subtilis food enzyme",
+        "abstractText": (
+            "The Bacillus subtilis enzyme showed optimum temperature at 62 degC and optimum pH at 7.2. "
+            "The specific activity was 18 U/mg. For casein, Km was 1.8 mM and kcat was 42 s-1. "
+            "Variant A123V improved thermostability."
+        ),
+        "journalTitle": "Food Enzyme Reports",
+        "pubYear": "2024",
+        "doi": "10.1000/relevant-hit",
+        "_source": "europepmc",
+    }
+    unrelated_record = {
+        "title": "Clinical case report without enzyme characterization",
+        "abstractText": "This paper does not discuss industrial biocatalysis.",
+        "journalTitle": "Unrelated Reports",
+        "pubYear": "2024",
+        "doi": "10.1000/unrelated-hit",
+        "_source": "pubmed",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append(("europepmc", query))
+        return [relevant_record]
+
+    def search_pubmed(query: str, size: int = 5):
+        calls.append(("pubmed", query))
+        return [unrelated_record]
+
+    def search_openalex(query: str, size: int = 5):
+        calls.append(("openalex", query))
+        return []
+
+    def search_semantic_scholar(query: str, size: int = 5):
+        calls.append(("semanticscholar", query))
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", search_pubmed)
+    monkeypatch.setattr(client, "_search_openalex", search_openalex)
+    monkeypatch.setattr(client, "_search_semantic_scholar", search_semantic_scholar)
+
+    batch = client.fetch_enzyme_records("Bacillus subtilis food enzyme", size=3, progress_callback=progress_events.append)
+
+    assert calls[:4] == [
+        ("europepmc", "Bacillus subtilis food enzyme"),
+        ("pubmed", "Bacillus subtilis food enzyme"),
+        ("openalex", "Bacillus subtilis food enzyme"),
+        ("semanticscholar", "Bacillus subtilis food enzyme"),
+    ]
+    assert len(calls) <= 40
+    assert [record.property_type for record in batch.property_data] == [
+        "optimal_temperature",
+        "optimal_pH",
+        "specific_activity",
+    ]
+    assert batch.kinetic_parameters[0].km == "1.8"
+    assert batch.kinetic_parameters[0].kcat == "42"
+    assert batch.mutant_records[0].mutation_string == "A123V"
+    assert progress_events[0]["candidate_articles"] == 1
+    assert progress_events[0]["candidate_papers"] == [
+        {
+            "title": "Characterization of a Bacillus subtilis food enzyme",
+            "source": "europepmc",
+            "year": 2024,
+            "doi": "10.1000/relevant-hit",
+            "pubmed_id": None,
+        }
+    ]
+    assert progress_events[0]["relevant_articles"] == 0
+    assert progress_events[-1]["articles_scanned"] == 1
+    assert progress_events[-1]["filtered_articles"] == 0
+    assert progress_events[-1]["relevant_articles"] == 1
+    assert progress_events[-1]["found_records"] == 5
+
+
+def test_real_enzyme_data_client_discovers_papers_without_characterization_keyword(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    paper = {
+        "title": (
+            "Expression, crystallization and preliminary X-ray crystallographic analysis of "
+            "cellobiose 2-epimerase from Dictyoglomus turgidum DSM 6724"
+        ),
+        "abstractText": (
+            "Cellobiose 2-epimerase from D. turgidum was purified. "
+            "The enzyme showed optimum temperature at 80 degC."
+        ),
+        "journalTitle": "Acta Crystallographica Section F",
+        "pubYear": "2013",
+        "pmid": "24100573",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append(query)
+        return [paper] if query == "Cellobiose 2-epimerase Dictyoglomus turgidum" else []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert "Cellobiose 2-epimerase Dictyoglomus turgidum" in calls
+    assert batch.property_data[0].value_original == "80"
+    assert batch.property_data[0].reference_title == paper["title"]
+
+
+def test_real_enzyme_data_client_keeps_broad_literature_query_set_small_and_general():
+    queries = _literature_discovery_queries("Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4")
+
+    assert queries[:5] == [
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        "Cellobiose 2-epimerase Dictyoglomus turgidum",
+        "Cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "Dictyoglomus turgidum Cellobiose 2-epimerase",
+        "Cellobiose 2-epimerase Dictyoglomus turgidum characterization",
+    ]
+    assert len(queries) <= 18
+
+
+def test_literature_discovery_queries_include_common_enzyme_name_aliases():
+    queries = _literature_discovery_queries("Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4")
+
+    assert "Cellobiose epimerase from Dictyoglomus turgidum" in queries
+    assert "recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum" in queries
+
+
+def test_literature_discovery_queries_include_common_experimental_title_patterns():
+    queries = _literature_discovery_queries("Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4")
+
+    assert "characterization of recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum" in queries
+    assert "characterization of a recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum" in queries
+    assert "purification of Cellobiose 2-epimerase from Dictyoglomus turgidum" in queries
+    assert "crystallographic analysis of Cellobiose 2-epimerase from Dictyoglomus turgidum" in queries
+
+
+def test_literature_discovery_queries_include_abbreviated_organism_variants():
+    queries = _literature_discovery_queries("Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4")
+
+    assert "Cellobiose 2-epimerase from D. turgidum" in queries
+    assert "D. turgidum Cellobiose 2-epimerase" in queries
+
+
+def test_literature_discovery_queries_keep_strain_with_organism_not_enzyme():
+    queries = _literature_discovery_queries(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum DSM 6724 B8DZK4"
+    )
+
+    assert "Cellobiose 2-epimerase Dictyoglomus turgidum DSM 6724" in queries
+    assert "Cellobiose 2-epimerase from Dictyoglomus turgidum DSM 6724" in queries
+    assert "Dictyoglomus turgidum DSM 6724 Cellobiose 2-epimerase" in queries
+    assert "Cellobiose 2-epimerase DSM 6724 from Dictyoglomus turgidum" not in queries
+
+
+def test_real_enzyme_data_client_discovers_papers_written_as_enzyme_from_species(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    paper = {
+        "title": "Characterization of cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": "The enzyme showed optimum pH 7.5 and optimum temperature at 80 degC.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2013",
+        "doi": "10.1000/dt-ce-characterization",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append(query)
+        return [paper] if query == "Cellobiose 2-epimerase from Dictyoglomus turgidum" else []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert "Cellobiose 2-epimerase from Dictyoglomus turgidum" in calls
+    assert {datum.property_type for datum in batch.property_data} == {"optimal_temperature", "optimal_pH"}
+    assert {datum.organism for datum in batch.property_data} == {"Dictyoglomus turgidum"}
+
+
+def test_real_enzyme_data_client_discovers_recombinant_characterization_title_pattern(monkeypatch):
+    client = RealEnzymeDataClient()
+    calls = []
+    paper = {
+        "title": (
+            "Characterization of a recombinant cellobiose 2-epimerase from Dictyoglomus turgidum "
+            "that epimerizes and isomerizes beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+        ),
+        "abstractText": "The enzyme showed optimum temperature at 80 degC and optimum pH at 7.5.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1007/s00253-012-4002-5",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        calls.append(query)
+        if query == "characterization of recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum":
+            return [paper]
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert "characterization of recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum" in calls
+    assert [datum.property_type for datum in batch.property_data] == [
+        "substrate_reaction_scope",
+        "optimal_temperature",
+        "optimal_pH",
+    ]
+    assert batch.property_data[0].value_original == (
+        "epimerizes and isomerizes beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+    )
+    assert batch.property_data[0].organism == "Dictyoglomus turgidum"
+    assert batch.literature_references[0].doi == "10.1007/s00253-012-4002-5"
+
+
+def test_real_enzyme_data_client_extracts_greek_substrate_scope_from_recombinant_title(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": (
+            "Characterization of a recombinant cellobiose 2-epimerase from Dictyoglomus turgidum "
+            "that epimerizes and isomerizes \u03b2-1,4- and \u03b1-1,4-gluco-oligosaccharides"
+        ),
+        "abstractText": "The recombinant enzyme was expressed and purified.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1007/s00253-012-4002-5",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert batch.literature_references[0].organism == "Dictyoglomus turgidum"
+    assert batch.property_data[0].property_type == "substrate_reaction_scope"
+    assert batch.property_data[0].value_original == (
+        "epimerizes and isomerizes beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+    )
+    assert batch.property_data[0].organism == "Dictyoglomus turgidum"
+
+
+def test_real_enzyme_data_client_does_not_fetch_full_text_when_title_has_substrate_scope(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": (
+            "Characterization of a recombinant cellobiose 2-epimerase from Dictyoglomus turgidum "
+            "that epimerizes and isomerizes \u03b2-1,4- and \u03b1-1,4-gluco-oligosaccharides"
+        ),
+        "abstractText": "The recombinant enzyme was expressed and purified.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1007/s00253-012-4002-5",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+    monkeypatch.setattr(
+        client,
+        "_with_europe_pmc_full_text",
+        lambda item: (_ for _ in ()).throw(AssertionError("title already has extractable data")),
+    )
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert batch.property_data[0].property_type == "substrate_reaction_scope"
+
+
+def test_real_enzyme_data_client_does_not_let_noisy_first_query_hide_later_precise_hits(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": "Cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": "The Dictyoglomus turgidum enzyme showed optimum temperature at 80 degC.",
+        "journalTitle": "Food Biocatalysis",
+        "pubYear": "2013",
+        "doi": "10.1000/precise-dt-ce-hit",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        if query == "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4":
+            return [
+                {
+                    "title": f"Unrelated glycoscience case report {index}",
+                    "abstractText": "This article discusses clinical nutrition but not the target enzyme.",
+                    "doi": f"10.1000/noisy-{index}",
+                    "_source": "europepmc",
+                }
+                for index in range(size)
+            ]
+        if query == "Cellobiose 2-epimerase from Dictyoglomus turgidum":
+            return [paper]
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert [datum.value_original for datum in batch.property_data] == ["80"]
+
+
+def test_real_enzyme_data_client_keeps_searching_precise_queries_after_many_broad_hits(monkeypatch):
+    client = RealEnzymeDataClient()
+    precise_paper = {
+        "title": (
+            "Characterization of a recombinant cellobiose 2-epimerase from Dictyoglomus turgidum "
+            "that epimerizes and isomerizes beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+        ),
+        "abstractText": "The enzyme showed optimum temperature at 80 degC.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1007/s00253-012-4002-5",
+        "_source": "europepmc",
+    }
+    broad_papers = [
+        {
+            "title": f"Cellobiose 2-epimerase survey for Dictyoglomus turgidum related enzymes {index}",
+            "abstractText": "This article mentions cellobiose 2-epimerase and Dictyoglomus turgidum.",
+            "doi": f"10.1000/broad-{index}",
+            "_source": "europepmc",
+        }
+        for index in range(18)
+    ]
+
+    def search_europe_pmc(query: str, size: int = 5):
+        if query == "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4":
+            return broad_papers[:size]
+        if query == "characterization of a recombinant Cellobiose 2-epimerase from Dictyoglomus turgidum":
+            return [precise_paper]
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum B8DZK4",
+        size=3,
+    )
+
+    assert any(reference.doi == "10.1007/s00253-012-4002-5" for reference in batch.literature_references)
+    assert "80" in [datum.value_original for datum in batch.property_data]
+
+
+def test_real_enzyme_data_client_ranks_precise_species_articles_before_broad_candidates(monkeypatch):
+    client = RealEnzymeDataClient()
+    precise_paper = {
+        "title": "Characterization of recombinant cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": "The Dictyoglomus turgidum enzyme showed optimum temperature at 80 degC.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1000/precise-dt-characterization",
+        "_source": "europepmc",
+    }
+
+    def search_europe_pmc(query: str, size: int = 5):
+        if query == "Cellobiose 2-epimerase Dictyoglomus turgidum":
+            return [
+                {
+                    "title": f"Broad cellobiose epimerase survey {index}",
+                    "abstractText": "This survey discusses several carbohydrate epimerases without the target source species.",
+                    "doi": f"10.1000/broad-survey-{index}",
+                    "_source": "europepmc",
+                }
+                for index in range(4)
+            ] + [precise_paper]
+        return []
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    candidates = list(client._search_relevant_literature("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3))
+
+    assert [candidate.get("doi") for candidate in candidates][:3] == [
+        "10.1000/precise-dt-characterization",
+        "10.1000/broad-survey-0",
+        "10.1000/broad-survey-1",
+    ]
+
+
+def test_real_enzyme_data_client_returns_relevant_literature_even_without_values(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": "Structure of cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": "Cellobiose 2-epimerase from Dictyoglomus turgidum was purified and crystallized.",
+        "journalTitle": "Acta Crystallographica Section F",
+        "pubYear": "2013",
+        "pmid": "24100573",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3)
+
+    assert batch.property_data == []
+    assert batch.literature_references[0].organism == "Dictyoglomus turgidum"
+    assert batch.literature_references[0].pubmed_id == "24100573"
+
+
+def test_real_enzyme_data_client_extracts_epimerase_source_organism_despite_expression_host(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": (
+            "Characterization of a recombinant cellobiose 2-epimerase from Dictyoglomus turgidum "
+            "that epimerizes and isomerizes beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+        ),
+        "abstractText": (
+            "The recombinant enzyme was expressed in Escherichia coli and purified. "
+            "The enzyme showed optimum temperature at 80 degC."
+        ),
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1007/s00253-012-4002-5",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3)
+
+    assert batch.literature_references[0].organism == "Dictyoglomus turgidum"
+    temperature = next(record for record in batch.property_data if record.property_type == "optimal_temperature")
+    assert temperature.organism == "Dictyoglomus turgidum"
+    assert temperature.value_original == "80"
+
+
+def test_real_enzyme_data_client_keeps_more_relevant_literature_than_property_budget(monkeypatch):
+    client = RealEnzymeDataClient()
+    papers = [
+        {
+            "title": f"Cellobiose 2-epimerase from Dictyoglomus turgidum study {index}",
+            "abstractText": "Cellobiose 2-epimerase from Dictyoglomus turgidum was purified and characterized.",
+            "journalTitle": "Food Enzyme Reports",
+            "pubYear": "2013",
+            "pmid": str(24100570 + index),
+            "_source": "europepmc",
+        }
+        for index in range(18)
+    ]
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: papers)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3)
+
+    assert [reference.pubmed_id for reference in batch.literature_references] == [
+        str(24100570 + index) for index in range(18)
+    ]
+
+
+def test_relevance_filter_accepts_species_abbreviation_in_literature_record():
+    record = {
+        "title": "Kinetic properties of cellobiose 2-epimerase from D. turgidum",
+        "abstractText": "The purified CE catalyzed lactose conversion at high temperature.",
+    }
+
+    assert _is_relevant_enzyme_article(record, "Cellobiose 2-epimerase Dictyoglomus turgidum")
+
+
+def test_real_enzyme_data_client_caps_total_candidate_literature(monkeypatch):
+    client = RealEnzymeDataClient()
+
+    def search_europe_pmc(query: str, size: int = 5):
+        return [
+            {
+                "title": f"Cellobiose 2-epimerase candidate {index} {query}",
+                "abstractText": "Dictyoglomus turgidum enzyme showed optimum temperature at 80 degC.",
+                "doi": f"10.1000/candidate-{query}-{index}",
+                "_source": "europepmc",
+            }
+            for index in range(size)
+        ]
+
+    monkeypatch.setattr(client, "_search_europe_pmc", search_europe_pmc)
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    candidates = list(client._search_relevant_literature("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3))
+
+    assert len(candidates) == 18
 
 
 def test_real_enzyme_data_client_reuses_literature_search_results_for_same_query(monkeypatch):

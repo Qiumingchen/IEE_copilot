@@ -3,7 +3,8 @@ import type {
   JobResponse,
   KineticRecord,
   LiteratureReferenceRecord,
-  PropertyRecord
+  PropertyRecord,
+  StructureRecord
 } from "../../../lib/types";
 import { formatReferenceCitation } from "./reference-utils.ts";
 
@@ -40,7 +41,21 @@ export type RealDataRefreshProgress = {
   processedEnzymes: number;
   totalEnzymes: number;
   stage: string | null;
+  candidateArticles: number;
+  articlesScanned: number;
+  filteredArticles: number;
+  relevantArticles: number;
+  extractedRecords: number;
+  candidatePapers: CandidatePaperSummary[];
   canPause: boolean;
+};
+
+export type CandidatePaperSummary = {
+  title: string;
+  source: string;
+  year: number | null;
+  doi: string | null;
+  pubmedId: string | null;
 };
 
 export function formatReferenceForTable(
@@ -52,6 +67,46 @@ export function formatReferenceForTable(
   }
   const reference = referencesById[referenceId];
   return reference ? formatReferenceCitation(reference) : referenceId;
+}
+
+export function sortLiteratureReferencesForDisplay(
+  references: LiteratureReferenceRecord[]
+): LiteratureReferenceRecord[] {
+  return [...references].sort((left, right) => {
+    const leftYear = left.year ?? Number.NEGATIVE_INFINITY;
+    const rightYear = right.year ?? Number.NEGATIVE_INFINITY;
+    if (leftYear !== rightYear) {
+      return rightYear - leftYear;
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+export function sortStructuresForDisplay<T extends Pick<StructureRecord, "structure_type" | "source">>(
+  structures: T[]
+): T[] {
+  return [...structures].sort((left, right) => structureDisplayPriority(left) - structureDisplayPriority(right));
+}
+
+export function isUserUploadedStructure(
+  structure: Pick<StructureRecord, "structure_type" | "source">
+): boolean {
+  return (
+    structure.source.toLowerCase() === "user_upload" &&
+    ["uploaded_pdb", "uploaded_cif"].includes(structure.structure_type.toLowerCase())
+  );
+}
+
+function structureDisplayPriority(structure: Pick<StructureRecord, "structure_type" | "source">): number {
+  const source = structure.source.toLowerCase();
+  const structureType = structure.structure_type.toLowerCase();
+  if (source.includes("rcsb") || structureType === "pdb") {
+    return 0;
+  }
+  if (source.includes("alphafold") || structureType === "alphafold") {
+    return 1;
+  }
+  return isUserUploadedStructure(structure) ? 3 : 2;
 }
 
 export function formatVisibilityStatus(
@@ -248,7 +303,13 @@ function realDataRefreshProgressDetails(
     notFoundSources: numberFromProgress(progress?.not_found_sources),
     processedEnzymes: numberFromProgress(progress?.processed_enzymes),
     totalEnzymes: numberFromProgress(progress?.total_enzymes),
-    stage: typeof progress?.stage === "string" ? progress.stage : null
+    stage: typeof progress?.stage === "string" ? progress.stage : null,
+    candidateArticles: numberFromProgress(progress?.candidate_articles),
+    articlesScanned: numberFromProgress(progress?.articles_scanned),
+    filteredArticles: numberFromProgress(progress?.filtered_articles),
+    relevantArticles: numberFromProgress(progress?.relevant_articles),
+    extractedRecords: numberFromProgress(progress?.extracted_records),
+    candidatePapers: candidatePapersFromProgress(progress?.candidate_papers)
   };
 }
 
@@ -284,4 +345,28 @@ function isRecordCountMap(value: unknown): value is Record<string, number> {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function candidatePapersFromProgress(value: unknown): CandidatePaperSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.title !== "string" || !record.title.trim()) {
+      return [];
+    }
+    return [
+      {
+        title: record.title.trim(),
+        source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : "-",
+        year: typeof record.year === "number" && Number.isFinite(record.year) ? record.year : null,
+        doi: typeof record.doi === "string" && record.doi.trim() ? record.doi.trim() : null,
+        pubmedId: typeof record.pubmed_id === "string" && record.pubmed_id.trim() ? record.pubmed_id.trim() : null
+      }
+    ];
+  });
 }

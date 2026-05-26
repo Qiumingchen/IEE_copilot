@@ -19,6 +19,7 @@ import {
   getLigandViews,
   getMetalIonViews,
   getResidueRows,
+  getStructureExternalLinks,
   getStructurePreviewAtoms,
   getStructureQualityChecks,
   getStructureReadiness,
@@ -26,6 +27,7 @@ import {
   getStructureStats,
   getStructureWorkflowActions,
   isStructureUploadFileName,
+  sortStructuresForStructurePage,
   structureUploadAccept,
   summarizeStructureUploadResult
 } from "./structure-utils";
@@ -58,11 +60,12 @@ export default function StructureAnalysisClient({ enzymeId, initialStructureId =
       const nextBundle = await getEnzymeRecordBundle(enzymeId, nextToken);
       setBundle(nextBundle);
       setSelectedStructureId((current) => {
+        const sortedStructures = sortStructuresForStructurePage(nextBundle.structures);
         const requestedStructureId = preferredStructureId ?? current ?? initialStructureId;
-        const hasRequestedStructure = nextBundle.structures.some(
+        const hasRequestedStructure = sortedStructures.some(
           (structure) => structure.id === requestedStructureId
         );
-        return hasRequestedStructure ? requestedStructureId : getDefaultStructureId(nextBundle.structures);
+        return hasRequestedStructure ? requestedStructureId : getDefaultStructureId(sortedStructures);
       });
     } catch {
       setError("Unable to load structure analysis data. Please check the API service and your login.");
@@ -81,7 +84,7 @@ export default function StructureAnalysisClient({ enzymeId, initialStructureId =
     void loadBundle(storedToken);
   }, [enzymeId, router]);
 
-  const structures = bundle?.structures ?? [];
+  const structures = useMemo(() => sortStructuresForStructurePage(bundle?.structures ?? []), [bundle]);
   const selectedStructure = useMemo(
     () => structures.find((structure) => structure.id === selectedStructureId) ?? structures[0] ?? null,
     [selectedStructureId, structures]
@@ -99,6 +102,7 @@ export default function StructureAnalysisClient({ enzymeId, initialStructureId =
   const workflowActions = selectedStructure ? getStructureWorkflowActions(selectedStructure, enzymeId) : [];
   const distanceMatrixRows = selectedStructure ? getDistanceMatrixRows(selectedStructure) : [];
   const previewAtoms = selectedStructure ? getStructurePreviewAtoms(selectedStructure) : [];
+  const externalLinks = selectedStructure ? getStructureExternalLinks(selectedStructure) : [];
 
   useEffect(() => {
     setSelectedChainId(chainOptions[0]?.chain_id ?? null);
@@ -322,6 +326,21 @@ export default function StructureAnalysisClient({ enzymeId, initialStructureId =
               <p className="mt-1 break-words font-mono text-sm text-slate-950">
                 {stats.database_identifiers}
               </p>
+              {externalLinks.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {externalLinks.map((link) => (
+                    <a
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
+                      href={link.href}
+                      key={link.href}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
             </section>
 
             <div className="flex flex-wrap justify-end gap-2">

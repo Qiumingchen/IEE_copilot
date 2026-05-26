@@ -21,7 +21,9 @@ from app.db.models import (
 from app.api.routes.enzymes import _ensure_protein_sequence
 from app.external.alphafold import AlphaFoldModelMetadata
 from app.external.enzyme_data import (
+    ExternalEnzymeDataBatch,
     ExternalKineticParameter,
+    ExternalLiteratureDatum,
     ExternalMutantRecord,
     ExternalPropertyDatum,
     MockEnzymeDataClient,
@@ -766,6 +768,124 @@ def test_real_provider_search_does_not_create_seed_entry_when_no_real_hit(client
     assert db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.source == "seed")) is None
 
 
+def test_real_provider_search_ignores_fresh_search_cache(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class RealUniProtClient:
+        source = "uniprot"
+
+        def __init__(self):
+            self.queries = []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            self.queries.append(keyword)
+            return [
+                UniProtSearchHit(
+                    accession="B8DZK4",
+                    protein_name="Cellobiose 2-epimerase",
+                    organism="Dictyoglomus turgidum",
+                    ec_number="5.1.3.11",
+                    score=1.0,
+                )
+            ][:size]
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            return []
+
+        def fetch_entry(self, accession: str):
+            return UniProtEntry(
+                accession=accession,
+                protein_name="Cellobiose 2-epimerase",
+                organism="Dictyoglomus turgidum",
+                ec_number="5.1.3.11",
+                sequence="M" + ("A" * 40),
+                mature_sequence="M" + ("A" * 40),
+                reviewed=True,
+                cross_references={"UniProtKB": accession},
+            )
+
+        def fetch_fasta(self, accession: str):
+            return f">sp|{accession}|CE_DICD3\nM{'A' * 40}\n"
+
+    uniprot_client = RealUniProtClient()
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.run_homology_collection",
+        PlaceholderTask,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.routes.enzymes.get_uniprot_client",
+        lambda: uniprot_client,
+        raising=False,
+    )
+
+    cached_family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cached search family",
+    )
+    db_session.add(cached_family)
+    db_session.flush()
+    cached_enzyme = EnzymeEntry(
+        family_id=cached_family.id,
+        name="Cached unrelated enzyme",
+        organism="Cached organism",
+        source="uniprot",
+        uniprot_id="CACHED1",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(cached_enzyme)
+    db_session.flush()
+    db_session.add(
+        SearchCacheRecord(
+            query="cellobiose 2-epimerase",
+            normalized_query="cellobiose 2-epimerase",
+            query_kind="keyword",
+            module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+            enzyme_entry_id=cached_enzyme.id,
+            payload_json={},
+            source="uniprot",
+            last_refreshed_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "real-cache-bypass@example.com",
+            "password": "search-password",
+            "display_name": "Real Cache Bypass",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "real-cache-bypass@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "cellobiose 2-epimerase"},
+    )
+
+    assert response.status_code == 200
+    assert uniprot_client.queries[0] == "cellobiose 2-epimerase"
+    assert response.json()["enzyme"]["uniprot_id"] == "B8DZK4"
+    assert response.json()["enzyme"]["id"] != cached_enzyme.id
+    assert response.json()["cache_status"] == "miss_refreshed"
+
+
 def test_real_provider_search_excludes_mock_and_seed_entries_from_matches(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings
@@ -1184,6 +1304,328 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert {record.reference_id for record in properties} == {europepmc_reference.id}
     assert kinetics[0].reference_id == europepmc_reference.id
     assert mutations[0].reference_id == europepmc_reference.id
+
+
+def test_real_data_refresh_prefers_batch_external_records(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    calls = []
+
+    class BatchRealDataClient:
+        source = "europepmc"
+
+        def fetch_enzyme_records(self, query: str, size: int = 5, progress_callback=None):
+            calls.append(("batch", query))
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "candidate_articles": 2,
+                        "articles_scanned": 1,
+                        "filtered_articles": 1,
+                        "found_records": 2,
+                        "stage": "extracting candidate literature",
+                    }
+                )
+            return ExternalEnzymeDataBatch(
+                property_data=[
+                    ExternalPropertyDatum(
+                        property_type="optimal_temperature",
+                        value_original="61",
+                        unit_original="degC",
+                        organism="Streptomyces mobaraensis",
+                        source=self.source,
+                        evidence="Europe PMC PMID:123 optimum temperature",
+                        reference_title="Relevant enzyme paper",
+                        pubmed_id="123",
+                    ),
+                    ExternalPropertyDatum(
+                        property_type="substrate_reaction_scope",
+                        value_original="epimerizes and isomerizes beta-1,4-gluco-oligosaccharides",
+                        organism="Streptomyces mobaraensis",
+                        source=self.source,
+                        evidence="Europe PMC PMID:123 substrate and reaction scope",
+                        reference_title="Relevant enzyme paper",
+                        pubmed_id="123",
+                    )
+                ],
+                kinetic_parameters=[
+                    ExternalKineticParameter(
+                        substrate="casein",
+                        km="1.8",
+                        organism="Streptomyces mobaraensis",
+                        source=self.source,
+                        evidence="Europe PMC PMID:123 Km",
+                        reference_title="Relevant enzyme paper",
+                        pubmed_id="123",
+                    )
+                ],
+                sources=["europepmc"],
+            )
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            raise AssertionError("batch real-data refresh should not fan out through property searches")
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            raise AssertionError("batch real-data refresh should not fan out through pH searches")
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            raise AssertionError("batch real-data refresh should not fan out through kinetic searches")
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            raise AssertionError("batch real-data refresh should not fan out through mutant searches")
+
+    class RealLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: BatchRealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: RealLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Mature microbial transglutaminases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Real microbial transglutaminase",
+        organism="Streptomyces mobaraensis",
+        source="uniprot",
+        uniprot_id="P81453",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "batch-real-data-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Batch Real Data Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "batch-real-data-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["properties"] == 2
+    assert response.json()["created"]["kinetics"] == 1
+    assert calls == [("batch", "Real microbial transglutaminase Streptomyces mobaraensis P81453")]
+    properties = db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all()
+    kinetics = db_session.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)).all()
+    assert {record.property_type for record in properties} == {"optimal_temperature", "substrate_reaction_scope"}
+    assert {record.method for record in properties} == {"europepmc"}
+    assert kinetics[0].method == "europepmc"
+
+
+def test_real_data_refresh_links_relevant_literature_without_extractable_values(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class BatchDataClient:
+        source = "europepmc"
+
+        def fetch_enzyme_records(self, query: str, size: int = 5, progress_callback=None):
+            return ExternalEnzymeDataBatch(
+                literature_references=[
+                    ExternalLiteratureDatum(
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence=(
+                            "Acta Crystallographica Section F 2013 pmid:24100573 | "
+                            "Evidence: Cellobiose 2-epimerase from Dictyoglomus turgidum was crystallized."
+                        ),
+                        reference_title=(
+                            "Expression, crystallization and preliminary X-ray crystallographic analysis "
+                            "of cellobiose 2-epimerase from Dictyoglomus turgidum DSM 6724"
+                        ),
+                        journal="Acta Crystallographica Section F",
+                        year=2013,
+                        pubmed_id="24100573",
+                    )
+                ],
+                sources=["europepmc"],
+            )
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: BatchDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cellobiose 2-epimerases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Cellobiose 2-epimerase",
+        organism="Dictyoglomus turgidum",
+        source="uniprot",
+        uniprot_id="B8DZK4",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "linked-literature-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Linked Literature Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "linked-literature-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"]["references"] == 1
+    assert db_session.scalars(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)).all() == []
+
+    references_response = client.get(
+        f"/enzymes/{enzyme.id}/references",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert references_response.status_code == 200
+    assert references_response.json()[0]["pubmed_id"] == "24100573"
+    assert "cellobiose 2-epimerase" in references_response.json()[0]["title"].lower()
+
+
+def test_real_data_refresh_attaches_relevant_literature_when_organism_is_missing_but_title_matches(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class BatchDataClient:
+        source = "europepmc"
+
+        def fetch_enzyme_records(self, query: str, size: int = 5, progress_callback=None):
+            return ExternalEnzymeDataBatch(
+                literature_references=[
+                    ExternalLiteratureDatum(
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence="Evidence: Cellobiose 2-epimerase from Dictyoglomus turgidum was crystallized.",
+                        reference_title=(
+                            "Expression, crystallization and preliminary X-ray crystallographic analysis "
+                            "of cellobiose 2-epimerase from Dictyoglomus turgidum DSM 6724"
+                        ),
+                        journal="Acta Crystallographica Section F",
+                        year=2013,
+                        pubmed_id="24100573",
+                    ),
+                    ExternalLiteratureDatum(
+                        organism=None,
+                        source="europepmc",
+                        evidence=(
+                            "Evidence: Characterization of a recombinant cellobiose 2-epimerase "
+                            "from Dictyoglomus turgidum that epimerizes gluco-oligosaccharides."
+                        ),
+                        reference_title=(
+                            "Characterization of a recombinant cellobiose 2-epimerase "
+                            "from Dictyoglomus turgidum that epimerizes and isomerizes "
+                            "beta-1,4- and alpha-1,4-gluco-oligosaccharides"
+                        ),
+                        journal="Applied Microbiology and Biotechnology",
+                        year=2012,
+                        doi="10.1007/s00253-012-4002-5",
+                    ),
+                ],
+                sources=["europepmc"],
+            )
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: BatchDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cellobiose 2-epimerases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Cellobiose 2-epimerase",
+        organism="Dictyoglomus turgidum (strain DSM 6724 / Z-1310)",
+        source="uniprot",
+        uniprot_id="B8DZK4",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "fallback-literature-refresh@example.com",
+            "password": "search-password",
+            "display_name": "Fallback Literature Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "fallback-literature-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["references"] == 2
+    assert not any("no organism was extracted" in warning for warning in body["warnings"])
+
+    references_response = client.get(
+        f"/enzymes/{enzyme.id}/references",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert references_response.status_code == 200
+    titles = [reference["title"] for reference in references_response.json()]
+    assert any("Expression, crystallization" in title for title in titles)
+    assert any("Characterization of a recombinant cellobiose 2-epimerase" in title for title in titles)
 
 
 def test_real_data_refresh_skips_weak_literature_records_without_organism(
@@ -4250,7 +4692,7 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
     )
 
 
-def test_cached_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sparse(
+def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sparse(
     client,
     db_session,
     monkeypatch,
@@ -4351,17 +4793,40 @@ def test_cached_keyword_search_backfills_real_uniprot_sources_when_local_results
                 sequence=f"M{accession}SEQUENCE",
                 mature_sequence=f"MATURE{accession}",
                 reviewed=accession == "P81453",
-                cross_references={"AlphaFoldDB": f"AF-{accession}-F1"},
+                cross_references={
+                    "AlphaFoldDB": f"AF-{accession}-F1",
+                    "PDB": "1IU4" if accession == "P81453" else f"{accession[-1]}TG",
+                },
             )
 
         def fetch_fasta(self, accession: str):
             return f">sp|{accession}|TGASE\nM{accession}SEQUENCE\n"
+
+    class FakeRcsbClient:
+        source = "rcsb"
+
+        def fetch_structure_metadata(self, pdb_id: str):
+            return RcsbStructureMetadata(
+                pdb_id=pdb_id.upper(),
+                title=f"RCSB structure {pdb_id.upper()}",
+                uniprot_id="P81453" if pdb_id.upper() == "1IU4" else None,
+                organism="Streptomyces mobaraensis" if pdb_id.upper() == "1IU4" else None,
+                chain_summary={"polymer_entity_count": 1},
+                ligand_summary={},
+            )
+
+        def search_by_uniprot(self, uniprot_id: str, size: int = 5):
+            return []
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return []
 
     FakeUniProtClient.fetch_entry_calls = []
 
     monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FakeUniProtClient(), raising=False)
     monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_rcsb_client", lambda: FakeRcsbClient())
     monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
     monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
 
@@ -4382,6 +4847,22 @@ def test_cached_keyword_search_backfills_real_uniprot_sources_when_local_results
     )
     db_session.add(enzyme)
     db_session.flush()
+    for accession, organism in [
+        ("Q11111", "Streptomyces hygroscopicus"),
+        ("Q22222", "Streptomyces cinnamoneus"),
+        ("Q33333", "Streptomyces netropsis"),
+    ]:
+        db_session.add(
+            EnzymeEntry(
+                family_id=family.id,
+                name="Protein-glutamine gamma-glutamyltransferase",
+                organism=organism,
+                ec_number="2.3.2.13",
+                uniprot_id=accession,
+                source="uniprot",
+                last_refreshed_at=datetime.utcnow(),
+            )
+        )
     job = AnalysisJob(
         enzyme_entry_id=enzyme.id,
         job_type="homolog_collection",
@@ -4424,14 +4905,19 @@ def test_cached_keyword_search_backfills_real_uniprot_sources_when_local_results
 
     assert response.status_code == 200
     body = response.json()
-    assert body["cache_status"] == "hit"
+    assert body["cache_status"] == "miss_refreshed"
     assert {match["uniprot_id"] for match in body["matches"]} == {
         "P81453",
         "Q11111",
         "Q22222",
         "Q33333",
     }
-    assert FakeUniProtClient.fetch_entry_calls == []
+    assert FakeUniProtClient.fetch_entry_calls == ["P81453", "Q11111", "Q22222", "Q33333"]
+    assert body["enzyme"]["pdb_id"] == "1IU4"
+    assert {
+        item.pdb_id
+        for item in db_session.scalars(select(StructureEntry).where(StructureEntry.source == "rcsb"))
+    } >= {"1IU4", "1TG", "2TG", "3TG"}
     assert {match["organism"] for match in body["matches"]} == {
         "Streptomyces mobaraensis",
         "Streptomyces hygroscopicus",

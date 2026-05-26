@@ -9,6 +9,7 @@ from app.db.models import (
     ExpressionRecord,
     JobStatus,
     KineticRecord,
+    LigandEntry,
     LiteratureReference,
     MutationRecord,
     ProteinSequence,
@@ -224,6 +225,101 @@ def test_create_structure_record_promotes_pdb_id_to_empty_enzyme_field(client, d
     db_session.expire_all()
     enzyme = db_session.get(EnzymeEntry, enzyme_id)
     assert enzyme.pdb_id == "9XYZ"
+
+
+def test_list_structures_prioritizes_database_structures_before_uploads(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    db_session.add_all(
+        [
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="uploaded_pdb",
+                complex_state="apo",
+                source="user_upload",
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="alphafold",
+                complex_state="predicted",
+                source="alphafold",
+            ),
+            StructureEntry(
+                enzyme_entry_id=enzyme_id,
+                structure_type="pdb",
+                complex_state="unknown",
+                pdb_id="1ABC",
+                source="rcsb",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(f"/enzymes/{enzyme_id}/structures", headers=headers)
+
+    assert response.status_code == 200
+    assert [item["structure_type"] for item in response.json()] == ["pdb", "alphafold", "uploaded_pdb"]
+
+
+def test_delete_uploaded_structure_removes_record_ligands_and_artifact(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        artifact_type="structure_file",
+        bucket="iee-artifacts",
+        object_key="structures/test/delete-me.pdb",
+        source="user_upload",
+        visibility=Visibility.PRIVATE,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="apo",
+        artifact_id=artifact.id,
+        source="user_upload",
+    )
+    db_session.add(structure)
+    db_session.flush()
+    ligand = LigandEntry(
+        structure_entry_id=structure.id,
+        ligand_name="AQ1",
+        ligand_code="AQ1",
+        ligand_type="substrate",
+    )
+    db_session.add(ligand)
+    db_session.commit()
+    structure_id = structure.id
+    ligand_id = ligand.id
+    artifact_id = artifact.id
+
+    response = client.delete(f"/enzymes/{enzyme_id}/structures/{structure_id}", headers=headers)
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(StructureEntry, structure_id) is None
+    assert db_session.get(LigandEntry, ligand_id) is None
+    assert db_session.get(AnalysisArtifact, artifact_id) is None
+
+
+def test_delete_database_structure_is_rejected(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="alphafold",
+        complex_state="predicted",
+        source="alphafold",
+    )
+    db_session.add(structure)
+    db_session.commit()
+
+    response = client.delete(f"/enzymes/{enzyme_id}/structures/{structure.id}", headers=headers)
+
+    assert response.status_code == 403
+    assert db_session.get(StructureEntry, structure.id) is not None
 
 
 def test_list_evidence_records_embed_literature_reference(client, db_session):

@@ -13,7 +13,6 @@ import {
   formatPdbDiscoveryHitSubtitle,
   formatRecordCoverageBadges,
   formatSearchMatchSubtitle,
-  formatSearchProvenanceSummary,
   paginateItems,
   pdbDiscoveryErrorMessage,
   sortPdbDiscoveryHits,
@@ -463,23 +462,6 @@ export default function SearchPage() {
             onPrevious={() => setSearchPage((page) => Math.max(1, page - 1))}
             onNext={() => setSearchPage((page) => Math.min(pagedSearchMatches.pageCount, page + 1))}
           />
-
-          <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <dt className="text-xs font-medium uppercase text-slate-500">Cache</dt>
-              <dd className="mt-1 text-sm text-slate-950">{result.cache_status}</dd>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <dt className="text-xs font-medium uppercase text-slate-500">Query kind</dt>
-              <dd className="mt-1 text-sm text-slate-950">{result.query_kind}</dd>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
-              <dt className="text-xs font-medium uppercase text-slate-500">Retrieval source</dt>
-              <dd className="mt-1 break-words text-sm text-slate-950">
-                {formatSearchProvenanceSummary(result.retrieval_provenance)}
-              </dd>
-            </div>
-          </dl>
         </section>
       ) : null}
 

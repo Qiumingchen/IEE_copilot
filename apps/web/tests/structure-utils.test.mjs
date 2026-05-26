@@ -12,6 +12,7 @@ import {
   getDistanceMatrixRows,
   getLigandViews,
   getMetalIonViews,
+  getStructureExternalLinks,
   getStructureQualityChecks,
   getStructurePreviewAtoms,
   getStructureProvenanceView,
@@ -19,6 +20,7 @@ import {
   getStructureStats,
   getStructureWorkflowActions,
   isStructureUploadFileName,
+  sortStructuresForStructurePage,
   structureUploadAccept,
   summarizeStructureUploadResult
 } from "../app/enzymes/[id]/structures/structure-utils.ts";
@@ -338,6 +340,60 @@ test("prefers structures with residue mapping for the default selection", () => 
   };
 
   assert.equal(getDefaultStructureId([unmappedStructure, structure]), "structure-1");
+});
+
+test("prioritizes RCSB and AlphaFold structures before user uploads on the structure page", () => {
+  const uploadedStructure = {
+    ...structure,
+    id: "uploaded-structure",
+    structure_type: "uploaded_pdb",
+    source: "user_upload",
+    pdb_id: null
+  };
+  const alphafoldStructure = {
+    ...structure,
+    id: "alphafold-structure",
+    structure_type: "alphafold",
+    source: "alphafold",
+    pdb_id: null
+  };
+  const rcsbStructure = {
+    ...structure,
+    id: "rcsb-structure",
+    structure_type: "pdb",
+    source: "rcsb",
+    pdb_id: "1IU4",
+    chain_summary: {
+      provenance: {
+        provider: "rcsb",
+        mode: "real",
+        source_url: "https://www.rcsb.org/structure/1IU4"
+      }
+    }
+  };
+
+  assert.deepEqual(
+    sortStructuresForStructurePage([uploadedStructure, alphafoldStructure, rcsbStructure]).map((item) => item.id),
+    ["rcsb-structure", "alphafold-structure", "uploaded-structure"]
+  );
+  assert.equal(getDefaultStructureId([uploadedStructure, alphafoldStructure, rcsbStructure]), "rcsb-structure");
+});
+
+test("builds direct external links for database structures", () => {
+  assert.deepEqual(
+    getStructureExternalLinks({
+      ...structure,
+      structure_type: "pdb",
+      source: "rcsb",
+      pdb_id: "1IU4"
+    }),
+    [
+      {
+        label: "RCSB 1IU4",
+        href: "https://www.rcsb.org/structure/1IU4"
+      }
+    ]
+  );
 });
 
 test("validates supported structure upload file names", () => {
