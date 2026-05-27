@@ -304,6 +304,39 @@ def test_delete_uploaded_structure_removes_record_ligands_and_artifact(client, d
     assert db_session.get(AnalysisArtifact, artifact_id) is None
 
 
+def test_delete_uploaded_structure_allows_legacy_unknown_source_with_user_artifact(client, db_session):
+    headers = _auth_headers(client)
+    enzyme_id = _enzyme_id(db_session)
+    artifact = AnalysisArtifact(
+        enzyme_entry_id=enzyme_id,
+        artifact_type="structure_file",
+        bucket="iee-artifacts",
+        object_key="structures/test/legacy-upload.pdb",
+        source="user_upload",
+        visibility=Visibility.PRIVATE,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme_id,
+        structure_type="uploaded_pdb",
+        complex_state="apo",
+        artifact_id=artifact.id,
+        source="unknown",
+    )
+    db_session.add(structure)
+    db_session.commit()
+    structure_id = structure.id
+    artifact_id = artifact.id
+
+    response = client.delete(f"/enzymes/{enzyme_id}/structures/{structure_id}", headers=headers)
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(StructureEntry, structure_id) is None
+    assert db_session.get(AnalysisArtifact, artifact_id) is None
+
+
 def test_delete_database_structure_is_rejected(client, db_session):
     headers = _auth_headers(client)
     enzyme_id = _enzyme_id(db_session)

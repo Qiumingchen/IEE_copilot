@@ -266,24 +266,28 @@ def _fetch_uniprot_entries_with_client(
     source = getattr(client, "source", "uniprot")
 
     def _entry_from_hit(hit) -> UniProtEntry:
+        cross_references = dict(getattr(hit, "cross_references", {}) or {})
+        cross_references.setdefault("UniProtKB", hit.accession)
         return UniProtEntry(
             accession=hit.accession,
             protein_name=hit.protein_name,
             organism=hit.organism,
             ec_number=hit.ec_number,
-            reviewed=False,
-            cross_references={"UniProtKB": hit.accession},
+            sequence=getattr(hit, "sequence", None),
+            mature_sequence=getattr(hit, "mature_sequence", None),
+            reviewed=bool(getattr(hit, "reviewed", False)),
+            cross_references=cross_references,
         )
 
     if resolved_query.kind == QueryKind.UNIPROT:
         entry = client.fetch_entry(resolved_query.normalized_query)
-        return [(entry, client.fetch_fasta(entry.accession), source)]
+        return [(entry, _fasta_for_uniprot_entry(client, entry), source)]
     if resolved_query.kind == QueryKind.ALPHAFOLD:
         accession = _uniprot_accession_from_alphafold_id(resolved_query.normalized_query)
         if accession is None:
             return []
         entry = client.fetch_entry(accession)
-        return [(entry, client.fetch_fasta(entry.accession), source)]
+        return [(entry, _fasta_for_uniprot_entry(client, entry), source)]
 
     hits = []
     if resolved_query.kind == QueryKind.EC:
@@ -307,11 +311,21 @@ def _fetch_uniprot_entries_with_client(
             continue
         seen_accessions.add(hit.accession)
         if include_details:
-            entry = client.fetch_entry(hit.accession)
-            entries.append((entry, client.fetch_fasta(entry.accession), source))
+            try:
+                entry = client.fetch_entry(hit.accession)
+            except (httpx.HTTPError, ValueError):
+                entries.append((_entry_from_hit(hit), None, source))
+                continue
+            entries.append((entry, _fasta_for_uniprot_entry(client, entry), source))
             continue
         entries.append((_entry_from_hit(hit), None, source))
     return entries
+
+
+def _fasta_for_uniprot_entry(client, entry: UniProtEntry) -> str | None:
+    if entry.sequence:
+        return None
+    return client.fetch_fasta(entry.accession)
 
 
 def _uniprot_accession_from_alphafold_id(alphafold_id: str) -> str | None:
@@ -374,6 +388,7 @@ def _create_enzyme_from_uniprot_entry(
     entry: UniProtEntry,
     fasta: str | None,
     source: str | None,
+    fetch_structures: bool = True,
 ) -> EnzymeEntry:
     now = datetime.utcnow()
     sequence = entry.sequence or parse_fasta_sequence(fasta or "")
@@ -407,7 +422,7 @@ def _create_enzyme_from_uniprot_entry(
         )
 
     alphafold_id = entry.cross_references.get("AlphaFoldDB")
-    if alphafold_id:
+    if fetch_structures and alphafold_id:
         model, alphafold_source, alphafold_provenance = _fetch_alphafold_model(entry.accession)
         if model is not None:
             _create_alphafold_structure(
@@ -417,7 +432,7 @@ def _create_enzyme_from_uniprot_entry(
                 source=alphafold_source,
                 provenance=alphafold_provenance,
             )
-    if pdb_id:
+    if fetch_structures and pdb_id:
         _save_rcsb_structure_for_enzyme(db, enzyme, pdb_id=pdb_id)
     return enzyme
 
@@ -429,6 +444,7 @@ def _upsert_enzyme_from_uniprot_entry(
     entry: UniProtEntry,
     fasta: str | None,
     source: str | None,
+    fetch_structures: bool = True,
 ) -> EnzymeEntry:
     enzyme = db.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == entry.accession))
     if enzyme is None:
@@ -438,6 +454,7 @@ def _upsert_enzyme_from_uniprot_entry(
             entry=entry,
             fasta=fasta,
             source=source,
+            fetch_structures=fetch_structures,
         )
 
     now = datetime.utcnow()
@@ -476,7 +493,7 @@ def _upsert_enzyme_from_uniprot_entry(
             protein_sequence.is_engineering_target = True
             protein_sequence.source = source or "uniprot"
             protein_sequence.checksum = checksum
-    if enzyme.pdb_id:
+    if fetch_structures and enzyme.pdb_id:
         _save_rcsb_structure_for_enzyme(db, enzyme, pdb_id=enzyme.pdb_id)
     return enzyme
 
@@ -1114,6 +1131,28 @@ def _create_alphafold_structure(
     return structure
 
 
+def _rcsb_complex_state_from_metadata(metadata: RcsbStructureMetadata) -> str:
+    ligands = metadata.ligand_summary.get("ligands") if isinstance(metadata.ligand_summary, dict) else None
+    if isinstance(ligands, list) and ligands:
+        return "enzyme_substrate_complex"
+    return "apo"
+
+
+def _rcsb_chain_summary_with_provenance(
+    metadata: RcsbStructureMetadata,
+    *,
+    source: str,
+    pdb_id: str,
+) -> dict:
+    chain_summary = dict(metadata.chain_summary)
+    chain_summary["provenance"] = _provider_provenance(
+        provider=source,
+        source_url=f"https://www.rcsb.org/structure/{pdb_id}",
+        fallback_warning="RCSB structure metadata came from a configured fallback client.",
+    )
+    return chain_summary
+
+
 def _save_rcsb_structure_for_enzyme(
     db: Session,
     enzyme: EnzymeEntry,
@@ -1129,9 +1168,6 @@ def _save_rcsb_structure_for_enzyme(
             StructureEntry.pdb_id == normalized_pdb_id,
         )
     )
-    if existing is not None:
-        return 0, [], []
-
     client = get_rcsb_client()
     source = getattr(client, "source", "rcsb")
     if require_real:
@@ -1149,16 +1185,25 @@ def _save_rcsb_structure_for_enzyme(
         return 0, [source], [f"RCSB provider unavailable: {exc}"]
 
     now = datetime.utcnow()
-    chain_summary = dict(metadata.chain_summary)
-    chain_summary["provenance"] = _provider_provenance(
-        provider=source,
-        source_url=f"https://www.rcsb.org/structure/{normalized_pdb_id}",
-        fallback_warning="RCSB structure metadata came from a configured fallback client.",
+    chain_summary = _rcsb_chain_summary_with_provenance(
+        metadata,
+        source=source,
+        pdb_id=normalized_pdb_id,
     )
+    complex_state = _rcsb_complex_state_from_metadata(metadata)
+    if existing is not None:
+        existing.structure_type = "pdb"
+        existing.complex_state = complex_state
+        existing.chain_summary = chain_summary
+        existing.ligand_summary = metadata.ligand_summary
+        existing.source = source
+        existing.updated_at = now
+        return 0, [source], []
+
     structure = StructureEntry(
         enzyme_entry_id=enzyme.id,
         structure_type="pdb",
-        complex_state="unknown",
+        complex_state=complex_state,
         pdb_id=normalized_pdb_id,
         chain_summary=chain_summary,
         ligand_summary=metadata.ligand_summary,
@@ -1200,7 +1245,7 @@ def _create_enzyme_from_rcsb_metadata(
         StructureEntry(
             enzyme_entry_id=enzyme.id,
             structure_type="pdb",
-            complex_state="unknown",
+            complex_state=_rcsb_complex_state_from_metadata(metadata),
             pdb_id=metadata.pdb_id,
             chain_summary=chain_summary,
             ligand_summary=metadata.ligand_summary,
@@ -1388,7 +1433,7 @@ def _backfill_sparse_uniprot_search_results(
             resolved_query,
             limit=limit,
             organism=organism,
-            include_details=True,
+            include_details=False,
         )
     except HTTPException:
         return
@@ -1403,6 +1448,7 @@ def _backfill_sparse_uniprot_search_results(
             entry=entry,
             fasta=fasta,
             source=source,
+            fetch_structures=False,
         )
 
 
@@ -2149,13 +2195,15 @@ def search_enzymes(
         )
         cache_status = "miss_refreshed"
 
+    fetched_uniprot_search_results = False
     if enzyme is None and resolved.kind in {QueryKind.UNIPROT, QueryKind.ALPHAFOLD, QueryKind.EC, QueryKind.KEYWORD}:
         uniprot_family: EnzymeFamily | None = None
+        fetch_entry_details = resolved.kind in {QueryKind.UNIPROT, QueryKind.ALPHAFOLD}
         for entry, fasta, source, entry_provenance in _fetch_uniprot_entries(
             resolved,
             limit=request.result_limit,
             organism=source_organism,
-            include_details=True,
+            include_details=fetch_entry_details,
         ):
             if uniprot_family is None:
                 uniprot_family = _ensure_uniprot_entry_family(db, module, entry)
@@ -2165,10 +2213,13 @@ def search_enzymes(
                 entry=entry,
                 fasta=fasta,
                 source=source,
+                fetch_structures=resolved.kind in {QueryKind.UNIPROT, QueryKind.ALPHAFOLD},
             )
             if enzyme is None:
                 retrieval_provenance = entry_provenance
                 enzyme = created_enzyme
+            if resolved.kind in {QueryKind.EC, QueryKind.KEYWORD}:
+                fetched_uniprot_search_results = True
         if enzyme is not None and not get_settings().use_real_science_providers:
             _save_literature_for_enzyme(
                 db,
@@ -2196,7 +2247,12 @@ def search_enzymes(
             detail="No real enzyme record found for this query; no seed or mock record was created.",
         )
 
-    if enzyme is not None and resolved.kind in {QueryKind.EC, QueryKind.KEYWORD} and settings.use_real_science_providers:
+    if (
+        enzyme is not None
+        and resolved.kind in {QueryKind.EC, QueryKind.KEYWORD}
+        and settings.use_real_science_providers
+        and not fetched_uniprot_search_results
+    ):
         _backfill_sparse_uniprot_search_results(
             db,
             primary_enzyme=enzyme,

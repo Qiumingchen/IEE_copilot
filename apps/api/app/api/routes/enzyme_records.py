@@ -293,6 +293,21 @@ def _structure_is_user_uploaded(structure: StructureEntry) -> bool:
     return source == "user_upload" and structure_type in {"uploaded_pdb", "uploaded_cif"}
 
 
+def _structure_is_deletable_user_upload(
+    structure: StructureEntry,
+    artifact: AnalysisArtifact | None,
+) -> bool:
+    if _structure_is_user_uploaded(structure):
+        return True
+    structure_type = (structure.structure_type or "").lower()
+    return (
+        structure_type in {"uploaded_pdb", "uploaded_cif"}
+        and artifact is not None
+        and artifact.artifact_type == "structure_file"
+        and artifact.source == "user_upload"
+    )
+
+
 def _summary_has_fallback_provenance(summary: dict | None) -> bool:
     if not isinstance(summary, dict):
         return False
@@ -1177,17 +1192,18 @@ def delete_structure(
     structure = db.get(StructureEntry, structure_id)
     if structure is None or structure.enzyme_entry_id != enzyme_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="structure not found")
-    if not _structure_is_user_uploaded(structure):
+    artifact = db.get(AnalysisArtifact, structure.artifact_id) if structure.artifact_id else None
+    if not _structure_is_deletable_user_upload(structure, artifact):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="only uploaded structure files can be deleted",
         )
 
-    artifact = db.get(AnalysisArtifact, structure.artifact_id) if structure.artifact_id else None
     ligands = list(db.scalars(select(LigandEntry).where(LigandEntry.structure_entry_id == structure.id)))
     for ligand in ligands:
         db.delete(ligand)
     db.delete(structure)
+    db.flush()
     if artifact is not None and artifact.source == "user_upload":
         db.delete(artifact)
     db.commit()

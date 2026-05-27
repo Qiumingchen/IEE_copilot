@@ -32,6 +32,10 @@ class UniProtSearchHit:
     organism: str | None = None
     ec_number: str | None = None
     score: float | None = None
+    sequence: str | None = None
+    mature_sequence: str | None = None
+    reviewed: bool = False
+    cross_references: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -192,6 +196,10 @@ def parse_uniprot_search_hits(payload: dict) -> list[UniProtSearchHit]:
                 organism=entry.organism,
                 ec_number=entry.ec_number,
                 score=item.get("score"),
+                sequence=entry.sequence,
+                mature_sequence=entry.mature_sequence,
+                reviewed=entry.reviewed,
+                cross_references=entry.cross_references,
             )
         )
     return hits

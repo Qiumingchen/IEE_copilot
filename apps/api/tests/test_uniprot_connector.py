@@ -4,6 +4,7 @@ from app.external.uniprot import (
     RealUniProtClient,
     parse_fasta_sequence,
     parse_uniprot_entry_payload,
+    parse_uniprot_search_hits,
 )
 
 
@@ -104,6 +105,37 @@ def test_parse_uniprot_entry_payload_keeps_first_pdb_cross_reference():
     entry = parse_uniprot_entry_payload(payload)
 
     assert entry.cross_references["PDB"] == "1AAA"
+
+
+def test_parse_uniprot_search_hits_preserves_entry_details_for_fast_search():
+    payload = {
+        "results": [
+            {
+                "primaryAccession": "P81453",
+                "entryType": "UniProtKB reviewed (Swiss-Prot)",
+                "proteinDescription": {
+                    "recommendedName": {
+                        "fullName": {"value": "Protein-glutamine gamma-glutamyltransferase"},
+                        "ecNumbers": [{"value": "2.3.2.13"}],
+                    }
+                },
+                "organism": {"scientificName": "Streptomyces mobaraensis"},
+                "sequence": {"value": "MATURESEQUENCE"},
+                "uniProtKBCrossReferences": [
+                    {"database": "PDB", "id": "1IU4"},
+                    {"database": "AlphaFoldDB", "id": "AF-P81453-F1"},
+                ],
+                "score": 42.0,
+            }
+        ]
+    }
+
+    hit = parse_uniprot_search_hits(payload)[0]
+
+    assert hit.reviewed is True
+    assert hit.sequence == "MATURESEQUENCE"
+    assert hit.cross_references["PDB"] == "1IU4"
+    assert hit.cross_references["AlphaFoldDB"] == "AF-P81453-F1"
 
 
 def test_parse_uniprot_entry_payload_extracts_reviewed_status():

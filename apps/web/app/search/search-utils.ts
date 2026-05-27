@@ -156,5 +156,8 @@ export function searchErrorMessage(error: ApiErrorLike): string {
   if (error.status === 404 && error.detail) {
     return error.detail;
   }
+  if (error.status && error.status >= 500 && error.detail) {
+    return error.detail;
+  }
   return "Search failed. Please confirm the API is running and your login is still valid.";
 }

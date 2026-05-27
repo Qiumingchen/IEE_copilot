@@ -3568,6 +3568,105 @@ def test_real_data_refresh_saves_rcsb_structure_for_known_pdb_id(client, db_sess
     assert structure.chain_summary["provenance"]["provider"] == "rcsb"
 
 
+def test_real_data_refresh_updates_existing_rcsb_structure_state(client, db_session, monkeypatch):
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class RealRcsbClient:
+        source = "rcsb"
+
+        def fetch_structure_metadata(self, pdb_id: str):
+            assert pdb_id == "1ABC"
+            return RcsbStructureMetadata(
+                pdb_id="1ABC",
+                title="Real PDB-linked food enzyme",
+                method="X-RAY DIFFRACTION",
+                resolution=1.8,
+                uniprot_id="P12346",
+                organism="Bacillus subtilis",
+                chain_summary={"polymer_entity_count": 1, "chains": ["A"]},
+                ligand_summary={"ligands": []},
+            )
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_rcsb_client", lambda: RealRcsbClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Food oxidoreductases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Food oxidoreductase with PDB",
+        organism="Bacillus subtilis",
+        source="uniprot",
+        uniprot_id="P12346",
+        pdb_id="1ABC",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    structure = StructureEntry(
+        enzyme_entry_id=enzyme.id,
+        structure_type="pdb",
+        complex_state="unknown",
+        pdb_id="1ABC",
+        chain_summary={},
+        ligand_summary={},
+        source="rcsb",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db_session.add(structure)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "rcsb-existing-refresh@example.com",
+            "password": "search-password",
+            "display_name": "RCSB Existing Refresh",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "rcsb-existing-refresh@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(structure)
+    assert structure.complex_state == "apo"
+    assert structure.chain_summary["chains"] == ["A"]
+    assert structure.chain_summary["provenance"]["provider"] == "rcsb"
+    assert structure.ligand_summary == {"ligands": []}
+
+
 def test_family_real_data_refresh_updates_same_family_entries(client, db_session, monkeypatch):
     class RealDataClient:
         source = "europepmc"
@@ -4487,6 +4586,8 @@ def test_enzyme_search_uses_uniprot_connector_for_ec_refresh(client, db_session,
                     protein_name="Connector microbial transglutaminase",
                     organism="Streptomyces testingensis",
                     ec_number=ec_number,
+                    sequence="MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVY",
+                    cross_references={"AlphaFoldDB": "AF-U11111-F1"},
                 )
             ]
 
@@ -4593,11 +4694,13 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
     class FakeUniProtClient:
         source = "uniprot"
         fetch_entry_calls: list[str] = []
+        search_calls: int = 0
 
         def search_by_ec(self, ec_number: str, size: int = 5):
             raise AssertionError("keyword search should not call EC search")
 
         def search_by_keyword(self, keyword: str, size: int = 5):
+            self.__class__.search_calls += 1
             assert keyword == "food lipase"
             assert size == 3
             return [
@@ -4685,6 +4788,7 @@ def test_real_keyword_search_persists_multiple_uniprot_hits(client, db_session, 
     body = response.json()
     assert {match["uniprot_id"] for match in body["matches"]} == {"R11111", "R22222", "R33333"}
     assert {match["source"] for match in body["matches"]} == {"uniprot"}
+    assert FakeUniProtClient.search_calls == 1
     assert body["enzyme"]["uniprot_id"] == "R11111"
     assert (
         db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == "R33333"))
@@ -4750,6 +4854,10 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
                     organism="Streptomyces mobaraensis",
                     ec_number="2.3.2.13",
                     score=90.0,
+                    sequence="MP81453SEQUENCE",
+                    mature_sequence="MATUREP81453",
+                    reviewed=True,
+                    cross_references={"AlphaFoldDB": "AF-P81453-F1", "PDB": "1IU4"},
                 ),
                 UniProtSearchHit(
                     accession="Q11111",
@@ -4757,6 +4865,9 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
                     organism="Streptomyces hygroscopicus",
                     ec_number="2.3.2.13",
                     score=80.0,
+                    sequence="MQ11111SEQUENCE",
+                    mature_sequence="MATUREQ11111",
+                    cross_references={"AlphaFoldDB": "AF-Q11111-F1", "PDB": "1TG"},
                 ),
                 UniProtSearchHit(
                     accession="Q22222",
@@ -4764,6 +4875,9 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
                     organism="Streptomyces cinnamoneus",
                     ec_number="2.3.2.13",
                     score=70.0,
+                    sequence="MQ22222SEQUENCE",
+                    mature_sequence="MATUREQ22222",
+                    cross_references={"AlphaFoldDB": "AF-Q22222-F1", "PDB": "2TG"},
                 ),
                 UniProtSearchHit(
                     accession="Q33333",
@@ -4771,6 +4885,9 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
                     organism="Streptomyces netropsis",
                     ec_number="2.3.2.13",
                     score=60.0,
+                    sequence="MQ33333SEQUENCE",
+                    mature_sequence="MATUREQ33333",
+                    cross_references={"AlphaFoldDB": "AF-Q33333-F1", "PDB": "3TG"},
                 ),
             ]
 
@@ -4800,20 +4917,13 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
             )
 
         def fetch_fasta(self, accession: str):
-            return f">sp|{accession}|TGASE\nM{accession}SEQUENCE\n"
+            raise AssertionError("keyword search should use sequence from UniProt entry instead of fetching FASTA")
 
     class FakeRcsbClient:
         source = "rcsb"
 
         def fetch_structure_metadata(self, pdb_id: str):
-            return RcsbStructureMetadata(
-                pdb_id=pdb_id.upper(),
-                title=f"RCSB structure {pdb_id.upper()}",
-                uniprot_id="P81453" if pdb_id.upper() == "1IU4" else None,
-                organism="Streptomyces mobaraensis" if pdb_id.upper() == "1IU4" else None,
-                chain_summary={"polymer_entity_count": 1},
-                ligand_summary={},
-            )
+            raise AssertionError("keyword search should defer RCSB metadata fetch until structure/detail refresh")
 
         def search_by_uniprot(self, uniprot_id: str, size: int = 5):
             return []
@@ -4912,18 +5022,108 @@ def test_keyword_search_backfills_real_uniprot_sources_when_local_results_are_sp
         "Q22222",
         "Q33333",
     }
-    assert FakeUniProtClient.fetch_entry_calls == ["P81453", "Q11111", "Q22222", "Q33333"]
+    assert FakeUniProtClient.fetch_entry_calls == []
     assert body["enzyme"]["pdb_id"] == "1IU4"
-    assert {
-        item.pdb_id
-        for item in db_session.scalars(select(StructureEntry).where(StructureEntry.source == "rcsb"))
-    } >= {"1IU4", "1TG", "2TG", "3TG"}
+    assert db_session.scalars(select(StructureEntry).where(StructureEntry.source == "rcsb")).all() == []
     assert {match["organism"] for match in body["matches"]} == {
         "Streptomyces mobaraensis",
         "Streptomyces hygroscopicus",
         "Streptomyces cinnamoneus",
         "Streptomyces netropsis",
     }
+
+
+def test_keyword_search_keeps_sparse_uniprot_hits_when_entry_details_fail(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class FlakyUniProtClient:
+        source = "uniprot"
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            raise AssertionError("keyword search should not call EC search")
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            return [
+                UniProtSearchHit(
+                    accession="P81453",
+                    protein_name="Protein-glutamine gamma-glutamyltransferase",
+                    organism="Streptomyces mobaraensis",
+                    ec_number="2.3.2.13",
+                    score=90.0,
+                )
+            ]
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise AssertionError("keyword search should not call organism search")
+
+        def fetch_entry(self, accession: str):
+            raise httpx.ConnectError("UniProt entry endpoint unavailable")
+
+        def fetch_fasta(self, accession: str):
+            raise AssertionError("FASTA should not be fetched when details fail")
+
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: FlakyUniProtClient(), raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "flaky-uniprot-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Flaky UniProt Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "flaky-uniprot-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "microbial transglutaminase", "result_limit": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enzyme"]["uniprot_id"] == "P81453"
+    assert body["enzyme"]["pdb_id"] is None
+    assert body["matches"][0]["organism"] == "Streptomyces mobaraensis"
 
 
 def test_keyword_search_passes_source_organism_to_uniprot(client, db_session, monkeypatch):

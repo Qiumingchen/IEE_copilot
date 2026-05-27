@@ -315,6 +315,13 @@ test("searchErrorMessage distinguishes real no-hit results from auth and API fai
     "Your login session has expired. Please sign in again before searching."
   );
   assert.equal(
+    searchErrorMessage({
+      status: 503,
+      detail: "UniProt provider unavailable; no mock enzyme record was created."
+    }),
+    "UniProt provider unavailable; no mock enzyme record was created."
+  );
+  assert.equal(
     searchErrorMessage({ message: "NetworkError" }),
     "Search failed. Please confirm the API is running and your login is still valid."
   );
