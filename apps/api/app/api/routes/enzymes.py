@@ -681,7 +681,7 @@ def _save_external_enzyme_data(
                 substrate=datum.substrate,
                 assay_temperature=datum.assay_temperature,
                 assay_pH=datum.assay_pH,
-                method=datum.source,
+                method=getattr(datum, "method", None) or datum.source,
                 reference_id=reference.id if reference else None,
                 evidence_text=datum.evidence,
             )
@@ -735,7 +735,7 @@ def _save_external_enzyme_data(
                 unit_original=parameter.unit_original,
                 assay_temperature=parameter.assay_temperature,
                 assay_pH=parameter.assay_pH,
-                method=parameter.source,
+                method=getattr(parameter, "method", None) or parameter.source,
                 reference_id=reference.id if reference else None,
                 evidence_text=parameter.evidence,
             )
@@ -778,6 +778,7 @@ def _save_external_enzyme_data(
                     "source": mutant.source,
                     "evidence": mutant.evidence,
                     "organism": mutant.organism,
+                    **({"method": mutant.method} if getattr(mutant, "method", None) else {}),
                 },
                 reference_id=reference.id if reference else None,
             )

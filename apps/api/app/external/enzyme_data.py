@@ -18,6 +18,7 @@ class ExternalPropertyDatum:
     substrate: str | None = None
     assay_temperature: str | None = None
     assay_pH: str | None = None
+    method: str | None = None
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
@@ -37,6 +38,7 @@ class ExternalKineticParameter:
     unit_original: str | None = None
     assay_temperature: str | None = None
     assay_pH: str | None = None
+    method: str | None = None
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
@@ -53,6 +55,7 @@ class ExternalMutantRecord:
     effect_summary: str | None = None
     property_delta: dict = field(default_factory=dict)
     substrate: str | None = None
+    method: str | None = None
     organism: str | None = None
     source: str = "enzyme_data_mock"
     evidence: str | None = None
@@ -724,6 +727,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
                 organism=_extract_evidence_organism(text, temperature),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, temperature),
+                method=_extract_assay_method(text, temperature),
                 **_reference_kwargs(item),
             )
         )
@@ -736,6 +740,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
                 organism=_extract_evidence_organism(text, ph_value),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, ph_value),
+                method=_extract_assay_method(text, ph_value),
                 **_reference_kwargs(item),
             )
         )
@@ -753,9 +758,12 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
                 value_original=activity,
                 unit_original=unit_original,
                 substrate=_extract_activity_substrate(text, activity),
+                assay_temperature=_extract_assay_temperature(text, activity),
+                assay_pH=_extract_assay_ph(text, activity),
                 organism=_extract_evidence_organism(text, activity),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, activity),
+                method=_extract_assay_method(text, activity),
                 **_reference_kwargs(item),
             )
         )
@@ -886,6 +894,7 @@ def _extract_comparative_property_data_from_article(item: dict, text: str) -> li
                     organism=first_organism,
                     source=_item_source(item),
                     evidence=_evidence_with_sentence(item, text, match.group(3)),
+                    method=_extract_assay_method(text, match.group(3)),
                     **_reference_kwargs(item),
                 ),
                 ExternalPropertyDatum(
@@ -896,6 +905,7 @@ def _extract_comparative_property_data_from_article(item: dict, text: str) -> li
                     organism=second_organism,
                     source=_item_source(item),
                     evidence=_evidence_with_sentence(item, text, match.group(7)),
+                    method=_extract_assay_method(text, match.group(7)),
                     **_reference_kwargs(item),
                 ),
             ]
@@ -926,6 +936,7 @@ def _comparative_property_records_from_match(
                 organism=organism_name,
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, value if value in sentence else match.group(5)),
+                method=_extract_assay_method(text, value),
                 **_reference_kwargs(item),
             )
         )
@@ -952,6 +963,7 @@ def _contrast_property_records_from_match(
             organism=organism_name,
             source=_item_source(item),
             evidence=_evidence_with_sentence(item, text, value),
+            method=_extract_assay_method(text, value),
             **_reference_kwargs(item),
         )
         for organism_name, value in ((first_organism, match.group(3)), (second_organism, match.group(6)))
@@ -981,6 +993,7 @@ def _extract_kinetic_parameter_from_article(item: dict, text: str) -> ExternalKi
         ),
         assay_temperature=_extract_kinetic_assay_temperature(text, value),
         assay_pH=_extract_kinetic_assay_ph(text, value),
+        method=_extract_assay_method(text, value),
         organism=_extract_evidence_organism(text, value),
         source=_item_source(item),
         evidence=_evidence_with_sentence(item, text, value),
@@ -1030,6 +1043,7 @@ def _extract_comparative_kinetic_parameters_from_article(item: dict, text: str) 
                     organism=organism_name,
                     source=_item_source(item),
                     evidence=_evidence_with_sentence(item, text, km),
+                    method=_extract_assay_method(text, km),
                     **_reference_kwargs(item),
                 )
             )
@@ -1059,6 +1073,7 @@ def _extract_comparative_kinetic_parameters_from_article(item: dict, text: str) 
                     organism=organism_name,
                     source=_item_source(item),
                     evidence=_evidence_with_sentence(item, text, kcat_km),
+                    method=_extract_assay_method(text, kcat_km),
                     **_reference_kwargs(item),
                 )
             )
@@ -1075,6 +1090,7 @@ def _extract_mutant_records_from_article(item: dict, text: str) -> list[External
                 effect_summary=f"Real literature mention: {sentence}",
                 property_delta=_extract_mutant_property_delta(sentence),
                 substrate=_extract_activity_substrate(sentence, _extract_fold_change(sentence)),
+                method=_extract_assay_method(text, mutation),
                 organism=_extract_evidence_organism(text, mutation),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, mutation),
@@ -1376,6 +1392,26 @@ def _evidence_with_sentence(item: dict, text: str, needle: str | None) -> str:
     if not sentence:
         return label
     return f"{label} | Evidence quality: literature sentence | Evidence: {sentence}"
+
+
+def _extract_assay_method(text: str, needle: str | None) -> str | None:
+    sentence = _sentence_containing(text, needle) if needle else text
+    if not sentence:
+        return None
+    patterns = [
+        r"\b(?:using|with)\s+(?:the\s+)?([A-Z0-9][A-Za-z0-9+\- ]{1,70}?\b(?:assay|method|analysis|chromatography))\b",
+        r"\b(?:determined|measured|assayed|analy[sz]ed)\s+(?:by|using|with)\s+(?:the\s+)?((?:HPLC|UPLC|LC-MS|GC)|[A-Z0-9][A-Za-z0-9+\- ]{0,70}?\b(?:assay|method|analysis|chromatography))\b",
+        r"\bin\s+(?:a|an|the)\s+([A-Za-z0-9+\- ]{2,70}?\bassay)\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, sentence, flags=re.IGNORECASE)
+        if not match:
+            continue
+        method = re.sub(r"\s+", " ", match.group(1)).strip(" .;,")
+        method = re.sub(r"\b(?:was|were|is|and|at|pH)\b.*$", "", method, flags=re.IGNORECASE).strip(" .;,")
+        if method:
+            return method
+    return None
 
 
 def _reference_kwargs(item: dict) -> dict:
@@ -2016,14 +2052,29 @@ def _extract_kinetic_substrate(text: str, value: str | None) -> str | None:
 
 
 def _extract_kinetic_assay_temperature(text: str, value: str | None) -> str | None:
+    return _extract_assay_temperature(text, value)
+
+
+def _extract_kinetic_assay_ph(text: str, value: str | None) -> str | None:
+    return _extract_assay_ph(text, value)
+
+
+def _extract_assay_temperature(text: str, value: str | None) -> str | None:
     if value is None:
         return None
     sentence = _sentence_containing(text, value)
     unit = r"(?:\u00b0\s*C|\u2103|degrees?\s*C|deg\s*C|degC|C)"
-    return _first_match(sentence, [rf"\bat\s+(\d+(?:\.\d+)?)\s*{unit}"])
+    return _first_match(
+        sentence,
+        [
+            rf"\bat\s+pH\s*\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
+            rf"\bat\s+(\d+(?:\.\d+)?)\s*{unit}",
+            rf"\btemperature\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*{unit}",
+        ],
+    )
 
 
-def _extract_kinetic_assay_ph(text: str, value: str | None) -> str | None:
+def _extract_assay_ph(text: str, value: str | None) -> str | None:
     if value is None:
         return None
     sentence = _sentence_containing(text, value)

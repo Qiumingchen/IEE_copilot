@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 from sqlalchemy import select
@@ -1304,6 +1305,141 @@ def test_real_data_refresh_saves_external_records_without_mock_fallback(client, 
     assert {record.reference_id for record in properties} == {europepmc_reference.id}
     assert kinetics[0].reference_id == europepmc_reference.id
     assert mutations[0].reference_id == europepmc_reference.id
+
+
+def test_real_data_refresh_persists_extracted_assay_methods(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class BatchRealDataClient:
+        source = "europepmc"
+
+        def fetch_enzyme_records(self, query: str, size: int = 5, progress_callback=None):
+            return ExternalEnzymeDataBatch(
+                property_data=[
+                    SimpleNamespace(
+                        property_type="specific_activity",
+                        value_original="125",
+                        unit_original="U/mg",
+                        substrate="lactose",
+                        assay_temperature="80",
+                        assay_pH="7.5",
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence="Specific activity toward lactose was 125 U/mg using the DNS assay.",
+                        reference_title="Method rich cellobiose epimerase characterization",
+                        journal="Applied Microbiology and Biotechnology",
+                        year=2012,
+                        doi="10.1000/method-rich-ce",
+                        pubmed_id="24100573",
+                        method="DNS assay",
+                    )
+                ],
+                kinetic_parameters=[
+                    SimpleNamespace(
+                        substrate="lactose",
+                        km="1.2",
+                        kcat="42",
+                        kcat_km=None,
+                        unit_original="Km:mM; kcat:s^-1",
+                        assay_temperature="80",
+                        assay_pH="7.5",
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence="The Km value for lactose was 1.2 mM and kcat value was 42 s^-1, determined by HPLC.",
+                        reference_title="Method rich cellobiose epimerase characterization",
+                        journal="Applied Microbiology and Biotechnology",
+                        year=2012,
+                        doi="10.1000/method-rich-ce",
+                        pubmed_id="24100573",
+                        method="HPLC",
+                    )
+                ],
+                mutant_records=[
+                    SimpleNamespace(
+                        mutation_string="A123V",
+                        effect_summary="A123V increased thermostability.",
+                        property_delta={"optimal_temperature": "+5 degC"},
+                        substrate="lactose",
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence="A123V increased thermostability in a thermal shift assay.",
+                        reference_title="Method rich cellobiose epimerase characterization",
+                        journal="Applied Microbiology and Biotechnology",
+                        year=2012,
+                        doi="10.1000/method-rich-ce",
+                        pubmed_id="24100573",
+                        method="thermal shift assay",
+                    )
+                ],
+                sources=["europepmc"],
+            )
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            raise AssertionError("batch client should be used")
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            raise AssertionError("batch client should be used")
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            raise AssertionError("batch client should be used")
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            raise AssertionError("batch client should be used")
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: BatchRealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cellobiose epimerases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Cellobiose 2-epimerase",
+        organism="Dictyoglomus turgidum",
+        source="uniprot",
+        uniprot_id="B8DZK4",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "method-real-data@example.com",
+            "password": "search-password",
+            "display_name": "Method Real Data",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "method-real-data@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    property_record = db_session.scalar(select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id))
+    kinetic_record = db_session.scalar(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id))
+    mutation_record = db_session.scalar(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id))
+    assert property_record.method == "DNS assay"
+    assert kinetic_record.method == "HPLC"
+    assert mutation_record.assay_condition_summary["method"] == "thermal shift assay"
 
 
 def test_real_data_refresh_prefers_batch_external_records(client, db_session, monkeypatch):

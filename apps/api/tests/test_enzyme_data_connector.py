@@ -4583,6 +4583,49 @@ def test_real_enzyme_data_client_extracts_epimerase_source_organism_despite_expr
     assert temperature.value_original == "80"
 
 
+def test_real_enzyme_data_client_extracts_assay_methods_with_literature_values(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": "Biochemical characterization of cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": (
+            "Specific activity toward lactose was 125 U/mg at pH 7.5 and 80 degC using the DNS assay. "
+            "The Km value for lactose was 1.2 mM and kcat value was 42 s^-1 at 80 degC and pH 7.5, "
+            "determined by HPLC."
+        ),
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1000/method-rich-ce",
+        "pmid": "24100573",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3)
+
+    activity = next(record for record in batch.property_data if record.property_type == "specific_activity")
+    kinetic = batch.kinetic_parameters[0]
+    assert activity.value_original == "125"
+    assert activity.unit_original == "U/mg"
+    assert activity.substrate == "lactose"
+    assert activity.assay_temperature == "80"
+    assert activity.assay_pH == "7.5"
+    assert activity.method == "DNS assay"
+    assert "Specific activity toward lactose was 125 U/mg at pH 7.5 and 80 degC using the DNS assay" in activity.evidence
+    assert activity.doi == "10.1000/method-rich-ce"
+    assert activity.pubmed_id == "24100573"
+    assert kinetic.substrate == "lactose"
+    assert kinetic.km == "1.2"
+    assert kinetic.kcat == "42"
+    assert kinetic.assay_temperature == "80"
+    assert kinetic.assay_pH == "7.5"
+    assert kinetic.method == "HPLC"
+    assert "determined by HPLC" in kinetic.evidence
+
+
 def test_real_enzyme_data_client_keeps_more_relevant_literature_than_property_budget(monkeypatch):
     client = RealEnzymeDataClient()
     papers = [
