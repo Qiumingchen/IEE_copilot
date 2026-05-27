@@ -299,9 +299,11 @@ def _fetch_uniprot_entries_with_client(
         else:
             hits = client.search_by_ec(resolved_query.normalized_query, size=limit)
     elif resolved_query.kind == QueryKind.KEYWORD:
-        hits = client.search_by_keyword(
-            _uniprot_query_with_organism(resolved_query.normalized_query, organism),
-            size=limit,
+        hits = _search_uniprot_keyword_variants(
+            client,
+            resolved_query.normalized_query,
+            organism=organism,
+            limit=limit,
         )
 
     entries: list[tuple[UniProtEntry, str | None, str | None]] = []
@@ -344,6 +346,43 @@ def _uniprot_query_with_organism(query: str, organism: str | None) -> str:
         return query
     escaped_organism = normalized_organism.replace('"', "")
     return f'{query} AND organism_name:"{escaped_organism}"'
+
+
+def _uniprot_keyword_query_variants(query: str, organism: str | None) -> list[str]:
+    normalized = " ".join(query.split())
+    if not normalized:
+        return []
+    protein_name = normalized.replace('"', "")
+    variants = [
+        _uniprot_query_with_organism(normalized, organism),
+        _uniprot_query_with_organism(f'protein_name:"{protein_name}"', organism),
+    ]
+    deduped: list[str] = []
+    for variant in variants:
+        if variant not in deduped:
+            deduped.append(variant)
+    return deduped
+
+
+def _search_uniprot_keyword_variants(
+    client,
+    query: str,
+    *,
+    organism: str | None,
+    limit: int,
+):
+    last_error: Exception | None = None
+    for keyword in _uniprot_keyword_query_variants(query, organism):
+        try:
+            hits = client.search_by_keyword(keyword, size=limit)
+        except (httpx.HTTPError, ValueError) as exc:
+            last_error = exc
+            continue
+        if hits:
+            return hits
+    if last_error is not None:
+        raise last_error
+    return []
 
 
 def _uniprot_retrieval_provenance(entry: UniProtEntry | None, source: str | None) -> dict | None:
@@ -2019,6 +2058,116 @@ def _local_pdb_discovery_hits(
     return hits[:limit]
 
 
+def _remote_pdb_discovery_hits(
+    db: Session,
+    *,
+    metadata: PdbDiscoveryMetadata,
+    query_sequence: str,
+    module: EnzymeModule | None = None,
+) -> list[PdbDiscoveryHit]:
+    candidates: list[tuple[str, str]] = []
+
+    def add_candidate(accession: str | None, evidence: str) -> None:
+        normalized = (accession or "").strip().upper()
+        if not normalized:
+            return
+        if normalized not in [candidate for candidate, _ in candidates]:
+            candidates.append((normalized, evidence))
+
+    add_candidate(metadata.uniprot_id, "uniprot_id")
+
+    if metadata.alphafold_id:
+        alphafold_accession = _uniprot_accession_from_alphafold_id(metadata.alphafold_id)
+        add_candidate(alphafold_accession, "alphafold_id")
+        if alphafold_accession and metadata.uniprot_id is None:
+            metadata.uniprot_id = alphafold_accession
+
+    if metadata.pdb_id and not candidates:
+        rcsb_client = get_rcsb_client()
+        try:
+            rcsb_metadata = rcsb_client.fetch_structure_metadata(metadata.pdb_id.upper())
+        except (httpx.HTTPError, ValueError, ImportError):
+            rcsb_metadata = None
+        if rcsb_metadata is not None and rcsb_metadata.uniprot_id:
+            add_candidate(rcsb_metadata.uniprot_id, "pdb_id")
+            if metadata.uniprot_id is None:
+                metadata.uniprot_id = rcsb_metadata.uniprot_id.upper()
+
+    if not candidates:
+        return []
+
+    uniprot_client = get_uniprot_client()
+    source = getattr(uniprot_client, "source", "uniprot")
+    hits: list[PdbDiscoveryHit] = []
+    family_by_name: dict[str, EnzymeFamily] = {}
+    fallback_module = module or EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE
+    for accession, evidence in candidates:
+        try:
+            entry = uniprot_client.fetch_entry(accession)
+        except (httpx.HTTPError, ValueError, ImportError):
+            continue
+        family_name = _uniprot_entry_family_name(entry).lower()
+        family = family_by_name.get(family_name)
+        if family is None:
+            family = _ensure_uniprot_entry_family(db, fallback_module, entry)
+            family_by_name[family_name] = family
+        enzyme = _upsert_enzyme_from_uniprot_entry(
+            db,
+            family=family,
+            entry=entry,
+            fasta=_fasta_for_uniprot_entry(uniprot_client, entry),
+            source=source,
+            fetch_structures=False,
+        )
+        if metadata.pdb_id and not enzyme.pdb_id:
+            enzyme.pdb_id = metadata.pdb_id.upper()
+        if metadata.alphafold_id and not enzyme.alphafold_id:
+            enzyme.alphafold_id = metadata.alphafold_id
+        db.flush()
+
+        candidate_sequence = entry.mature_sequence or entry.sequence or ""
+        if candidate_sequence:
+            similarity = calculate_ungapped_similarity(query_sequence, candidate_sequence)
+            identity = round(similarity.identity, 4)
+            coverage = round(similarity.coverage, 4)
+            aligned_length = similarity.aligned_length
+        else:
+            identity = 1.0
+            coverage = 1.0
+            aligned_length = len(query_sequence)
+        hits.append(
+            PdbDiscoveryHit(
+                enzyme=enzyme,
+                identity=identity,
+                coverage=coverage,
+                aligned_length=aligned_length,
+                evidence=[evidence, "remote_database"],
+                confidence="exact",
+            )
+        )
+    return hits
+
+
+def _merge_pdb_discovery_hit_list(
+    db: Session,
+    hits: list[PdbDiscoveryHit],
+    *,
+    limit: int = 12,
+) -> list[PdbDiscoveryHit]:
+    hits_by_enzyme_id: dict[str, PdbDiscoveryHit] = {}
+    for hit in hits:
+        existing_hit = hits_by_enzyme_id.get(hit.enzyme.id)
+        if existing_hit is None:
+            hits_by_enzyme_id[hit.enzyme.id] = hit
+        else:
+            hits_by_enzyme_id[hit.enzyme.id] = _merge_pdb_discovery_hits(existing_hit, hit)
+    return sorted(
+        hits_by_enzyme_id.values(),
+        key=_pdb_discovery_hit_rank(db, hits_by_enzyme_id.values()),
+        reverse=True,
+    )[:limit]
+
+
 def _merge_pdb_discovery_hits(existing: PdbDiscoveryHit, incoming: PdbDiscoveryHit) -> PdbDiscoveryHit:
     sequence_hit = _best_sequence_pdb_discovery_hit(existing, incoming)
     metric_hit = sequence_hit or max([existing, incoming], key=_pdb_discovery_hit_score)
@@ -2028,7 +2177,14 @@ def _merge_pdb_discovery_hits(existing: PdbDiscoveryHit, incoming: PdbDiscoveryH
     )
     evidence = [
         evidence
-        for evidence in ["pdb_id", "alphafold_id", "uniprot_id", "sequence_similarity", "local_database"]
+        for evidence in [
+            "pdb_id",
+            "alphafold_id",
+            "uniprot_id",
+            "sequence_similarity",
+            "local_database",
+            "remote_database",
+        ]
         if evidence in {*existing.evidence, *incoming.evidence}
     ]
     return PdbDiscoveryHit(
@@ -2400,6 +2556,18 @@ async def discover_enzyme_from_pdb(
         metadata=metadata,
         query_sequence=query_chain.sequence,
     )
+    if get_settings().use_real_science_providers:
+        remote_hits = _remote_pdb_discovery_hits(
+            db,
+            metadata=metadata,
+            query_sequence=query_chain.sequence,
+        )
+        if remote_hits:
+            db.commit()
+        hits = _merge_pdb_discovery_hit_list(
+            db,
+            [*hits, *remote_hits],
+        )
     return PdbDiscoveryResponse(
         file_name=file_name,
         metadata=metadata,

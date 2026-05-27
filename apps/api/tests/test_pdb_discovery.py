@@ -1,6 +1,10 @@
 from datetime import datetime
 
+from sqlalchemy import select
+
 from app.db.models import EnzymeEntry, EnzymeFamily, EnzymeModule, ProteinSequence, PropertyRecord, StructureEntry
+from app.external.rcsb import RcsbStructureMetadata
+from app.external.uniprot import UniProtEntry
 
 
 PDB_WITH_SEQUENCE = """\
@@ -574,6 +578,135 @@ def test_pdb_discovery_groups_upload_with_structure_level_alphafold_id(client, d
     assert body["hits"][0]["enzyme"]["id"] == enzyme.id
     assert body["hits"][0]["confidence"] == "exact"
     assert body["hits"][0]["evidence"] == ["alphafold_id", "local_database"]
+
+
+def test_pdb_discovery_fetches_remote_uniprot_from_alphafold_filename_when_not_local(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RemoteUniProtClient:
+        source = "uniprot"
+        fetch_entry_calls: list[str] = []
+
+        def fetch_entry(self, accession: str):
+            self.fetch_entry_calls.append(accession)
+            assert accession == "P81453"
+            return UniProtEntry(
+                accession="P81453",
+                protein_name="Protein-glutamine gamma-glutamyltransferase",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                sequence="AEAKLLND",
+                mature_sequence="AEAKLLND",
+                reviewed=True,
+                cross_references={"AlphaFoldDB": "AF-P81453-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            raise AssertionError("sequence is already present on remote UniProt entry")
+
+    uniprot_client = RemoteUniProtClient()
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: uniprot_client, raising=False)
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("AF-P81453-F1-model_v6.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["alphafold_id"] == "AF-P81453-F1"
+    assert body["metadata"]["uniprot_id"] == "P81453"
+    assert body["hits"][0]["enzyme"]["uniprot_id"] == "P81453"
+    assert body["hits"][0]["enzyme"]["alphafold_id"] == "AF-P81453-F1"
+    assert body["hits"][0]["identity"] == 1.0
+    assert body["hits"][0]["coverage"] == 1.0
+    assert body["hits"][0]["confidence"] == "exact"
+    assert body["hits"][0]["evidence"] == ["alphafold_id", "remote_database"]
+    assert uniprot_client.fetch_entry_calls == ["P81453"]
+    assert db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == "P81453")) is not None
+
+
+def test_pdb_discovery_fetches_remote_uniprot_from_rcsb_pdb_id_when_not_local(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class RemoteRcsbClient:
+        source = "rcsb"
+        fetch_calls: list[str] = []
+
+        def fetch_structure_metadata(self, pdb_id: str):
+            self.fetch_calls.append(pdb_id)
+            assert pdb_id == "9XYZ"
+            return RcsbStructureMetadata(
+                pdb_id="9XYZ",
+                title="Remote microbial transglutaminase",
+                method="X-ray diffraction",
+                resolution=2.1,
+                uniprot_id="P81453",
+                organism="Streptomyces mobaraensis",
+                chain_summary={"A": {"length": 8}},
+                ligand_summary=[],
+            )
+
+    class RemoteUniProtClient:
+        source = "uniprot"
+        fetch_entry_calls: list[str] = []
+
+        def fetch_entry(self, accession: str):
+            self.fetch_entry_calls.append(accession)
+            assert accession == "P81453"
+            return UniProtEntry(
+                accession="P81453",
+                protein_name="Protein-glutamine gamma-glutamyltransferase",
+                organism="Streptomyces mobaraensis",
+                ec_number="2.3.2.13",
+                sequence="AEAKLLND",
+                mature_sequence="AEAKLLND",
+                reviewed=True,
+                cross_references={"PDB": "9XYZ", "AlphaFoldDB": "AF-P81453-F1"},
+            )
+
+        def fetch_fasta(self, accession: str):
+            raise AssertionError("sequence is already present on remote UniProt entry")
+
+    rcsb_client = RemoteRcsbClient()
+    uniprot_client = RemoteUniProtClient()
+    monkeypatch.setattr("app.api.routes.enzymes.get_rcsb_client", lambda: rcsb_client, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: uniprot_client, raising=False)
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/enzymes/discover-pdb",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("9xyz.pdb", PDB_WITH_SEQUENCE, "chemical/x-pdb")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["pdb_id"] == "9XYZ"
+    assert body["metadata"]["uniprot_id"] == "P81453"
+    assert body["hits"][0]["enzyme"]["uniprot_id"] == "P81453"
+    assert body["hits"][0]["enzyme"]["pdb_id"] == "9XYZ"
+    assert body["hits"][0]["confidence"] == "exact"
+    assert body["hits"][0]["evidence"] == ["pdb_id", "remote_database"]
+    assert rcsb_client.fetch_calls == ["9XYZ"]
+    assert uniprot_client.fetch_entry_calls == ["P81453"]
+    assert db_session.scalar(select(EnzymeEntry).where(EnzymeEntry.uniprot_id == "P81453")) is not None
 
 
 def test_pdb_discovery_rejects_files_without_protein_sequence(client):

@@ -5126,6 +5126,119 @@ def test_keyword_search_keeps_sparse_uniprot_hits_when_entry_details_fail(
     assert body["matches"][0]["organism"] == "Streptomyces mobaraensis"
 
 
+def test_keyword_search_expands_uniprot_query_when_primary_keyword_has_no_hits(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class PlaceholderTask:
+        @staticmethod
+        def delay(job_id):
+            return None
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    class EmptyEnzymeDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return []
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return []
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyAlphaFoldClient:
+        source = "alphafold"
+
+        def fetch_model_by_uniprot(self, uniprot_id: str):
+            raise ValueError("no AlphaFold model in this test")
+
+    class ExpandingUniProtClient:
+        source = "uniprot"
+        queries: list[str] = []
+
+        def search_by_ec(self, ec_number: str, size: int = 5):
+            raise AssertionError("keyword search should not call EC search")
+
+        def search_by_keyword(self, keyword: str, size: int = 5):
+            self.queries.append(keyword)
+            if keyword == "cellobiose 2-epimerase":
+                return []
+            if keyword == 'protein_name:"cellobiose 2-epimerase"':
+                return [
+                    UniProtSearchHit(
+                        accession="Q9X123",
+                        protein_name="Cellobiose 2-epimerase",
+                        organism="Dictyoglomus turgidum",
+                        ec_number="5.1.3.11",
+                        sequence="MCESEQUENCE",
+                        mature_sequence="CESEQUENCE",
+                        reviewed=True,
+                        cross_references={"AlphaFoldDB": "AF-Q9X123-F1"},
+                    )
+                ]
+            return []
+
+        def search_by_organism(self, organism: str, size: int = 5):
+            raise AssertionError("keyword search should use keyword variants")
+
+        def fetch_entry(self, accession: str):
+            raise AssertionError("keyword search should use sparse hit details")
+
+        def fetch_fasta(self, accession: str):
+            raise AssertionError("FASTA should not be fetched for sparse hit details")
+
+    uniprot_client = ExpandingUniProtClient()
+    monkeypatch.setattr("app.api.routes.enzymes.run_homology_collection", PlaceholderTask, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_uniprot_client", lambda: uniprot_client, raising=False)
+    monkeypatch.setattr("app.api.routes.enzymes.get_alphafold_client", lambda: EmptyAlphaFoldClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: EmptyEnzymeDataClient())
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "expanded-uniprot-searcher@example.com",
+            "password": "search-password",
+            "display_name": "Expanded UniProt Searcher",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "expanded-uniprot-searcher@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        "/enzymes/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "cellobiose 2-epimerase", "result_limit": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enzyme"]["uniprot_id"] == "Q9X123"
+    assert body["enzyme"]["organism"] == "Dictyoglomus turgidum"
+    assert uniprot_client.queries == [
+        "cellobiose 2-epimerase",
+        'protein_name:"cellobiose 2-epimerase"',
+    ]
+
+
 def test_keyword_search_passes_source_organism_to_uniprot(client, db_session, monkeypatch):
     monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
     from app.core.config import get_settings
