@@ -193,7 +193,11 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
               source: "europepmc",
               year: 2012,
               doi: "10.1007/s00253-012-4002-5",
-              pubmed_id: null
+              pubmed_id: null,
+              relevance_score: 24,
+              decision: "extracted",
+              reason: "passed relevance filter and produced extractable records",
+              extracted_fields: ["optimal_temperature", "optimal_pH"]
             }
           ]
         }
@@ -224,7 +228,11 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
           source: "europepmc",
           year: 2012,
           doi: "10.1007/s00253-012-4002-5",
-          pubmedId: null
+          pubmedId: null,
+          relevanceScore: 24,
+          decision: "extracted",
+          reason: "passed relevance filter and produced extractable records",
+          extractedFields: ["optimal_temperature", "optimal_pH"]
         }
       ],
       canPause: true

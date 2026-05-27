@@ -1599,6 +1599,16 @@ function RealDataProgressPanel({
                     .filter(Boolean)
                     .join(" | ")}
                 </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {[
+                    paper.decision ? `Decision ${paper.decision}` : null,
+                    paper.relevanceScore !== null ? `Score ${paper.relevanceScore}` : null,
+                    paper.extractedFields.length > 0 ? `Extracted ${paper.extractedFields.join(", ")}` : null
+                  ]
+                    .filter(Boolean)
+                    .join(" | ")}
+                </p>
+                {paper.reason ? <p className="mt-1 text-xs text-slate-500">{paper.reason}</p> : null}
               </li>
             ))}
           </ul>

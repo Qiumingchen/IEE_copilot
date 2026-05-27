@@ -400,13 +400,14 @@ class RealEnzymeDataClient:
     ) -> ExternalEnzymeDataBatch:
         candidate_limit = _literature_candidate_limit(size)
         candidates = list(self._search_relevant_literature(query, size=size))
+        candidate_states = _initial_candidate_paper_states(candidates, query)
         sources = _unique_strings(_item_source(item) for item in candidates)
         _emit_progress(
             progress_callback,
             {
                 "stage": "candidate literature search",
                 "candidate_articles": len(candidates),
-                "candidate_papers": _candidate_paper_summaries(candidates),
+                "candidate_papers": _candidate_paper_summaries(candidates, candidate_states),
                 "articles_scanned": 0,
                 "filtered_articles": 0,
                 "relevant_articles": 0,
@@ -429,12 +430,19 @@ class RealEnzymeDataClient:
             articles_scanned += 1
             if not _is_relevant_enzyme_article(item, query):
                 filtered_articles += 1
+                _update_candidate_paper_state(
+                    candidate_states,
+                    item,
+                    decision="filtered",
+                    reason="failed enzyme/source relevance filter",
+                    extracted_fields=[],
+                )
                 _emit_progress(
                     progress_callback,
                     {
                         "stage": "filtering candidate literature",
                         "candidate_articles": len(candidates),
-                        "candidate_papers": _candidate_paper_summaries(candidates),
+                        "candidate_papers": _candidate_paper_summaries(candidates, candidate_states),
                         "articles_scanned": articles_scanned,
                         "filtered_articles": filtered_articles,
                         "relevant_articles": articles_scanned - filtered_articles,
@@ -450,7 +458,12 @@ class RealEnzymeDataClient:
                 seen_literature.add(literature_identity)
                 literature_references.append(literature_datum)
 
-            for datum in _extract_property_data_from_article(item, text):
+            item_property_data = _extract_property_data_from_article(item, text)
+            item_kinetics = _extract_kinetic_parameters_from_article(item, text)
+            item_mutants = _extract_mutant_records_from_article(item, text)
+            extracted_fields = _extracted_field_names(item_property_data, item_kinetics, item_mutants)
+
+            for datum in item_property_data:
                 identity = (
                     datum.property_type,
                     datum.value_original,
@@ -464,26 +477,37 @@ class RealEnzymeDataClient:
                 seen_properties.add(identity)
                 property_data.append(datum)
 
-            kinetics = _extract_kinetic_parameters_from_article(item, text)
-            for kinetic in kinetics:
+            for kinetic in item_kinetics:
                 kinetic_identity = _kinetic_identity(kinetic)
                 if kinetic_identity not in seen_kinetics:
                     seen_kinetics.add(kinetic_identity)
                     kinetic_parameters.append(kinetic)
 
-            for mutant in _extract_mutant_records_from_article(item, text):
+            for mutant in item_mutants:
                 mutant_identity = (mutant.mutation_string, mutant.substrate, mutant.doi, mutant.pubmed_id)
                 if mutant_identity in seen_mutants:
                     continue
                 seen_mutants.add(mutant_identity)
                 mutant_records.append(mutant)
 
+            _update_candidate_paper_state(
+                candidate_states,
+                item,
+                decision="extracted" if extracted_fields else "linked_reference",
+                reason=(
+                    "passed relevance filter and produced extractable records"
+                    if extracted_fields
+                    else "passed relevance filter but no target values were extracted"
+                ),
+                extracted_fields=extracted_fields,
+            )
+
             _emit_progress(
                 progress_callback,
                 {
                     "stage": "extracting candidate literature",
                     "candidate_articles": len(candidates),
-                    "candidate_papers": _candidate_paper_summaries(candidates),
+                    "candidate_papers": _candidate_paper_summaries(candidates, candidate_states),
                     "articles_scanned": articles_scanned,
                     "filtered_articles": filtered_articles,
                     "relevant_articles": articles_scanned - filtered_articles,
@@ -1113,21 +1137,79 @@ def _literature_candidate_limit(size: int) -> int:
     return min(max(size * 6, 18), 30)
 
 
-def _candidate_paper_summaries(items: list[dict]) -> list[dict]:
+def _initial_candidate_paper_states(items: list[dict], query: str) -> dict[tuple, dict]:
+    return {
+        _literature_candidate_identity(item): {
+            "relevance_score": _literature_relevance_score(item, query),
+            "decision": "candidate",
+            "reason": "found by high-recall literature search",
+            "extracted_fields": [],
+        }
+        for item in items
+    }
+
+
+def _update_candidate_paper_state(
+    states: dict[tuple, dict],
+    item: dict,
+    *,
+    decision: str,
+    reason: str,
+    extracted_fields: list[str],
+) -> None:
+    key = _literature_candidate_identity(item)
+    state = states.setdefault(
+        key,
+        {
+            "relevance_score": 0,
+            "decision": "candidate",
+            "reason": "found by high-recall literature search",
+            "extracted_fields": [],
+        },
+    )
+    state["decision"] = decision
+    state["reason"] = reason
+    state["extracted_fields"] = extracted_fields
+
+
+def _extracted_field_names(
+    property_data: list[ExternalPropertyDatum],
+    kinetic_parameters: list[ExternalKineticParameter],
+    mutant_records: list[ExternalMutantRecord],
+) -> list[str]:
+    names: list[str] = []
+    names.extend(record.property_type for record in property_data)
+    if kinetic_parameters:
+        names.append("kinetic_parameters")
+    if mutant_records:
+        names.append("mutants")
+    return _unique_strings(names)
+
+
+def _candidate_paper_summaries(items: list[dict], states: dict[tuple, dict] | None = None) -> list[dict]:
     summaries = []
     for item in items:
         title = item.get("title")
         if not isinstance(title, str) or not title.strip():
             continue
-        summaries.append(
-            {
-                "title": title.strip(),
-                "source": _item_source(item),
-                "year": _parse_year(item.get("pubYear")),
-                "doi": _normalize_doi(item.get("doi")),
-                "pubmed_id": _normalize_pubmed_id(item.get("pmid")),
-            }
-        )
+        summary = {
+            "title": title.strip(),
+            "source": _item_source(item),
+            "year": _parse_year(item.get("pubYear")),
+            "doi": _normalize_doi(item.get("doi")),
+            "pubmed_id": _normalize_pubmed_id(item.get("pmid")),
+        }
+        if states is not None:
+            state = states.get(_literature_candidate_identity(item), {})
+            summary.update(
+                {
+                    "relevance_score": state.get("relevance_score", 0),
+                    "decision": state.get("decision", "candidate"),
+                    "reason": state.get("reason", "found by high-recall literature search"),
+                    "extracted_fields": list(state.get("extracted_fields") or []),
+                }
+            )
+        summaries.append(summary)
     return summaries
 
 

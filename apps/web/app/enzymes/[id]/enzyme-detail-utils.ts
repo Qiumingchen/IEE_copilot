@@ -56,6 +56,10 @@ export type CandidatePaperSummary = {
   year: number | null;
   doi: string | null;
   pubmedId: string | null;
+  relevanceScore: number | null;
+  decision: string | null;
+  reason: string | null;
+  extractedFields: string[];
 };
 
 export function formatReferenceForTable(
@@ -365,7 +369,14 @@ function candidatePapersFromProgress(value: unknown): CandidatePaperSummary[] {
         source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : "-",
         year: typeof record.year === "number" && Number.isFinite(record.year) ? record.year : null,
         doi: typeof record.doi === "string" && record.doi.trim() ? record.doi.trim() : null,
-        pubmedId: typeof record.pubmed_id === "string" && record.pubmed_id.trim() ? record.pubmed_id.trim() : null
+        pubmedId: typeof record.pubmed_id === "string" && record.pubmed_id.trim() ? record.pubmed_id.trim() : null,
+        relevanceScore:
+          typeof record.relevance_score === "number" && Number.isFinite(record.relevance_score)
+            ? record.relevance_score
+            : null,
+        decision: typeof record.decision === "string" && record.decision.trim() ? record.decision.trim() : null,
+        reason: typeof record.reason === "string" && record.reason.trim() ? record.reason.trim() : null,
+        extractedFields: stringArray(record.extracted_fields)
       }
     ];
   });

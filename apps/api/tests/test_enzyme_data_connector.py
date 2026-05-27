@@ -4170,15 +4170,17 @@ def test_real_enzyme_data_client_fetches_all_record_types_from_relevant_papers_o
     assert batch.kinetic_parameters[0].kcat == "42"
     assert batch.mutant_records[0].mutation_string == "A123V"
     assert progress_events[0]["candidate_articles"] == 1
-    assert progress_events[0]["candidate_papers"] == [
-        {
-            "title": "Characterization of a Bacillus subtilis food enzyme",
-            "source": "europepmc",
-            "year": 2024,
-            "doi": "10.1000/relevant-hit",
-            "pubmed_id": None,
-        }
-    ]
+    assert progress_events[0]["candidate_papers"][0] == {
+        "title": "Characterization of a Bacillus subtilis food enzyme",
+        "source": "europepmc",
+        "year": 2024,
+        "doi": "10.1000/relevant-hit",
+        "pubmed_id": None,
+        "relevance_score": 30,
+        "decision": "candidate",
+        "reason": "found by high-recall literature search",
+        "extracted_fields": [],
+    }
     assert progress_events[0]["relevant_articles"] == 0
     assert progress_events[-1]["articles_scanned"] == 1
     assert progress_events[-1]["filtered_articles"] == 0
@@ -4624,6 +4626,50 @@ def test_real_enzyme_data_client_extracts_assay_methods_with_literature_values(m
     assert kinetic.assay_pH == "7.5"
     assert kinetic.method == "HPLC"
     assert "determined by HPLC" in kinetic.evidence
+
+
+def test_real_enzyme_data_client_reports_candidate_paper_diagnostics(monkeypatch):
+    client = RealEnzymeDataClient()
+    progress_events = []
+    extracted_paper = {
+        "title": "Characterization of cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": "The Dictyoglomus turgidum enzyme showed optimum temperature at 80 degC.",
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1000/extracted-paper",
+        "_source": "europepmc",
+    }
+    filtered_paper = {
+        "title": "Cellobiose metabolism in unrelated bacteria",
+        "abstractText": "This paper does not mention the target enzyme source.",
+        "journalTitle": "Unrelated Reports",
+        "pubYear": "2011",
+        "doi": "10.1000/filtered-paper",
+        "_source": "pubmed",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [extracted_paper, filtered_paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    client.fetch_enzyme_records(
+        "Cellobiose 2-epimerase Dictyoglomus turgidum",
+        size=3,
+        progress_callback=progress_events.append,
+    )
+
+    papers = progress_events[-1]["candidate_papers"]
+    extracted = next(paper for paper in papers if paper["doi"] == "10.1000/extracted-paper")
+    filtered = next(paper for paper in papers if paper["doi"] == "10.1000/filtered-paper")
+    assert extracted["relevance_score"] > 0
+    assert extracted["decision"] == "extracted"
+    assert extracted["reason"] == "passed relevance filter and produced extractable records"
+    assert extracted["extracted_fields"] == ["optimal_temperature"]
+    assert filtered["relevance_score"] > 0
+    assert filtered["decision"] == "filtered"
+    assert filtered["reason"] == "failed enzyme/source relevance filter"
+    assert filtered["extracted_fields"] == []
 
 
 def test_real_enzyme_data_client_keeps_more_relevant_literature_than_property_budget(monkeypatch):
