@@ -129,6 +129,7 @@ def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc(monkeypa
             property_type="optimal_temperature",
             value_original="72",
             unit_original="degC",
+            assay_pH="6.5",
             organism=None,
             source="europepmc",
             evidence=(
@@ -145,6 +146,7 @@ def test_real_enzyme_data_client_extracts_property_data_from_europe_pmc(monkeypa
     ]
     assert ph_values[0].property_type == "optimal_pH"
     assert ph_values[0].value_original == "6.5"
+    assert ph_values[0].assay_temperature == "72"
     assert ph_values[0].source == "europepmc"
 
 
@@ -4791,6 +4793,76 @@ def test_real_enzyme_data_client_preserves_optimum_temperature_ph_cross_conditio
     assert "Optimum pH and temperature were 7.5 and 80 degC" in ph.evidence
     assert ph.doi == "10.1000/optimum-context"
     assert ph.pubmed_id == "24100573"
+
+
+def test_real_enzyme_data_client_preserves_direct_optimum_assay_context(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Direct optimum condition report",
+                            "abstractText": (
+                                "The Dictyoglomus turgidum cellobiose 2-epimerase was characterized. "
+                                "Optimum pH and temperature were 7.5 and 80 degC, respectively, "
+                                "using the DNS assay."
+                            ),
+                            "journalTitle": "Applied Microbiology and Biotechnology",
+                            "pubYear": "2012",
+                            "doi": "10.1000/direct-optimum-context",
+                            "pmid": "24100573",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("cellobiose 2-epimerase")
+    ph_values = client.fetch_opt_pH("cellobiose 2-epimerase")
+
+    assert temperatures[0] == ExternalPropertyDatum(
+        property_type="optimal_temperature",
+        value_original="80",
+        unit_original="degC",
+        assay_pH="7.5",
+        method="DNS assay",
+        organism="Dictyoglomus turgidum",
+        source="europepmc",
+        evidence=(
+            "Applied Microbiology and Biotechnology 2012 doi:10.1000/direct-optimum-context pmid:24100573 | "
+            "Evidence quality: literature sentence | "
+            "Evidence: Optimum pH and temperature were 7.5 and 80 degC, respectively, using the DNS assay"
+        ),
+        reference_title="Direct optimum condition report",
+        journal="Applied Microbiology and Biotechnology",
+        year=2012,
+        doi="10.1000/direct-optimum-context",
+        pubmed_id="24100573",
+    )
+    assert ph_values[0] == ExternalPropertyDatum(
+        property_type="optimal_pH",
+        value_original="7.5",
+        assay_temperature="80",
+        method="DNS assay",
+        organism="Dictyoglomus turgidum",
+        source="europepmc",
+        evidence=(
+            "Applied Microbiology and Biotechnology 2012 doi:10.1000/direct-optimum-context pmid:24100573 | "
+            "Evidence quality: literature sentence | "
+            "Evidence: Optimum pH and temperature were 7.5 and 80 degC, respectively, using the DNS assay"
+        ),
+        reference_title="Direct optimum condition report",
+        journal="Applied Microbiology and Biotechnology",
+        year=2012,
+        doi="10.1000/direct-optimum-context",
+        pubmed_id="24100573",
+    )
 
 
 def test_real_enzyme_data_client_reports_candidate_paper_diagnostics(monkeypatch):
