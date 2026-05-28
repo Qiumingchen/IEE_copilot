@@ -1875,6 +1875,137 @@ def test_real_data_refresh_skips_weak_literature_records_without_organism(
     assert db_session.scalars(select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)).all() == []
 
 
+def test_real_data_refresh_attaches_value_records_without_organism_when_context_matches(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class ContextualDataClient:
+        source = "europepmc"
+
+        def fetch_opt_temperature(self, query: str, size: int = 5):
+            return [
+                ExternalPropertyDatum(
+                    property_type="optimal_temperature",
+                    value_original="80",
+                    unit_original="degC",
+                    source=self.source,
+                    evidence=(
+                        "Applied Microbiology and Biotechnology 2012 doi:10.1007/s00253-012-4002-5 "
+                        "pmid:22488279 | Evidence: The recombinant cellobiose 2-epimerase from "
+                        "Dictyoglomus turgidum DSM 6724 showed maximal activity at 80 degC."
+                    ),
+                    reference_title=(
+                        "Characterization of a recombinant cellobiose 2-epimerase from "
+                        "Dictyoglomus turgidum that epimerizes and isomerizes beta-1,4- and "
+                        "alpha-1,4-gluco-oligosaccharides"
+                    ),
+                    journal="Applied Microbiology and Biotechnology",
+                    year=2012,
+                    doi="10.1007/s00253-012-4002-5",
+                    pubmed_id="22488279",
+                )
+            ]
+
+        def fetch_opt_pH(self, query: str, size: int = 5):
+            return []
+
+        def fetch_kinetic_parameters(self, query: str, size: int = 5):
+            return [
+                ExternalKineticParameter(
+                    substrate="cellobiose",
+                    km="1.8",
+                    unit_original="mM",
+                    source=self.source,
+                    evidence=(
+                        "Applied Microbiology and Biotechnology 2012 doi:10.1007/s00253-012-4002-5 "
+                        "pmid:22488279 | Evidence: The recombinant cellobiose 2-epimerase from "
+                        "Dictyoglomus turgidum DSM 6724 showed a Km value of 1.8 mM for cellobiose."
+                    ),
+                    reference_title=(
+                        "Characterization of a recombinant cellobiose 2-epimerase from "
+                        "Dictyoglomus turgidum that epimerizes and isomerizes beta-1,4- and "
+                        "alpha-1,4-gluco-oligosaccharides"
+                    ),
+                    journal="Applied Microbiology and Biotechnology",
+                    year=2012,
+                    doi="10.1007/s00253-012-4002-5",
+                    pubmed_id="22488279",
+                )
+            ]
+
+        def fetch_mutants(self, query: str, size: int = 5):
+            return []
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: ContextualDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cellobiose 2-epimerases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Cellobiose 2-epimerase",
+        organism="Dictyoglomus turgidum (strain DSM 6724 / Z-1310)",
+        source="uniprot",
+        uniprot_id="B8DZK4",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "contextual-real-data@example.com",
+            "password": "search-password",
+            "display_name": "Contextual Real Data",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "contextual-real-data@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"]["properties"] == 1
+    assert body["created"]["kinetics"] == 1
+    assert not any("no organism was extracted" in warning for warning in body["warnings"])
+
+    property_records = db_session.scalars(
+        select(PropertyRecord).where(PropertyRecord.enzyme_entry_id == enzyme.id)
+    ).all()
+    kinetic_records = db_session.scalars(
+        select(KineticRecord).where(KineticRecord.enzyme_entry_id == enzyme.id)
+    ).all()
+
+    assert property_records[0].value_original == "80"
+    assert property_records[0].evidence_text is not None
+    assert "Dictyoglomus turgidum DSM 6724 showed maximal activity at 80 degC" in property_records[0].evidence_text
+    assert kinetic_records[0].substrate == "cellobiose"
+    assert kinetic_records[0].km == "1.8"
+    assert kinetic_records[0].evidence_text is not None
+    assert "Km value of 1.8 mM for cellobiose" in kinetic_records[0].evidence_text
+
+
 def test_real_data_refresh_routes_external_records_to_matching_family_organism(
     client, db_session, monkeypatch
 ):

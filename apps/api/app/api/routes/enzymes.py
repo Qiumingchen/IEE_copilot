@@ -833,7 +833,7 @@ def _external_enzyme_data_queries(enzyme: EnzymeEntry) -> list[str]:
 def _target_enzyme_for_external_datum(db: Session, enzyme: EnzymeEntry, datum) -> EnzymeEntry | None:
     organism = _normalize_source_organism(getattr(datum, "organism", None))
     if organism is None:
-        if _external_literature_datum_matches_enzyme_context(enzyme, datum):
+        if _external_datum_matches_enzyme_context(enzyme, datum):
             return enzyme
         if _external_datum_needs_explicit_organism(datum):
             return None
@@ -861,27 +861,11 @@ def _external_datum_needs_explicit_organism(datum) -> bool:
     }
 
 
-def _external_literature_datum_matches_enzyme_context(enzyme: EnzymeEntry, datum) -> bool:
-    if not _looks_like_literature_only_datum(datum):
-        return False
+def _external_datum_matches_enzyme_context(enzyme: EnzymeEntry, datum) -> bool:
     text = _external_datum_reference_text(datum)
     if not text:
         return False
     return _text_mentions_enzyme_name(text, enzyme.name) and _text_mentions_enzyme_organism(text, enzyme.organism)
-
-
-def _looks_like_literature_only_datum(datum) -> bool:
-    if not getattr(datum, "reference_title", None):
-        return False
-    value_fields = (
-        "property_type",
-        "value_original",
-        "km",
-        "kcat",
-        "kcat_km",
-        "mutation_string",
-    )
-    return not any(getattr(datum, field, None) for field in value_fields)
 
 
 def _external_datum_reference_text(datum) -> str:
