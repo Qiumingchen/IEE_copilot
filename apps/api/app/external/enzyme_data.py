@@ -303,6 +303,7 @@ class RealEnzymeDataClient:
                 ),
                 assay_temperature=_extract_kinetic_assay_temperature(text, km or kcat or kcat_km),
                 assay_pH=_extract_kinetic_assay_ph(text, km or kcat or kcat_km),
+                method=_extract_assay_method(text, km or kcat or kcat_km),
                 organism=_extract_evidence_organism(text, km or kcat or kcat_km),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, km or kcat or kcat_km),
@@ -1525,6 +1526,7 @@ def _extract_assay_method(text: str, needle: str | None) -> str | None:
     if not sentence:
         return None
     patterns = [
+        r"\b(?:using|with)\s+(?:the\s+)?((?:HPLC|UPLC|LC-MS|GC)\b)",
         r"\b(?:using|with)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9+\- ]{1,70}?\b(?:assay|method|analysis|chromatography))\b",
         r"\b(?:determined|measured|assayed|analy[sz]ed)\s+(?:by|using|with)\s+(?:the\s+)?((?:HPLC|UPLC|LC-MS|GC)|[A-Za-z0-9][A-Za-z0-9+\- ]{0,70}?\b(?:assay|method|analysis|chromatography))\b",
         r"\bin\s+(?:a|an|the)\s+([A-Za-z0-9+\- ]{2,70}?\bassay)\b",
@@ -1960,6 +1962,7 @@ ORGANISM_FALSE_POSITIVE_PREFIXES = {
     "For",
     "Full",
     "Journal",
+    "Kinetic",
     "Maximum",
     "Michaelis",
     "Menten",
@@ -1976,6 +1979,20 @@ ORGANISM_FALSE_POSITIVE_PREFIXES = {
 }
 
 
+ORGANISM_FALSE_POSITIVE_SPECIES = {
+    "activity",
+    "analysis",
+    "assay",
+    "data",
+    "kinetic",
+    "method",
+    "parameters",
+    "profile",
+    "report",
+    "temperature",
+}
+
+
 def _extract_organism(text: str) -> str | None:
     organisms = _extract_organisms(text)
     return organisms[0] if len(organisms) == 1 else None
@@ -1988,6 +2005,8 @@ def _extract_organisms(text: str) -> list[str]:
         if len(genus) <= 2:
             continue
         if genus in ORGANISM_FALSE_POSITIVE_PREFIXES:
+            continue
+        if species in ORGANISM_FALSE_POSITIVE_SPECIES:
             continue
         organism = f"{genus} {species}"
         if organism not in organisms:
@@ -2154,6 +2173,7 @@ def _extract_kinetic_substrate(text: str, value: str | None) -> str | None:
         r"\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s*(?:K|k)",
         r"\bfor\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s+[^.;]*?\b(?:K|k)m\b",
         r"\btoward\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?),\s*(?:K|k)",
+        r"\bkinetic\s+parameters?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was|are|is)\s+(?:K|k)m\b",
         r"\bKm\s+and\s+kcat\s+values?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was)\b",
         r"\bkcat\s+and\s+Km\s+values?\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+(?:were|was)\b",
         r"\bKm\s+for\s+([A-Za-z0-9][A-Za-z0-9+\-()/ ]{0,60}?)\s+and\s+kcat\s+(?:were|was)\b",

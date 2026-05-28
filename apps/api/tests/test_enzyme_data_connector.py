@@ -2527,6 +2527,63 @@ def test_real_enzyme_data_client_preserves_km_micromolar_unit(monkeypatch):
     assert kinetics[0].organism == "Bacillus subtilis"
 
 
+def test_real_enzyme_data_client_extracts_compact_kinetic_parameters_for_substrate(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Compact kinetic parameter report",
+                            "abstractText": (
+                                "The Dictyoglomus turgidum enzyme was purified. "
+                                "Kinetic parameters for cellobiose were Km 1.8 mM "
+                                "and kcat 42 s-1 at 80 degC and pH 7.5 using HPLC."
+                            ),
+                            "journalTitle": "Food Enzyme Kinetics",
+                            "pubYear": "2024",
+                            "doi": "10.1000/compact-kinetics",
+                            "pmid": "45678901",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    kinetics = client.fetch_kinetic_parameters("cellobiose epimerase")
+
+    assert kinetics == [
+        ExternalKineticParameter(
+            substrate="cellobiose",
+            km="1.8",
+            kcat="42",
+            kcat_km=None,
+            unit_original="mM; s^-1",
+            assay_temperature="80",
+            assay_pH="7.5",
+            method="HPLC",
+            organism="Dictyoglomus turgidum",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Kinetics 2024 doi:10.1000/compact-kinetics pmid:45678901 | "
+                "Evidence quality: literature sentence | "
+                "Evidence: Kinetic parameters for cellobiose were Km 1.8 mM "
+                "and kcat 42 s-1 at 80 degC and pH 7.5 using HPLC"
+            ),
+            reference_title="Compact kinetic parameter report",
+            journal="Food Enzyme Kinetics",
+            year=2024,
+            doi="10.1000/compact-kinetics",
+            pubmed_id="45678901",
+        )
+    ]
+
+
 def test_real_enzyme_data_client_extracts_kinetic_value_labels(monkeypatch):
     class Response:
         def raise_for_status(self):
