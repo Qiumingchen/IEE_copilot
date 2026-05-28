@@ -2088,7 +2088,8 @@ def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(m
                         {
                             "title": "Mutation and kinetic analysis of a food enzyme",
                             "abstractText": (
-                                "Variant A123V improved thermostability. For maltose, "
+                                "Variant A123V improved thermostability at pH 7.0 and 45 degC "
+                                "using the thermal shift assay. For maltose, "
                                 "Km was 1.8 mM and kcat was 42 s-1 at 45 degC and pH 7.0."
                             ),
                             "journalTitle": "Food Biocatalysis",
@@ -2130,15 +2131,22 @@ def test_real_enzyme_data_client_extracts_kinetics_and_mutants_from_europe_pmc(m
     assert mutants == [
         ExternalMutantRecord(
             mutation_string="A123V",
-            effect_summary="Real literature mention: Variant A123V improved thermostability.",
+            effect_summary=(
+                "Real literature mention: Variant A123V improved thermostability at pH 7.0 "
+                "and 45 degC using the thermal shift assay."
+            ),
             property_delta={},
             substrate=None,
+            assay_temperature="45",
+            assay_pH="7.0",
+            method="thermal shift assay",
             organism=None,
             source="europepmc",
             evidence=(
                 "Food Biocatalysis 2024 doi:10.1000/kinetic-mutant | "
                 "Evidence quality: literature sentence | "
-                "Evidence: Variant A123V improved thermostability."
+                "Evidence: Variant A123V improved thermostability at pH 7.0 and 45 degC "
+                "using the thermal shift assay."
             ),
             reference_title="Mutation and kinetic analysis of a food enzyme",
             journal="Food Biocatalysis",

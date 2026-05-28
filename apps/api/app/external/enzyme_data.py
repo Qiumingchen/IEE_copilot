@@ -55,6 +55,8 @@ class ExternalMutantRecord:
     effect_summary: str | None = None
     property_delta: dict = field(default_factory=dict)
     substrate: str | None = None
+    assay_temperature: str | None = None
+    assay_pH: str | None = None
     method: str | None = None
     organism: str | None = None
     source: str = "enzyme_data_mock"
@@ -382,6 +384,9 @@ class RealEnzymeDataClient:
                         effect_summary=f"Real literature mention: {sentence}",
                         property_delta=_extract_mutant_property_delta(sentence),
                         substrate=_extract_activity_substrate(sentence, _extract_fold_change(sentence)),
+                        assay_temperature=_extract_assay_temperature(text, mutation),
+                        assay_pH=_extract_assay_ph(text, mutation),
+                        method=_extract_assay_method(text, mutation),
                         organism=_extract_evidence_organism(text, mutation),
                         source=_item_source(item),
                         evidence=_evidence_with_sentence(item, text, mutation),
@@ -1116,6 +1121,8 @@ def _extract_mutant_records_from_article(item: dict, text: str) -> list[External
                 effect_summary=f"Real literature mention: {sentence}",
                 property_delta=_extract_mutant_property_delta(sentence),
                 substrate=_extract_activity_substrate(sentence, _extract_fold_change(sentence)),
+                assay_temperature=_extract_assay_temperature(text, mutation),
+                assay_pH=_extract_assay_ph(text, mutation),
                 method=_extract_assay_method(text, mutation),
                 organism=_extract_evidence_organism(text, mutation),
                 source=_item_source(item),
@@ -1483,8 +1490,8 @@ def _extract_assay_method(text: str, needle: str | None) -> str | None:
     if not sentence:
         return None
     patterns = [
-        r"\b(?:using|with)\s+(?:the\s+)?([A-Z0-9][A-Za-z0-9+\- ]{1,70}?\b(?:assay|method|analysis|chromatography))\b",
-        r"\b(?:determined|measured|assayed|analy[sz]ed)\s+(?:by|using|with)\s+(?:the\s+)?((?:HPLC|UPLC|LC-MS|GC)|[A-Z0-9][A-Za-z0-9+\- ]{0,70}?\b(?:assay|method|analysis|chromatography))\b",
+        r"\b(?:using|with)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9+\- ]{1,70}?\b(?:assay|method|analysis|chromatography))\b",
+        r"\b(?:determined|measured|assayed|analy[sz]ed)\s+(?:by|using|with)\s+(?:the\s+)?((?:HPLC|UPLC|LC-MS|GC)|[A-Za-z0-9][A-Za-z0-9+\- ]{0,70}?\b(?:assay|method|analysis|chromatography))\b",
         r"\bin\s+(?:a|an|the)\s+([A-Za-z0-9+\- ]{2,70}?\bassay)\b",
     ]
     for pattern in patterns:

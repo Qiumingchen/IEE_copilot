@@ -1372,6 +1372,8 @@ def test_real_data_refresh_persists_extracted_assay_methods(client, db_session, 
                         doi="10.1000/method-rich-ce",
                         pubmed_id="24100573",
                         method="thermal shift assay",
+                        assay_temperature="80",
+                        assay_pH="7.5",
                     )
                 ],
                 sources=["europepmc"],
@@ -1440,6 +1442,106 @@ def test_real_data_refresh_persists_extracted_assay_methods(client, db_session, 
     assert property_record.method == "DNS assay"
     assert kinetic_record.method == "HPLC"
     assert mutation_record.assay_condition_summary["method"] == "thermal shift assay"
+    assert mutation_record.assay_condition_summary["assay_temperature"] == "80"
+    assert mutation_record.assay_condition_summary["assay_pH"] == "7.5"
+
+
+def test_real_data_refresh_backfills_existing_mutation_assay_conditions(client, db_session, monkeypatch):
+    monkeypatch.setenv("USE_REAL_SCIENCE_PROVIDERS", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    class BatchRealDataClient:
+        source = "europepmc"
+
+        def fetch_enzyme_records(self, query: str, size: int = 5, progress_callback=None):
+            return ExternalEnzymeDataBatch(
+                mutant_records=[
+                    SimpleNamespace(
+                        mutation_string="A123V",
+                        effect_summary="A123V increased thermostability.",
+                        property_delta={"optimal_temperature": "+5 degC"},
+                        substrate="lactose",
+                        organism="Dictyoglomus turgidum",
+                        source="europepmc",
+                        evidence="A123V increased thermostability at pH 7.5 and 80 degC using a thermal shift assay.",
+                        reference_title="Mutation assay context",
+                        journal="Applied Microbiology and Biotechnology",
+                        year=2012,
+                        doi="10.1000/mutation-context",
+                        pubmed_id="24100573",
+                        method="thermal shift assay",
+                        assay_temperature="80",
+                        assay_pH="7.5",
+                    )
+                ],
+                sources=["europepmc"],
+            )
+
+    class EmptyLiteratureClient:
+        source = "crossref"
+
+        def search_by_enzyme_name(self, enzyme_name: str, size: int = 5):
+            return []
+
+    monkeypatch.setattr("app.api.routes.enzymes.get_enzyme_data_client", lambda: BatchRealDataClient())
+    monkeypatch.setattr("app.api.routes.enzymes.get_literature_client", lambda: EmptyLiteratureClient())
+
+    family = EnzymeFamily(
+        module=EnzymeModule.MICROBIAL_TRANSGLUTAMINASE_MATURE,
+        name="Cellobiose epimerases",
+    )
+    db_session.add(family)
+    db_session.flush()
+    enzyme = EnzymeEntry(
+        family_id=family.id,
+        name="Cellobiose 2-epimerase",
+        organism="Dictyoglomus turgidum",
+        source="uniprot",
+        uniprot_id="B8DZK4",
+        last_refreshed_at=datetime.utcnow(),
+    )
+    db_session.add(enzyme)
+    db_session.flush()
+    db_session.add(
+        MutationRecord(
+            enzyme_entry_id=enzyme.id,
+            mutation_string="A123V",
+            effect_summary="A123V increased thermostability.",
+            property_delta={"optimal_temperature": "+5 degC"},
+            substrate="lactose",
+            assay_condition_summary={"source": "old_literature"},
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/auth/register",
+        json={
+            "email": "mutation-backfill@example.com",
+            "password": "search-password",
+            "display_name": "Mutation Backfill",
+        },
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "mutation-backfill@example.com", "password": "search-password"},
+    ).json()["access_token"]
+
+    response = client.post(
+        f"/enzymes/{enzyme.id}/real-data/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    mutations = db_session.scalars(select(MutationRecord).where(MutationRecord.enzyme_entry_id == enzyme.id)).all()
+    assert len(mutations) == 1
+    summary = mutations[0].assay_condition_summary
+    assert summary["evidence"].startswith("A123V increased thermostability")
+    assert summary["method"] == "thermal shift assay"
+    assert summary["assay_temperature"] == "80"
+    assert summary["assay_pH"] == "7.5"
 
 
 def test_real_data_refresh_prefers_batch_external_records(client, db_session, monkeypatch):

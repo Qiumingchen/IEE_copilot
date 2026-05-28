@@ -766,6 +766,7 @@ def _save_external_enzyme_data(
         existing = _find_existing_external_mutation(db, target_enzyme, mutant)
         if existing is not None:
             _backfill_external_reference(existing, reference, mutant.evidence)
+            _backfill_external_mutation_assay_context(existing, mutant)
             continue
         db.add(
             MutationRecord(
@@ -779,6 +780,12 @@ def _save_external_enzyme_data(
                     "evidence": mutant.evidence,
                     "organism": mutant.organism,
                     **({"method": mutant.method} if getattr(mutant, "method", None) else {}),
+                    **(
+                        {"assay_temperature": mutant.assay_temperature}
+                        if getattr(mutant, "assay_temperature", None)
+                        else {}
+                    ),
+                    **({"assay_pH": mutant.assay_pH} if getattr(mutant, "assay_pH", None) else {}),
                 },
                 reference_id=reference.id if reference else None,
             )
@@ -925,6 +932,21 @@ def _backfill_external_reference(record, reference: LiteratureReference | None, 
         summary = dict(record.assay_condition_summary or {})
         summary.setdefault("evidence", evidence)
         record.assay_condition_summary = summary
+
+
+def _backfill_external_mutation_assay_context(record: MutationRecord, mutant) -> None:
+    summary = dict(record.assay_condition_summary or {})
+    for source_key, summary_key in (
+        ("method", "method"),
+        ("assay_temperature", "assay_temperature"),
+        ("assay_pH", "assay_pH"),
+        ("source", "source"),
+        ("organism", "organism"),
+    ):
+        value = getattr(mutant, source_key, None)
+        if value:
+            summary.setdefault(summary_key, value)
+    record.assay_condition_summary = summary
 
 
 def _link_literature_reference_to_enzyme(
