@@ -4188,6 +4188,14 @@ def test_real_enzyme_data_client_fetches_all_record_types_from_relevant_papers_o
         "decision": "candidate",
         "reason": "found by high-recall literature search",
         "extracted_fields": [],
+        "missing_fields": [
+            "optimal_temperature",
+            "optimal_pH",
+            "specific_activity",
+            "kinetic_parameters",
+            "mutants",
+        ],
+        "extraction_notes": [],
     }
     assert progress_events[0]["relevant_articles"] == 0
     assert progress_events[-1]["articles_scanned"] == 1
@@ -4711,10 +4719,25 @@ def test_real_enzyme_data_client_reports_candidate_paper_diagnostics(monkeypatch
     assert extracted["decision"] == "extracted"
     assert extracted["reason"] == "passed relevance filter and produced extractable records"
     assert extracted["extracted_fields"] == ["optimal_temperature"]
+    assert extracted["missing_fields"] == [
+        "optimal_pH",
+        "specific_activity",
+        "kinetic_parameters",
+        "mutants",
+    ]
+    assert extracted["extraction_notes"] == ["missing optimal_pH, specific_activity, kinetic_parameters, mutants"]
     assert filtered["relevance_score"] > 0
     assert filtered["decision"] == "filtered"
     assert filtered["reason"] == "failed enzyme/source relevance filter"
     assert filtered["extracted_fields"] == []
+    assert filtered["missing_fields"] == [
+        "optimal_temperature",
+        "optimal_pH",
+        "specific_activity",
+        "kinetic_parameters",
+        "mutants",
+    ]
+    assert filtered["extraction_notes"] == ["not scanned for extraction after relevance filter"]
 
 
 def test_real_enzyme_data_client_keeps_more_relevant_literature_than_property_budget(monkeypatch):

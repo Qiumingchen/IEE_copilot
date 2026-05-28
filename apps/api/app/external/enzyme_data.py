@@ -1146,6 +1146,15 @@ def _literature_candidate_limit(size: int) -> int:
     return min(max(size * 6, 18), 30)
 
 
+TARGET_EXTRACTION_FIELDS = [
+    "optimal_temperature",
+    "optimal_pH",
+    "specific_activity",
+    "kinetic_parameters",
+    "mutants",
+]
+
+
 def _initial_candidate_paper_states(items: list[dict], query: str) -> dict[tuple, dict]:
     return {
         _literature_candidate_identity(item): {
@@ -1153,6 +1162,8 @@ def _initial_candidate_paper_states(items: list[dict], query: str) -> dict[tuple
             "decision": "candidate",
             "reason": "found by high-recall literature search",
             "extracted_fields": [],
+            "missing_fields": TARGET_EXTRACTION_FIELDS.copy(),
+            "extraction_notes": [],
         }
         for item in items
     }
@@ -1174,11 +1185,16 @@ def _update_candidate_paper_state(
             "decision": "candidate",
             "reason": "found by high-recall literature search",
             "extracted_fields": [],
+            "missing_fields": TARGET_EXTRACTION_FIELDS.copy(),
+            "extraction_notes": [],
         },
     )
     state["decision"] = decision
     state["reason"] = reason
     state["extracted_fields"] = extracted_fields
+    missing_fields = _missing_field_names(extracted_fields)
+    state["missing_fields"] = missing_fields
+    state["extraction_notes"] = _candidate_extraction_notes(decision, missing_fields)
 
 
 def _extracted_field_names(
@@ -1193,6 +1209,23 @@ def _extracted_field_names(
     if mutant_records:
         names.append("mutants")
     return _unique_strings(names)
+
+
+def _missing_field_names(extracted_fields: list[str]) -> list[str]:
+    extracted = set(extracted_fields)
+    return [field_name for field_name in TARGET_EXTRACTION_FIELDS if field_name not in extracted]
+
+
+def _candidate_extraction_notes(decision: str, missing_fields: list[str]) -> list[str]:
+    if decision == "filtered":
+        return ["not scanned for extraction after relevance filter"]
+    if not missing_fields:
+        return []
+    if decision == "linked_reference":
+        return ["no target property/kinetic/mutant values extracted"]
+    if decision == "extracted":
+        return [f"missing {', '.join(missing_fields)}"]
+    return []
 
 
 def _candidate_paper_summaries(items: list[dict], states: dict[tuple, dict] | None = None) -> list[dict]:
@@ -1216,6 +1249,8 @@ def _candidate_paper_summaries(items: list[dict], states: dict[tuple, dict] | No
                     "decision": state.get("decision", "candidate"),
                     "reason": state.get("reason", "found by high-recall literature search"),
                     "extracted_fields": list(state.get("extracted_fields") or []),
+                    "missing_fields": list(state.get("missing_fields") or []),
+                    "extraction_notes": list(state.get("extraction_notes") or []),
                 }
             )
         summaries.append(summary)

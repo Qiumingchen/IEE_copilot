@@ -197,7 +197,9 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
               relevance_score: 24,
               decision: "extracted",
               reason: "passed relevance filter and produced extractable records",
-              extracted_fields: ["optimal_temperature", "optimal_pH"]
+              extracted_fields: ["optimal_temperature", "optimal_pH"],
+              missing_fields: ["specific_activity", "kinetic_parameters", "mutants"],
+              extraction_notes: ["missing specific_activity, kinetic_parameters, mutants"]
             }
           ]
         }
@@ -232,7 +234,9 @@ test("buildRealDataRefreshProgress maps queued and running jobs to progress mess
           relevanceScore: 24,
           decision: "extracted",
           reason: "passed relevance filter and produced extractable records",
-          extractedFields: ["optimal_temperature", "optimal_pH"]
+          extractedFields: ["optimal_temperature", "optimal_pH"],
+          missingFields: ["specific_activity", "kinetic_parameters", "mutants"],
+          extractionNotes: ["missing specific_activity, kinetic_parameters, mutants"]
         }
       ],
       canPause: true

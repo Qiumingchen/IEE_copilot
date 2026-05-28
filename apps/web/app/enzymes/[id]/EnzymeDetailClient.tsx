@@ -1603,12 +1603,16 @@ function RealDataProgressPanel({
                   {[
                     paper.decision ? `Decision ${paper.decision}` : null,
                     paper.relevanceScore !== null ? `Score ${paper.relevanceScore}` : null,
-                    paper.extractedFields.length > 0 ? `Extracted ${paper.extractedFields.join(", ")}` : null
+                    paper.extractedFields.length > 0 ? `Extracted ${paper.extractedFields.join(", ")}` : null,
+                    paper.missingFields.length > 0 ? `Missing ${paper.missingFields.join(", ")}` : null
                   ]
                     .filter(Boolean)
                     .join(" | ")}
                 </p>
                 {paper.reason ? <p className="mt-1 text-xs text-slate-500">{paper.reason}</p> : null}
+                {paper.extractionNotes.length > 0 ? (
+                  <p className="mt-1 text-xs text-amber-700">{paper.extractionNotes.join(" | ")}</p>
+                ) : null}
               </li>
             ))}
           </ul>

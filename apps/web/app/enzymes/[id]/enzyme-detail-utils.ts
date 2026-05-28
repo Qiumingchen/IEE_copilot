@@ -60,6 +60,8 @@ export type CandidatePaperSummary = {
   decision: string | null;
   reason: string | null;
   extractedFields: string[];
+  missingFields: string[];
+  extractionNotes: string[];
 };
 
 export function formatReferenceForTable(
@@ -376,7 +378,9 @@ function candidatePapersFromProgress(value: unknown): CandidatePaperSummary[] {
             : null,
         decision: typeof record.decision === "string" && record.decision.trim() ? record.decision.trim() : null,
         reason: typeof record.reason === "string" && record.reason.trim() ? record.reason.trim() : null,
-        extractedFields: stringArray(record.extracted_fields)
+        extractedFields: stringArray(record.extracted_fields),
+        missingFields: stringArray(record.missing_fields),
+        extractionNotes: stringArray(record.extraction_notes)
       }
     ];
   });
