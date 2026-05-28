@@ -171,6 +171,7 @@ class RealEnzymeDataClient:
                     property_type="optimal_temperature",
                     value_original=value,
                     unit_original="degC",
+                    substrate=_extract_activity_substrate(text, value),
                     assay_pH=_extract_assay_ph(text, value),
                     method=_extract_assay_method(text, value),
                     organism=_extract_evidence_organism(text, value),
@@ -204,6 +205,7 @@ class RealEnzymeDataClient:
                 ExternalPropertyDatum(
                     property_type="optimal_pH",
                     value_original=value,
+                    substrate=_extract_activity_substrate(text, value),
                     assay_temperature=_extract_assay_temperature(text, value),
                     method=_extract_assay_method(text, value),
                     organism=_extract_evidence_organism(text, value),
@@ -761,6 +763,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
                 property_type="optimal_temperature",
                 value_original=temperature,
                 unit_original="degC",
+                substrate=_extract_activity_substrate(text, temperature),
                 assay_pH=_extract_assay_ph(text, temperature),
                 organism=_extract_evidence_organism(text, temperature),
                 source=_item_source(item),
@@ -775,6 +778,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
             ExternalPropertyDatum(
                 property_type="optimal_pH",
                 value_original=ph_value,
+                substrate=_extract_activity_substrate(text, ph_value),
                 assay_temperature=_extract_assay_temperature(text, ph_value),
                 organism=_extract_evidence_organism(text, ph_value),
                 source=_item_source(item),

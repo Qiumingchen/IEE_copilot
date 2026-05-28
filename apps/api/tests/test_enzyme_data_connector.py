@@ -4865,6 +4865,52 @@ def test_real_enzyme_data_client_preserves_direct_optimum_assay_context(monkeypa
     )
 
 
+def test_real_enzyme_data_client_preserves_direct_optimum_substrate_context(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Substrate-specific optimum condition report",
+                            "abstractText": (
+                                "The Dictyoglomus turgidum cellobiose 2-epimerase was characterized. "
+                                "Maximum activity toward cellobiose was observed at 80 degC "
+                                "and pH 7.5 using the DNS assay."
+                            ),
+                            "journalTitle": "Applied Microbiology and Biotechnology",
+                            "pubYear": "2012",
+                            "doi": "10.1000/direct-optimum-substrate",
+                            "pmid": "24100574",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    temperatures = client.fetch_opt_temperature("cellobiose 2-epimerase")
+    ph_values = client.fetch_opt_pH("cellobiose 2-epimerase")
+
+    assert temperatures[0].property_type == "optimal_temperature"
+    assert temperatures[0].value_original == "80"
+    assert temperatures[0].substrate == "cellobiose"
+    assert temperatures[0].assay_pH == "7.5"
+    assert temperatures[0].method == "DNS assay"
+    assert "Maximum activity toward cellobiose was observed at 80 degC and pH 7.5 using the DNS assay" in (
+        temperatures[0].evidence or ""
+    )
+    assert ph_values[0].property_type == "optimal_pH"
+    assert ph_values[0].value_original == "7.5"
+    assert ph_values[0].substrate == "cellobiose"
+    assert ph_values[0].assay_temperature == "80"
+    assert ph_values[0].method == "DNS assay"
+
+
 def test_real_enzyme_data_client_reports_candidate_paper_diagnostics(monkeypatch):
     client = RealEnzymeDataClient()
     progress_events = []
