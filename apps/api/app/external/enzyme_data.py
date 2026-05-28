@@ -748,6 +748,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
                 property_type="optimal_temperature",
                 value_original=temperature,
                 unit_original="degC",
+                assay_pH=_extract_assay_ph(text, temperature),
                 organism=_extract_evidence_organism(text, temperature),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, temperature),
@@ -761,6 +762,7 @@ def _extract_property_data_from_article(item: dict, text: str) -> list[ExternalP
             ExternalPropertyDatum(
                 property_type="optimal_pH",
                 value_original=ph_value,
+                assay_temperature=_extract_assay_temperature(text, ph_value),
                 organism=_extract_evidence_organism(text, ph_value),
                 source=_item_source(item),
                 evidence=_evidence_with_sentence(item, text, ph_value),
@@ -2149,6 +2151,8 @@ def _extract_assay_temperature(text: str, value: str | None) -> str | None:
     return _first_match(
         sentence,
         [
+            rf"\bpH\s+and\s+temperature\s+(?:optima\s+)?(?:were|was)\s+\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
+            rf"\btemperature\s+and\s+pH\s+(?:optima\s+)?(?:were|was)\s+(\d+(?:\.\d+)?)\s*{unit}\s+and\s+\d+(?:\.\d+)?",
             rf"\bat\s+pH\s*\d+(?:\.\d+)?\s+and\s+(\d+(?:\.\d+)?)\s*{unit}",
             rf"\bat\s+(\d+(?:\.\d+)?)\s*{unit}",
             rf"\btemperature\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*{unit}",
@@ -2160,7 +2164,14 @@ def _extract_assay_ph(text: str, value: str | None) -> str | None:
     if value is None:
         return None
     sentence = _sentence_containing(text, value)
-    return _first_match(sentence, [r"\bpH\s*(\d+(?:\.\d+)?)"])
+    return _first_match(
+        sentence,
+        [
+            r"\bpH\s+and\s+temperature\s+(?:optima\s+)?(?:were|was)\s+(\d+(?:\.\d+)?)\s+and\s+\d+(?:\.\d+)?",
+            r"\btemperature\s+and\s+pH\s+(?:optima\s+)?(?:were|was)\s+\d+(?:\.\d+)?\s*(?:\u00b0\s*C|\u2103|degrees?\s*C|deg\s*C|degC|C)\s+and\s+(\d+(?:\.\d+)?)",
+            r"\bpH\s*(\d+(?:\.\d+)?)",
+        ],
+    )
 
 
 def _extract_km_unit(text: str, value: str | None) -> str:

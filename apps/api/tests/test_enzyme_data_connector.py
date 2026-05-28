@@ -4628,6 +4628,43 @@ def test_real_enzyme_data_client_extracts_assay_methods_with_literature_values(m
     assert "determined by HPLC" in kinetic.evidence
 
 
+def test_real_enzyme_data_client_preserves_optimum_temperature_ph_cross_conditions(monkeypatch):
+    client = RealEnzymeDataClient()
+    paper = {
+        "title": "Biochemical characterization of cellobiose 2-epimerase from Dictyoglomus turgidum",
+        "abstractText": (
+            "The recombinant Dictyoglomus turgidum cellobiose 2-epimerase was characterized. "
+            "Optimum pH and temperature were 7.5 and 80 degC, respectively, using the DNS assay."
+        ),
+        "journalTitle": "Applied Microbiology and Biotechnology",
+        "pubYear": "2012",
+        "doi": "10.1000/optimum-context",
+        "pmid": "24100573",
+        "_source": "europepmc",
+    }
+
+    monkeypatch.setattr(client, "_search_europe_pmc", lambda query, size=5: [paper])
+    monkeypatch.setattr(client, "_search_pubmed", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_openalex", lambda query, size=5: [])
+    monkeypatch.setattr(client, "_search_semantic_scholar", lambda query, size=5: [])
+
+    batch = client.fetch_enzyme_records("Cellobiose 2-epimerase Dictyoglomus turgidum", size=3)
+
+    temperature = next(record for record in batch.property_data if record.property_type == "optimal_temperature")
+    ph = next(record for record in batch.property_data if record.property_type == "optimal_pH")
+    assert temperature.value_original == "80"
+    assert temperature.unit_original == "degC"
+    assert temperature.assay_pH == "7.5"
+    assert temperature.method == "DNS assay"
+    assert "Optimum pH and temperature were 7.5 and 80 degC" in temperature.evidence
+    assert ph.value_original == "7.5"
+    assert ph.assay_temperature == "80"
+    assert ph.method == "DNS assay"
+    assert "Optimum pH and temperature were 7.5 and 80 degC" in ph.evidence
+    assert ph.doi == "10.1000/optimum-context"
+    assert ph.pubmed_id == "24100573"
+
+
 def test_real_enzyme_data_client_reports_candidate_paper_diagnostics(monkeypatch):
     client = RealEnzymeDataClient()
     progress_events = []
