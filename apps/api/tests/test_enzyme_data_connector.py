@@ -327,6 +327,61 @@ def test_real_enzyme_data_client_extracts_organism_and_specific_activity(monkeyp
     ]
 
 
+def test_real_enzyme_data_client_preserves_specific_activity_assay_context(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Specific activity report",
+                            "abstractText": (
+                                "The Dictyoglomus turgidum enzyme was purified. "
+                                "Specific activity toward cellobiose was 124 U/mg "
+                                "at 80 degC and pH 7.5 using DNS assay."
+                            ),
+                            "journalTitle": "Food Enzyme Activity",
+                            "pubYear": "2024",
+                            "doi": "10.1000/specific-activity",
+                            "pmid": "45678902",
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("app.external.enzyme_data.httpx.get", lambda *args, **kwargs: Response())
+    client = RealEnzymeDataClient()
+
+    records = client.fetch_specific_activity("cellobiose epimerase")
+
+    assert records == [
+        ExternalPropertyDatum(
+            property_type="specific_activity",
+            value_original="124",
+            unit_original="U/mg",
+            substrate="cellobiose",
+            assay_temperature="80",
+            assay_pH="7.5",
+            method="DNS assay",
+            organism="Dictyoglomus turgidum",
+            source="europepmc",
+            evidence=(
+                "Food Enzyme Activity 2024 doi:10.1000/specific-activity pmid:45678902 | "
+                "Evidence quality: literature sentence | "
+                "Evidence: Specific activity toward cellobiose was 124 U/mg at 80 degC and pH 7.5 using DNS assay"
+            ),
+            reference_title="Specific activity report",
+            journal="Food Enzyme Activity",
+            year=2024,
+            doi="10.1000/specific-activity",
+            pubmed_id="45678902",
+        )
+    ]
+
+
 def test_real_enzyme_data_client_extracts_specific_activity_unit_variants(monkeypatch):
     class Response:
         def raise_for_status(self):
